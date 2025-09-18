@@ -153,8 +153,8 @@ program
       const client = tradingEngine.getClient();
 
       // Test API health
-      const isHealthy = await client.healthCheck();
-      if (isHealthy) {
+      const healthStatus = await client.healthCheck();
+      if (healthStatus.isHealthy) {
         logger.info('✅ GalaSwap API connection healthy');
       } else {
         logger.error('❌ GalaSwap API connection failed');

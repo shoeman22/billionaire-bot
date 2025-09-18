@@ -416,7 +416,7 @@ describe('GalaSwapClient', () => {
 
       const isHealthy = await client.healthCheck();
 
-      expect(isHealthy).toBe(true);
+      expect(isHealthy.isHealthy).toBe(true);
     });
 
     it('should return false when API is unhealthy', async () => {
@@ -424,7 +424,7 @@ describe('GalaSwapClient', () => {
 
       const isHealthy = await client.healthCheck();
 
-      expect(isHealthy).toBe(false);
+      expect(isHealthy.isHealthy).toBe(false);
       expect(logger.error).toHaveBeenCalledWith('Health check failed:', expect.any(Error));
     });
   });
