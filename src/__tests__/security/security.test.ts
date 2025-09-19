@@ -264,8 +264,8 @@ describe('Security Tests', () => {
         throw new Error('Test error with sensitive data: ' + JSON.stringify(sensitiveData));
       } catch (error) {
         // Error message should not contain sensitive data
-        expect(error.message).not.toContain('0123456789');
-        expect(error.message).not.toContain('word1 word2');
+        expect((error as Error).message).not.toContain('0123456789');
+        expect((error as Error).message).not.toContain('word1 word2');
       }
     });
 
@@ -441,7 +441,7 @@ describe('Security Tests', () => {
       const validSignature = signer.signPayload(payload);
 
       // Test verification timing
-      const timings = [];
+      const timings: number[] = [];
       const testSignatures = [
         validSignature,
         'invalid_signature_1',
@@ -488,7 +488,7 @@ describe('Security Tests', () => {
         expect(result.errors.length).toBeGreaterThan(0);
 
         // Errors should not contain the malicious input
-        result.errors.forEach(error => {
+        result.errors.forEach((error: string) => {
           expect(error).not.toContain('<script>');
           expect(error).not.toContain('DROP TABLE');
           expect(error).not.toContain('javascript:');
@@ -536,7 +536,7 @@ describe('Security Tests', () => {
         expect(result.errors.length).toBeGreaterThan(0);
 
         // Error messages should not reveal system information
-        result.errors.forEach(error => {
+        result.errors.forEach((error: string) => {
           expect(error).not.toContain(process.platform);
           expect(error).not.toContain(__dirname);
           expect(error).not.toContain(process.cwd());
@@ -562,7 +562,7 @@ describe('Security Tests', () => {
       } catch (error) {
         // Sanitize error message
         const { sanitizeInput } = require('../../utils/validation');
-        const sanitizedMessage = sanitizeInput(error.message);
+        const sanitizedMessage = sanitizeInput((error as Error).message);
 
         expect(sanitizedMessage).not.toContain(sensitiveData.privateKey);
         expect(sanitizedMessage).not.toContain(sensitiveData.password);
@@ -578,11 +578,11 @@ describe('Security Tests', () => {
         sensitiveFunction();
       } catch (error) {
         // Stack trace should not reveal sensitive paths
-        expect(error.stack).toBeDefined();
+        expect((error as Error).stack).toBeDefined();
 
         // In production, stack traces should be sanitized
-        const stackLines = error.stack.split('\n');
-        stackLines.forEach(line => {
+        const stackLines = (error as Error).stack!.split('\n');
+        stackLines.forEach((line: string) => {
           // Should not contain absolute paths to sensitive directories
           expect(line).not.toContain('/home/');
           expect(line).not.toContain('C:\\Users\\');

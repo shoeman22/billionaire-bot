@@ -340,10 +340,11 @@ export class TestHelpers {
    */
   static createMockErrorResponse(message: string = 'Test error', status: number = 400) {
     return {
-      Status: 0,
-      Data: null,
+      error: true,
+      status,
       message,
-      HttpStatus: status
+      data: null,
+      timestamp: Date.now()
     };
   }
 
@@ -392,6 +393,57 @@ export class TestHelpers {
     expect(status).toHaveProperty('reason');
     expect(status).toHaveProperty('activatedAt');
     expect(typeof status.isActive).toBe('boolean');
+  }
+
+  /**
+   * Create a mock API response with success data
+   */
+  static createMockApiResponse(data: any) {
+    return {
+      error: false,
+      status: 200,
+      data,
+      timestamp: Date.now()
+    };
+  }
+
+  /**
+   * Create a mock quote response
+   */
+  static createMockQuoteResponse() {
+    return {
+      error: false,
+      status: 200,
+      data: {
+        amountOut: '95.5',
+        amountOutMinimum: '94.5',
+        priceImpact: 0.02,
+        route: ['GALA$Unit$none$none', 'GUSDC$Unit$none$none'],
+        fee: 3000,
+        gasEstimate: 250000
+      },
+      timestamp: Date.now()
+    };
+  }
+
+  /**
+   * Create a mock pool response
+   */
+  static createMockPoolResponse() {
+    return {
+      error: false,
+      status: 200,
+      data: {
+        token0: 'GALA$Unit$none$none',
+        token1: 'GUSDC$Unit$none$none',
+        fee: 3000,
+        liquidity: '1000000',
+        tick: 100,
+        sqrtPriceX96: '79228162514264337593543950336',
+        pool: '0x1234567890123456789012345678901234567890'
+      },
+      timestamp: Date.now()
+    };
   }
 }
 

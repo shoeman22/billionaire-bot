@@ -271,9 +271,213 @@ export class SlippageProtection {
   } {
     return {
       defaultTolerance: this.config.defaultSlippageTolerance,
-      maxSlippage: this.MAX_SLIPPAGE,
+      maxSlippage: this.config.maxSlippage || this.MAX_SLIPPAGE,
       highImpactThreshold: this.HIGH_IMPACT_THRESHOLD,
     };
+  }
+
+  /**
+   * Slippage statistics tracking
+   */
+  private slippageHistory: Map<string, number[]> = new Map();
+
+  /**
+   * Validate slippage for a trade
+   */
+  validateSlippage(maxSlippage: number, amountIn: number, amountOut: number): {
+    valid: boolean;
+    actualSlippage: number;
+    reason?: string;
+  } {
+    const expectedOutput = amountIn * (1 - maxSlippage);
+    const actualSlippage = (amountIn - amountOut) / amountIn;
+
+    // Check emergency limits first
+    if (this.emergencyLimitsActive && actualSlippage > this.emergencySlippageLimit) {
+      return {
+        valid: false,
+        actualSlippage,
+        reason: `emergency slippage limit exceeded: ${(actualSlippage * 100).toFixed(2)}% > ${(this.emergencySlippageLimit * 100).toFixed(3)}%`
+      };
+    }
+
+    return {
+      valid: actualSlippage <= maxSlippage,
+      actualSlippage,
+      reason: actualSlippage > maxSlippage ? `slippage ${(actualSlippage * 100).toFixed(2)}% exceeds tolerance ${(maxSlippage * 100).toFixed(2)}%` : undefined
+    };
+  }
+
+  /**
+   * Calculate minimum output amount with slippage tolerance
+   */
+  calculateMinimumOutput(amountIn: number, slippageTolerance: number): number {
+    return amountIn * (1 - slippageTolerance);
+  }
+
+  /**
+   * Adjust slippage for market conditions
+   */
+  adjustSlippageForConditions(baseSlippage: number, conditions: { volatility: string; liquidity: string }): number {
+    let multiplier = 1;
+
+    if (conditions.volatility === 'high') {
+      multiplier *= 1.5;
+    }
+    if (conditions.liquidity === 'poor') {
+      multiplier *= 1.3;
+    }
+
+    return Math.min(baseSlippage * multiplier, this.MAX_SLIPPAGE);
+  }
+
+  /**
+   * Record slippage for statistical tracking
+   */
+  recordSlippage(pair: string, slippage: number): void {
+    if (!this.slippageHistory.has(pair)) {
+      this.slippageHistory.set(pair, []);
+    }
+
+    const history = this.slippageHistory.get(pair)!;
+    history.push(slippage);
+
+    // Keep only last 100 records per pair
+    if (history.length > 100) {
+      history.shift();
+    }
+  }
+
+  /**
+   * Get slippage statistics for a trading pair
+   */
+  getSlippageStats(pair: string): {
+    average: number;
+    maximum: number;
+    minimum: number;
+    count: number;
+    recent: number[];
+  } {
+    const history = this.slippageHistory.get(pair) || [];
+
+    if (history.length === 0) {
+      return {
+        average: 0,
+        maximum: 0,
+        minimum: 0,
+        count: 0,
+        recent: []
+      };
+    }
+
+    const average = history.reduce((sum, val) => sum + val, 0) / history.length;
+    const maximum = Math.max(...history);
+    const minimum = Math.min(...history);
+    const recent = history.slice(-10); // Last 10 records
+
+    return {
+      average,
+      maximum,
+      minimum,
+      count: history.length,
+      recent
+    };
+  }
+
+  /**
+   * Emergency slippage limits
+   */
+  private emergencyLimitsActive = false;
+  private emergencySlippageLimit = 0.01; // 1% in emergency mode
+
+  /**
+   * Get slippage alerts for unusual patterns
+   */
+  getSlippageAlerts(): Array<{
+    pair: string;
+    alertType: string;
+    severity: 'warning' | 'critical';
+    description: string;
+  }> {
+    const alerts: Array<{
+      pair: string;
+      alertType: string;
+      severity: 'warning' | 'critical';
+      description: string;
+    }> = [];
+
+    this.slippageHistory.forEach((history, pair) => {
+      if (history.length < 5) return;
+
+      const stats = this.getSlippageStats(pair);
+
+      // Check for unusual spike in recent slippage
+      const recent = stats.recent.slice(-3);
+      const recentAverage = recent.reduce((sum, val) => sum + val, 0) / recent.length;
+
+      if (recentAverage > stats.average * 2) {
+        alerts.push({
+          pair,
+          alertType: 'SLIPPAGE_SPIKE',
+          severity: 'warning',
+          description: `Recent slippage ${(recentAverage * 100).toFixed(2)}% is double the average ${(stats.average * 100).toFixed(2)}%`
+        });
+      }
+
+      // Check for consistently high slippage
+      if (stats.average > 0.03) { // 3% average is concerning
+        alerts.push({
+          pair,
+          alertType: 'HIGH_AVG_SLIPPAGE',
+          severity: 'warning',
+          description: `Average slippage ${(stats.average * 100).toFixed(2)}% is consistently high`
+        });
+      }
+
+      // Check for critically high maximum slippage
+      if (stats.maximum > 0.1) { // 10%
+        alerts.push({
+          pair,
+          alertType: 'HIGH_SLIPPAGE',
+          severity: 'critical',
+          description: `Maximum observed slippage of ${(stats.maximum * 100).toFixed(2)}% is extremely high`
+        });
+      }
+    });
+
+    return alerts;
+  }
+
+  /**
+   * Activate emergency slippage limits
+   */
+  activateEmergencyLimits(emergencyLimit: number): void {
+    this.emergencyLimitsActive = true;
+    this.emergencySlippageLimit = emergencyLimit;
+    logger.warn(`Emergency slippage limits activated: ${(emergencyLimit * 100).toFixed(3)}%`);
+  }
+
+  /**
+   * Deactivate emergency slippage limits
+   */
+  deactivateEmergencyLimits(): void {
+    this.emergencyLimitsActive = false;
+    logger.info('Emergency slippage limits deactivated');
+  }
+
+  /**
+   * Enhanced validateSlippage that respects emergency limits
+   */
+  validateSlippageEnhanced(maxSlippage: number, amountIn: number, amountOut: number): {
+    valid: boolean;
+    actualSlippage: number;
+    reason?: string;
+  } {
+    const effectiveLimit = this.emergencyLimitsActive ?
+      Math.min(maxSlippage, this.emergencySlippageLimit) :
+      maxSlippage;
+
+    return this.validateSlippage(effectiveLimit, amountIn, amountOut);
   }
 
   /**

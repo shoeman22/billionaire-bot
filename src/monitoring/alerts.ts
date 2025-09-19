@@ -93,11 +93,14 @@ export class AlertSystem {
 
   private readonly MAX_ALERT_HISTORY = 10000;
   private readonly CLEANUP_INTERVAL = 3600000; // 1 hour
+  private cleanupTimer?: NodeJS.Timeout;
 
-  constructor() {
+  constructor(startCleanupTimer: boolean = true) {
     this.initializeDefaultRules();
     this.initializeDefaultChannels();
-    this.startCleanupTimer();
+    if (startCleanupTimer) {
+      this.startCleanupTimer();
+    }
     logger.info('Alert System initialized');
   }
 
@@ -594,8 +597,18 @@ export class AlertSystem {
    * Start periodic cleanup timer
    */
   private startCleanupTimer(): void {
-    setInterval(() => {
+    this.cleanupTimer = setInterval(() => {
       this.cleanupOldAlerts();
     }, this.CLEANUP_INTERVAL);
+  }
+
+  /**
+   * Stop cleanup timer and cleanup resources
+   */
+  public destroy(): void {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = undefined;
+    }
   }
 }

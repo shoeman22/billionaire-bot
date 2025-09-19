@@ -148,7 +148,18 @@ export class InputValidator {
       return { isValid: false, errors, warnings };
     }
 
-    const trimmedToken = this.sanitizeInput(token);
+    const trimmedToken = token.trim();
+
+    // Check for injection patterns first
+    const injectionPatterns = [
+      /javascript:/i, /<script/i, /<\/script>/i, /eval\s*\(/i, /function\s*\(/i,
+      /\.\.\//g, /\\\.\.\\/, /rm\s+-rf/i, /onload/i, /onerror/i
+    ];
+
+    if (injectionPatterns.some(pattern => pattern.test(trimmedToken))) {
+      errors.push('Token contains potentially unsafe characters');
+      return { isValid: false, errors, warnings };
+    }
 
     // Check if it's a known token symbol
     const knownTokens = Object.values(TRADING_CONSTANTS.TOKENS) as string[];
@@ -200,7 +211,7 @@ export class InputValidator {
    * Check if token follows GalaChain format
    */
   private static isGalaChainTokenFormat(token: string): boolean {
-    return /^[A-Z0-9]+\$[A-Z0-9]+\$[A-Za-z0-9]+\$[A-Za-z0-9]+$/.test(token);
+    return /^[A-Za-z0-9]+\$[A-Za-z0-9]+\$[A-Za-z0-9]+\$[A-Za-z0-9]+$/.test(token);
   }
 
   /**
@@ -225,21 +236,18 @@ export class InputValidator {
 
     const [collection, category, type, additionalKey] = parts;
 
-    // Validate each component
-    if (!this.validateTokenComponent(collection, 'Collection')) {
-      errors.push('Invalid Collection component (must be alphanumeric, 1-20 chars)');
-    }
+    // Validate each component with detailed security checks
+    const componentNames = ['Collection', 'Category', 'Type', 'AdditionalKey'];
+    const components = [collection, category, type, additionalKey];
 
-    if (!this.validateTokenComponent(category, 'Category')) {
-      errors.push('Invalid Category component (must be alphanumeric, 1-20 chars)');
-    }
+    for (let i = 0; i < components.length; i++) {
+      const component = components[i];
+      const componentName = componentNames[i];
+      const validation = this.validateTokenComponentDetailed(component, componentName);
 
-    if (!this.validateTokenComponent(type, 'Type')) {
-      errors.push('Invalid Type component (must be alphanumeric, 1-20 chars)');
-    }
-
-    if (!this.validateTokenComponent(additionalKey, 'AdditionalKey')) {
-      errors.push('Invalid AdditionalKey component (must be alphanumeric, 1-20 chars)');
+      if (!validation.isValid) {
+        errors.push(...validation.errors);
+      }
     }
 
     // Check for path traversal attempts
@@ -299,6 +307,60 @@ export class InputValidator {
   }
 
   /**
+   * Validate individual token component with detailed error messages
+   */
+  private static validateTokenComponentDetailed(component: string, componentName: string): ValidationResult {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    if (!component || component.length === 0) {
+      errors.push(`${componentName} component cannot be empty`);
+      return { isValid: false, errors, warnings };
+    }
+
+    if (component.length > 20) {
+      errors.push(`${componentName} component too long (max 20 characters)`);
+      return { isValid: false, errors, warnings };
+    }
+
+    // Check for dangerous injection patterns first
+    const injectionPatterns = [
+      { pattern: /javascript/i, message: 'unsafe JavaScript code detected' },
+      { pattern: /script/i, message: 'unsafe script tag detected' },
+      { pattern: /eval/i, message: 'unsafe eval function detected' },
+      { pattern: /function/i, message: 'unsafe function declaration detected' },
+      { pattern: /return/i, message: 'unsafe return statement detected' },
+      { pattern: /\.\./i, message: 'invalid path traversal detected' },
+      { pattern: /\//, message: 'invalid path separator detected' },
+      { pattern: /\\/, message: 'invalid path separator detected' },
+      { pattern: /</, message: 'unsafe HTML tag detected' },
+      { pattern: />/, message: 'unsafe HTML tag detected' },
+      { pattern: /"/, message: 'unsafe quote character detected' },
+      { pattern: /'/, message: 'unsafe quote character detected' },
+      { pattern: /&/, message: 'unsafe ampersand character detected' },
+      { pattern: /;/, message: 'unsafe semicolon character detected' },
+      { pattern: /\|/, message: 'unsafe pipe character detected' },
+      { pattern: /`/, message: 'unsafe backtick character detected' },
+      { pattern: /rm\s+-rf/i, message: 'unsafe system command detected' }
+    ];
+
+    for (const { pattern, message } of injectionPatterns) {
+      if (pattern.test(component)) {
+        errors.push(`${componentName} component contains ${message}`);
+        return { isValid: false, errors, warnings };
+      }
+    }
+
+    // Allow alphanumeric and specific safe characters for GalaChain
+    if (!/^[A-Za-z0-9-_]+$/.test(component)) {
+      errors.push(`Invalid ${componentName} component (must be alphanumeric with hyphens/underscores only)`);
+      return { isValid: false, errors, warnings };
+    }
+
+    return { isValid: true, errors, warnings };
+  }
+
+  /**
    * Validate trading amount with enhanced security checks
    * Prevents malformed amounts that could cause expensive API failures
    */
@@ -339,7 +401,7 @@ export class InputValidator {
     }
 
     if (numAmount < TRADING_CONSTANTS.MIN_TRADE_AMOUNT) {
-      errors.push(`Amount below minimum: ${TRADING_CONSTANTS.MIN_TRADE_AMOUNT}`);
+      warnings.push(`Amount below recommended minimum: ${TRADING_CONSTANTS.MIN_TRADE_AMOUNT}`);
     }
 
     if (numAmount > 1000000000) { // 1 billion max
@@ -466,15 +528,19 @@ export class InputValidator {
       return { isValid: false, errors, warnings };
     }
 
-    const sanitizedAddress = this.sanitizeInput(address);
+    const trimmedAddress = address.trim();
 
-    // Check for injection attempts
-    if (sanitizedAddress !== address.trim()) {
+    // Check for dangerous patterns while allowing valid address characters
+    const dangerousPatterns = [
+      /<script/i, /<\/script>/i, /javascript:/i, /data:/i, /vbscript:/i,
+      /onload/i, /onerror/i, /onclick/i, /eval\s*\(/i, /function\s*\(/i,
+      /\.\.\//g, /\\\.\.\\/, /&&/, /;\s*\w+/
+    ];
+
+    if (dangerousPatterns.some(pattern => pattern.test(trimmedAddress))) {
       errors.push('Address contains potentially unsafe characters');
       return { isValid: false, errors, warnings };
     }
-
-    const trimmedAddress = sanitizedAddress.trim();
 
     // Check length constraints
     if (trimmedAddress.length > 100) {
@@ -664,12 +730,13 @@ export class InputValidator {
       return false;
     }
 
-    // Check for dangerous patterns
+    // Check for dangerous patterns - allow $ and | for GalaChain formats
     const dangerousPatterns = [
       /<script/i, /<\/script>/i, /javascript:/i, /data:/i, /vbscript:/i,
       /onload/i, /onerror/i, /onclick/i, /onmouseover/i,
       /eval\s*\(/i, /function\s*\(/i, /return\s+/i,
-      /\.\.\//g, /\\\.\.\\/, /\|\|/, /&&/, /;\s*\w+/, /\|\s*\w+/
+      /\.\.\//g, /\\\.\.\\/, /&&/, /;\s*\w+/, /rm\s+-rf/i
+      // Removed /\|\|/ and /\|\s*\w+/ to allow single | characters in addresses
     ];
 
     return !dangerousPatterns.some(pattern => pattern.test(input));

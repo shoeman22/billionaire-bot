@@ -45,7 +45,7 @@ async function testRiskManagementSystem(): Promise<void> {
 
     // Test violations detection
     const violations = await positionLimits.getViolations(config.wallet.address);
-    logger.info(`Violations check: ${violations.hasViolations ? violations.violations.length + ' violations found' : 'No violations'}`);
+    logger.info(`Violations check: ${violations.length > 0 ? violations.length + ' violations found' : 'No violations'}`);
 
     // Test position size calculations
     const maxSafeSize = positionLimits.calculateMaxSafePositionSize('GALA', [], 1000);

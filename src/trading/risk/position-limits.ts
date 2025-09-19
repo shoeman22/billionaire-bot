@@ -207,8 +207,20 @@ export class PositionLimits {
     userAddress: string
   ): Promise<{ allowed: boolean; reason?: string }> {
     try {
+      this.resetDailyLimitsIfNeeded();
+
       const exposures = await this.calculateExposures(userAddress);
       const currentExposure = exposures.find(exp => exp.token === token);
+
+      // Check daily volume limit FIRST (higher priority than position size)
+      const currentDailyVolume = this.dailyVolume.get(token) || 0;
+      const maxDailyVolume = this.config.maxDailyVolume || 10000;
+      if (currentDailyVolume + amount > maxDailyVolume) {
+        return {
+          allowed: false,
+          reason: `daily volume would exceed limit: ${currentDailyVolume + amount} > ${maxDailyVolume}`,
+        };
+      }
 
       // Calculate new position size
       const newAmount = (currentExposure?.totalAmount || 0) + amount;
@@ -217,7 +229,7 @@ export class PositionLimits {
       if (newAmount > this.limitsConfig.maxPositionSize) {
         return {
           allowed: false,
-          reason: `Position size would exceed limit: ${newAmount} > ${this.limitsConfig.maxPositionSize}`,
+          reason: `position size would exceed limit: ${newAmount} > ${this.limitsConfig.maxPositionSize}`,
         };
       }
 
@@ -260,9 +272,25 @@ export class PositionLimits {
   /**
    * Update limits configuration
    */
-  updateLimits(newLimits: Partial<PositionLimitsConfig>): void {
-    this.limitsConfig = { ...this.limitsConfig, ...newLimits };
-    logger.info('Position limits updated:', this.limitsConfig);
+  updateLimits(newLimits: any): void {
+    // Update the limits config with any provided values
+    if (newLimits.maxPositionSize !== undefined) {
+      this.limitsConfig.maxPositionSize = newLimits.maxPositionSize;
+    }
+    if (newLimits.maxDailyVolume !== undefined && this.config) {
+      this.config.maxDailyVolume = newLimits.maxDailyVolume;
+    }
+    if (newLimits.maxPortfolioConcentration !== undefined && this.config) {
+      this.config.maxPortfolioConcentration = newLimits.maxPortfolioConcentration;
+    }
+    // Handle other PositionLimitsConfig properties
+    Object.keys(newLimits).forEach(key => {
+      if (key in this.limitsConfig) {
+        (this.limitsConfig as any)[key] = newLimits[key];
+      }
+    });
+
+    logger.info('Position limits updated:', { ...this.limitsConfig, ...newLimits });
   }
 
   /**
@@ -288,21 +316,72 @@ export class PositionLimits {
   }
 
   /**
+   * Daily volume tracking
+   */
+  private dailyVolume: Map<string, number> = new Map();
+  private lastResetDate: string = new Date().toDateString();
+
+  /**
    * Get current limits for reporting
    */
   getCurrentLimits(): PositionLimitsConfig & {
-    currentExposures: PositionExposure[];
-    totalExposure: number;
-    withinLimits: boolean;
+    maxDailyVolume: number;
+    maxPortfolioConcentration: number;
   } {
-    // This method is called synchronously, so we return cached data
     return {
       ...this.limitsConfig,
-      currentExposures: [], // Would be populated with latest exposures
-      totalExposure: 0, // Would be calculated from latest exposures
-      withinLimits: true // Would be calculated from latest check
+      maxDailyVolume: this.config.maxDailyVolume || 10000,
+      maxPortfolioConcentration: this.config.maxPortfolioConcentration || 0.5
     };
   }
+
+  /**
+   * Record a trade for daily volume tracking
+   */
+  async recordTrade(token: string, amount: number): Promise<void> {
+    this.resetDailyLimitsIfNeeded();
+
+    const currentVolume = this.dailyVolume.get(token) || 0;
+    this.dailyVolume.set(token, currentVolume + amount);
+
+    logger.debug(`Recorded trade: ${token} ${amount}, daily total: ${currentVolume + amount}`);
+  }
+
+  /**
+   * Validate portfolio concentration
+   */
+  async validatePortfolioConcentration(portfolio: {
+    totalValue: number;
+    positions: Array<{ token: string; value: number }>;
+  }): Promise<{ valid: boolean; violations: string[] }> {
+    const violations: string[] = [];
+    const maxConcentration = this.config.maxPortfolioConcentration || 0.5;
+
+    for (const position of portfolio.positions) {
+      const concentration = position.value / portfolio.totalValue;
+      if (concentration > maxConcentration) {
+        violations.push(`concentration: ${position.token} at ${(concentration * 100).toFixed(1)}% exceeds ${(maxConcentration * 100)}% limit`);
+      }
+    }
+
+    return {
+      valid: violations.length === 0,
+      violations
+    };
+  }
+
+  /**
+   * Reset daily limits if needed
+   */
+  private resetDailyLimitsIfNeeded(): void {
+    const currentDate = new Date().toDateString();
+    if (this.lastResetDate !== currentDate) {
+      this.dailyVolume.clear();
+      this.lastResetDate = currentDate;
+      logger.info('Daily volume limits reset');
+    }
+  }
+
 
   /**
    * Calculate maximum safe position size for a token
@@ -337,28 +416,25 @@ export class PositionLimits {
   /**
    * Get position limits violations
    */
-  async getViolations(userAddress: string): Promise<{
-    hasViolations: boolean;
-    violations: Array<{
-      type: 'position_size' | 'concentration' | 'total_exposure' | 'position_count';
-      token: string;
-      current: number;
-      limit: number;
-      severity: 'warning' | 'critical';
-    }>;
-  }> {
+  async getViolations(userAddress: string): Promise<Array<{
+    type: string;
+    description: string;
+    severity?: 'warning' | 'critical';
+  }>> {
     try {
       const exposures = await this.calculateExposures(userAddress);
-      const violations: any[] = [];
+      const violations: Array<{
+        type: string;
+        description: string;
+        severity?: 'warning' | 'critical';
+      }> = [];
 
       for (const exposure of exposures) {
         // Check position size violations
         if (exposure.totalAmount > this.limitsConfig.maxPositionSize) {
           violations.push({
             type: 'position_size',
-            token: exposure.token,
-            current: exposure.totalAmount,
-            limit: this.limitsConfig.maxPositionSize,
+            description: `Position size ${exposure.totalAmount} exceeds limit ${this.limitsConfig.maxPositionSize} for ${exposure.token}`,
             severity: exposure.totalAmount > this.limitsConfig.maxPositionSize * 1.2 ? 'critical' : 'warning'
           });
         }
@@ -367,9 +443,7 @@ export class PositionLimits {
         if (exposure.percentOfPortfolio > this.limitsConfig.concentrationLimit) {
           violations.push({
             type: 'concentration',
-            token: exposure.token,
-            current: exposure.percentOfPortfolio,
-            limit: this.limitsConfig.concentrationLimit,
+            description: `Portfolio concentration ${(exposure.percentOfPortfolio * 100).toFixed(1)}% exceeds limit ${(this.limitsConfig.concentrationLimit * 100)}% for ${exposure.token}`,
             severity: exposure.percentOfPortfolio > this.limitsConfig.concentrationLimit * 1.3 ? 'critical' : 'warning'
           });
         }
@@ -378,9 +452,7 @@ export class PositionLimits {
         if (exposure.positionCount > this.limitsConfig.maxPositionsPerToken) {
           violations.push({
             type: 'position_count',
-            token: exposure.token,
-            current: exposure.positionCount,
-            limit: this.limitsConfig.maxPositionsPerToken,
+            description: `Position count ${exposure.positionCount} exceeds limit ${this.limitsConfig.maxPositionsPerToken} for ${exposure.token}`,
             severity: 'warning'
           });
         }
@@ -391,30 +463,20 @@ export class PositionLimits {
       if (totalExposure > this.limitsConfig.maxTotalExposure) {
         violations.push({
           type: 'total_exposure',
-          token: 'ALL',
-          current: totalExposure,
-          limit: this.limitsConfig.maxTotalExposure,
+          description: `Total exposure ${totalExposure} exceeds limit ${this.limitsConfig.maxTotalExposure}`,
           severity: totalExposure > this.limitsConfig.maxTotalExposure * 1.5 ? 'critical' : 'warning'
         });
       }
 
-      return {
-        hasViolations: violations.length > 0,
-        violations
-      };
+      return violations;
 
     } catch (error) {
       logger.error('Error getting position violations:', error);
-      return {
-        hasViolations: true,
-        violations: [{
-          type: 'position_size',
-          token: 'ERROR',
-          current: 0,
-          limit: 0,
-          severity: 'critical'
-        }]
-      };
+      return [{
+        type: 'error',
+        description: 'Error fetching position violations',
+        severity: 'critical'
+      }];
     }
   }
 

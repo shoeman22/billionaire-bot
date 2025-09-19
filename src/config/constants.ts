@@ -6,7 +6,7 @@
 export const TRADING_CONSTANTS = {
   // Trading parameters
   DEFAULT_GAS_LIMIT: 300000,
-  MAX_SLIPPAGE_PERCENT: 5, // 5% maximum slippage
+  MAX_SLIPPAGE_PERCENT: 15, // 15% maximum slippage
   MIN_TRADE_AMOUNT: 0.01, // Minimum trade amount
   DEFAULT_SLIPPAGE_TOLERANCE: 0.01, // 1% default slippage
 

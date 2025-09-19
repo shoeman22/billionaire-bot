@@ -198,22 +198,22 @@ export const ENDPOINT_REQUIRED_PARAMS = {
 // Validation schemas for request parameters
 export const ENDPOINT_VALIDATION = {
   [ENDPOINTS.QUOTE]: {
-    tokenIn: { type: 'string', pattern: /^[A-Z0-9]+\$[A-Z0-9]+\$[A-Za-z0-9]+\$[A-Za-z0-9]+$/ },
-    tokenOut: { type: 'string', pattern: /^[A-Z0-9]+\$[A-Z0-9]+\$[A-Za-z0-9]+\$[A-Za-z0-9]+$/ },
+    tokenIn: { type: 'string', pattern: /^[A-Za-z0-9]+\$[A-Za-z0-9]+\$[A-Za-z0-9]+\$[A-Za-z0-9]+$/ },
+    tokenOut: { type: 'string', pattern: /^[A-Za-z0-9]+\$[A-Za-z0-9]+\$[A-Za-z0-9]+\$[A-Za-z0-9]+$/ },
     amountIn: { type: 'string', pattern: /^\d+(\.\d+)?$/, optional: true },
     amountOut: { type: 'string', pattern: /^\d+(\.\d+)?$/, optional: true },
     fee: { type: 'number', values: [500, 3000, 10000], optional: true },
   },
   [ENDPOINTS.PRICE]: {
-    token: { type: 'string', pattern: /^[A-Z0-9]+\$[A-Z0-9]+\$[A-Za-z0-9]+\$[A-Za-z0-9]+$/ },
+    token: { type: 'string', pattern: /^[A-Za-z0-9]+\$[A-Za-z0-9]+\$[A-Za-z0-9]+\$[A-Za-z0-9]+$/ },
   },
   [ENDPOINTS.POOL]: {
-    token0: { type: 'string', pattern: /^[A-Z0-9]+\$[A-Z0-9]+\$[A-Za-z0-9]+\$[A-Za-z0-9]+$/ },
-    token1: { type: 'string', pattern: /^[A-Z0-9]+\$[A-Z0-9]+\$[A-Za-z0-9]+\$[A-Za-z0-9]+$/ },
+    token0: { type: 'string', pattern: /^[A-Za-z0-9]+\$[A-Za-z0-9]+\$[A-Za-z0-9]+\$[A-Za-z0-9]+$/ },
+    token1: { type: 'string', pattern: /^[A-Za-z0-9]+\$[A-Za-z0-9]+\$[A-Za-z0-9]+\$[A-Za-z0-9]+$/ },
     fee: { type: 'number', values: [500, 3000, 10000] },
   },
   [ENDPOINTS.POSITIONS]: {
-    user: { type: 'string', pattern: /^eth\|0x[a-fA-F0-9]{40}$/ },
+    user: { type: 'string', pattern: /^(eth|client)\|0x[a-fA-F0-9]{40}$/ },
     limit: { type: 'number', min: 1, max: 100 },
     bookmark: { type: 'string', optional: true },
   },

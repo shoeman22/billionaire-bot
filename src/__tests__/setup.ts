@@ -17,12 +17,12 @@ beforeAll(() => {
   // Setup test logger configuration (comment out logger.level as it may not exist)
   // logger.level = 'error'; // Only show errors in tests
 
-  // Mock console methods if not in verbose mode
-  if (!process.env.JEST_VERBOSE) {
-    console.log = jest.fn();
-    console.warn = jest.fn();
-    console.error = jest.fn();
-  }
+  // Mock console methods if not in verbose mode (DISABLED FOR DEBUGGING)
+  // if (!process.env.JEST_VERBOSE) {
+  //   console.log = jest.fn();
+  //   console.warn = jest.fn();
+  //   console.error = jest.fn();
+  // }
 });
 
 afterAll(() => {
