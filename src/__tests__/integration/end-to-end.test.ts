@@ -156,7 +156,7 @@ describe('End-to-End Integration Tests', () => {
         // Get positions to verify
         const positions = await galaSwapClient.getUserPositions();
         expect(positions.status).toBe(1);
-        expect(Array.isArray(positions.data.positions)).toBe(true);
+        expect(Array.isArray((positions.data as any).positions)).toBe(true);
 
       } finally {
         await tradingEngine.stop();

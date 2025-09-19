@@ -398,14 +398,27 @@ describe('TradingEngine', () => {
     });
 
     it('should execute strategies based on market conditions', async () => {
-      await tradingEngine.start();
+      // Clear mocks before the trading cycle runs, not after
+      jest.clearAllMocks();
 
+      // Ensure getUserPositions returns proper structure
+      (mockGalaSwapClient.getUserPositions as any).mockResolvedValue({
+        success: true,
+        status: 1,
+        data: {
+          positions: TestHelpers.createMockPositions(config.wallet.address),
+          totalValue: "10000",
+          totalValueUsd: "10000"
+        }
+      });
+
+      // TradingEngine is already started in beforeEach
       jest.advanceTimersByTime(5000);
       await Promise.resolve();
+      await Promise.resolve(); // Give more time for async operations
 
+      // Verify the strategy was executed
       expect(mockStrategy.execute).toHaveBeenCalled();
-
-      await tradingEngine.stop();
     });
 
     it('should handle high risk conditions', async () => {
