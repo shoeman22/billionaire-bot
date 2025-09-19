@@ -7,6 +7,7 @@ import { GalaSwapClient } from '../../api/GalaSwapClient';
 import { TradingConfig } from '../../config/environment';
 import { logger } from '../../utils/logger';
 import { AlertSystem } from '../../monitoring/alerts';
+import { safeParseFloat } from '../../utils/safe-parse';
 
 export interface RiskConfig {
   maxDailyLossPercent: number;
@@ -86,16 +87,16 @@ export class RiskMonitor {
 
     // Initialize risk configuration from environment
     this.riskConfig = {
-      maxDailyLossPercent: parseFloat(process.env.MAX_DAILY_LOSS_PERCENT || '0.05'),
-      maxTotalLossPercent: parseFloat(process.env.MAX_TOTAL_LOSS_PERCENT || '0.15'),
-      maxDrawdownPercent: parseFloat(process.env.MAX_DRAWDOWN_PERCENT || '0.10'),
-      maxDailyVolume: parseFloat(process.env.MAX_DAILY_VOLUME || '5000'),
-      maxPositionAge: parseFloat(process.env.MAX_POSITION_AGE_HOURS || '24'),
+      maxDailyLossPercent: safeParseFloat(process.env.MAX_DAILY_LOSS_PERCENT || '0.05', 0.05),
+      maxTotalLossPercent: safeParseFloat(process.env.MAX_TOTAL_LOSS_PERCENT || '0.15', 0.15),
+      maxDrawdownPercent: safeParseFloat(process.env.MAX_DRAWDOWN_PERCENT || '0.10', 0.10),
+      maxDailyVolume: safeParseFloat(process.env.MAX_DAILY_VOLUME || '5000', 5000),
+      maxPositionAge: safeParseFloat(process.env.MAX_POSITION_AGE_HOURS || '24', 24),
       emergencyStopTriggers: {
-        portfolioLoss: parseFloat(process.env.EMERGENCY_PORTFOLIO_LOSS || '0.20'),
-        dailyLoss: parseFloat(process.env.EMERGENCY_DAILY_LOSS || '0.10'),
-        unusualVolatility: parseFloat(process.env.EMERGENCY_VOLATILITY || '0.50'),
-        lowLiquidity: parseFloat(process.env.EMERGENCY_LOW_LIQUIDITY || '0.10'),
+        portfolioLoss: safeParseFloat(process.env.EMERGENCY_PORTFOLIO_LOSS || '0.20', 0.20),
+        dailyLoss: safeParseFloat(process.env.EMERGENCY_DAILY_LOSS || '0.10', 0.10),
+        unusualVolatility: safeParseFloat(process.env.EMERGENCY_VOLATILITY || '0.50', 0.50),
+        lowLiquidity: safeParseFloat(process.env.EMERGENCY_LOW_LIQUIDITY || '0.10', 0.10),
       }
     };
 
@@ -339,14 +340,14 @@ export class RiskMonitor {
           // Extract token balances from liquidity positions
           if (position.token0Symbol && position.liquidity) {
             const token0 = position.token0Symbol;
-            const liquidityAmount = parseFloat(position.liquidity) / 2; // Approximate split
+            const liquidityAmount = safeParseFloat(position.liquidity, 0) / 2; // Approximate split
             const current = tokenBalances.get(token0) || 0;
             tokenBalances.set(token0, current + liquidityAmount);
           }
 
           if (position.token1Symbol && position.liquidity) {
             const token1 = position.token1Symbol;
-            const liquidityAmount = parseFloat(position.liquidity) / 2; // Approximate split
+            const liquidityAmount = safeParseFloat(position.liquidity, 0) / 2; // Approximate split
             const current = tokenBalances.get(token1) || 0;
             tokenBalances.set(token1, current + liquidityAmount);
           }
@@ -390,7 +391,7 @@ export class RiskMonitor {
           const priceResponse = await this.galaSwapClient.getPrice(tokenKey);
 
           if (priceResponse && !priceResponse.error && priceResponse.data) {
-            const priceUsd = parseFloat(priceResponse.data.priceUsd || priceResponse.data.price || '0');
+            const priceUsd = safeParseFloat(priceResponse.data.priceUsd || priceResponse.data.price || '0', 0);
             prices[token] = priceUsd;
             logger.debug(`Price for ${token}: $${priceUsd}`);
           } else {

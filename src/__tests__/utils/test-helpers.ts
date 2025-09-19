@@ -220,8 +220,8 @@ export class TestHelpers {
    */
   static createMockPositions(userAddress: string) {
     return {
-      Status: 1,
-      Data: {
+      status: 1,
+      data: {
         positions: [
           {
             id: 'pos-1',

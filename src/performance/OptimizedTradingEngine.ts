@@ -103,7 +103,7 @@ export class OptimizedTradingEngine extends TradingEngine {
     const startTime = Date.now();
     const operationId = 'fast-trade-' + params.tokenIn + '-' + params.tokenOut + '-' + Date.now();
     
-    this.performanceMonitor.startOperation(operationId, params);
+    this.performanceMonitor.startOperation(operationId, 'trading', params);
 
     try {
       // 1. Check if we can use fast path
@@ -146,7 +146,7 @@ export class OptimizedTradingEngine extends TradingEngine {
     const startTime = Date.now();
     const operationId = 'batch-trades-' + request.trades.length + '-' + Date.now();
     
-    this.performanceMonitor.startOperation(operationId, { tradeCount: request.trades.length });
+    this.performanceMonitor.startOperation(operationId, 'batch_trading', { tradeCount: request.trades.length });
 
     const maxParallel = Math.min(request.maxParallel || 3, this.MAX_PARALLEL_REQUESTS);
     const results: Array<{

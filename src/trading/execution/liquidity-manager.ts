@@ -5,6 +5,7 @@
 
 import { GalaSwapClient } from '../../api/GalaSwapClient';
 import { logger } from '../../utils/logger';
+import { safeParseFloat } from '../../utils/safe-parse';
 import {
   AddLiquidityPayloadRequest,
   RemoveLiquidityPayloadRequest,
@@ -170,7 +171,7 @@ export class LiquidityManager {
           logger.info(`Position fully closed: ${params.positionId}`);
         } else {
           // Update remaining liquidity
-          position.liquidity = (parseFloat(position.liquidity) - parseFloat(params.liquidity)).toString();
+          position.liquidity = (safeParseFloat(position.liquidity, 0) - safeParseFloat(params.liquidity, 0)).toString();
           position.lastUpdated = Date.now();
           this.positions.set(params.positionId, position);
         }
@@ -317,7 +318,7 @@ export class LiquidityManager {
     }
 
     // Check amounts
-    if (parseFloat(params.amount0) <= 0 || parseFloat(params.amount1) <= 0) {
+    if (safeParseFloat(params.amount0, 0) <= 0 || safeParseFloat(params.amount1, 0) <= 0) {
       return { valid: false, error: 'Amounts must be positive' };
     }
 
@@ -385,7 +386,7 @@ export class LiquidityManager {
         tickUpper: position.tickUpper,
         tickLower: position.tickLower,
         fee: position.fee,
-        amount: parseFloat(liquidityToRemove)
+        amount: safeParseFloat(liquidityToRemove, 0)
       });
 
       if (isSuccessResponse(estimateResponse)) {
@@ -395,18 +396,20 @@ export class LiquidityManager {
         };
       } else {
         logger.warn('Failed to get removal estimate, using proportional calculation');
-        const proportion = parseFloat(liquidityToRemove) / parseFloat(position.liquidity);
+        const positionLiquidity = safeParseFloat(position.liquidity, 0);
+        const proportion = positionLiquidity > 0 ? safeParseFloat(liquidityToRemove, 0) / positionLiquidity : 0;
         return {
-          amount0: (parseFloat(position.amount0) * proportion).toString(),
-          amount1: (parseFloat(position.amount1) * proportion).toString(),
+          amount0: (safeParseFloat(position.amount0, 0) * proportion).toString(),
+          amount1: (safeParseFloat(position.amount1, 0) * proportion).toString(),
         };
       }
     } catch (error) {
       logger.warn('Error calculating removal amounts:', error);
-      const proportion = parseFloat(liquidityToRemove) / parseFloat(position.liquidity);
+      const positionLiquidity = safeParseFloat(position.liquidity, 0);
+      const proportion = positionLiquidity > 0 ? safeParseFloat(liquidityToRemove, 0) / positionLiquidity : 0;
       return {
-        amount0: (parseFloat(position.amount0) * proportion).toString(),
-        amount1: (parseFloat(position.amount1) * proportion).toString(),
+        amount0: (safeParseFloat(position.amount0, 0) * proportion).toString(),
+        amount1: (safeParseFloat(position.amount1, 0) * proportion).toString(),
       };
     }
   }
@@ -418,8 +421,8 @@ export class LiquidityManager {
     try {
       // Calculate minimum amounts with 1% slippage tolerance
       const slippageTolerance = 0.01;
-      const amount0Min = (parseFloat(params.amount0) * (1 - slippageTolerance)).toString();
-      const amount1Min = (parseFloat(params.amount1) * (1 - slippageTolerance)).toString();
+      const amount0Min = (safeParseFloat(params.amount0, 0) * (1 - slippageTolerance)).toString();
+      const amount1Min = (safeParseFloat(params.amount1, 0) * (1 - slippageTolerance)).toString();
 
       const addLiquidityRequest: AddLiquidityPayloadRequest = {
         token0: createTokenClassKey(params.token0),
@@ -460,8 +463,8 @@ export class LiquidityManager {
       // Calculate minimum amounts with 1% slippage tolerance
       const amounts = await this.calculateRemovalAmounts(position, params.liquidity);
       const slippageTolerance = 0.01;
-      const amount0Min = (parseFloat(amounts.amount0) * (1 - slippageTolerance)).toString();
-      const amount1Min = (parseFloat(amounts.amount1) * (1 - slippageTolerance)).toString();
+      const amount0Min = (safeParseFloat(amounts.amount0, 0) * (1 - slippageTolerance)).toString();
+      const amount1Min = (safeParseFloat(amounts.amount1, 0) * (1 - slippageTolerance)).toString();
 
       const removeLiquidityRequest: RemoveLiquidityPayloadRequest = {
         token0: createTokenClassKey(position.token0),
@@ -627,7 +630,7 @@ export class LiquidityManager {
 
     // Calculate approximate TVL (simplified)
     const totalValueLocked = positions.reduce((sum, position) => {
-      return sum + parseFloat(position.amount0) + parseFloat(position.amount1);
+      return sum + safeParseFloat(position.amount0, 0) + safeParseFloat(position.amount1, 0);
     }, 0);
 
     return {

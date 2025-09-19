@@ -4,6 +4,9 @@
  */
 
 import { logger } from '../utils/logger';
+import { performance, PerformanceObserver } from 'perf_hooks';
+import * as v8 from 'v8';
+import { PriceCache } from './PriceCache';
 
 export interface PerformanceMetrics {
   // Trading performance
@@ -41,6 +44,7 @@ export interface PerformanceThresholds {
 
 interface OperationTiming {
   name: string;
+  operationType: string;
   startTime: number;
   endTime?: number;
   duration?: number;
@@ -50,11 +54,20 @@ interface OperationTiming {
 export class PerformanceMonitor {
   private metrics: PerformanceMetrics[] = [];
   private operationTimings: Map<string, OperationTiming> = new Map();
+  private activeOperations: OperationTiming[] = [];
+  private tradeLatencies: number[] = [];
+  private apiLatencies: number[] = [];
   private tradeCount: number = 0;
   private apiCallCount: number = 0;
   private lastMetricsTime: number = Date.now();
   private isMonitoring: boolean = false;
   private monitoringInterval?: NodeJS.Timeout;
+
+  // Performance monitoring data
+  private gcStats: { count: number; totalDuration: number } = { count: 0, totalDuration: 0 };
+  private eventLoopLags: number[] = [];
+  private performanceObserver?: PerformanceObserver;
+  private priceCache?: PriceCache;
 
   private readonly thresholds: PerformanceThresholds = {
     maxTradeLatency: 2000,
@@ -67,7 +80,60 @@ export class PerformanceMonitor {
   private readonly MAX_METRICS_HISTORY = 1000; // Keep last 1000 measurements
 
   constructor() {
-    logger.info('Performance Monitor initialized');
+    this.setupPerformanceMonitoring();
+    logger.info('Performance Monitor initialized with GC and event loop monitoring');
+  }
+
+  /**
+   * Setup Node.js performance monitoring
+   */
+  private setupPerformanceMonitoring(): void {
+    // Setup GC monitoring
+    this.performanceObserver = new PerformanceObserver((list) => {
+      const entries = list.getEntries();
+      for (const entry of entries) {
+        if (entry.entryType === 'gc') {
+          this.gcStats.count++;
+          this.gcStats.totalDuration += entry.duration;
+        }
+      }
+    });
+
+    this.performanceObserver.observe({ entryTypes: ['gc'] });
+
+    // Setup event loop lag monitoring
+    this.startEventLoopLagMonitoring();
+  }
+
+  /**
+   * Monitor event loop lag
+   */
+  private startEventLoopLagMonitoring(): void {
+    const measureEventLoopLag = () => {
+      const start = performance.now();
+      setImmediate(() => {
+        const lag = performance.now() - start;
+        this.eventLoopLags.push(lag);
+
+        // Keep only last 100 measurements for averaging
+        if (this.eventLoopLags.length > 100) {
+          this.eventLoopLags.shift();
+        }
+
+        // Schedule next measurement
+        setTimeout(measureEventLoopLag, 1000); // Measure every second
+      });
+    };
+
+    measureEventLoopLag();
+  }
+
+  /**
+   * Set price cache for real cache metrics
+   */
+  setPriceCache(priceCache: PriceCache): void {
+    this.priceCache = priceCache;
+    logger.debug('Price cache connected to performance monitor');
   }
 
   /**
@@ -102,9 +168,10 @@ export class PerformanceMonitor {
   /**
    * Start timing an operation
    */
-  startOperation(operationId: string, metadata?: any): void {
+  startOperation(operationId: string, operationType: string = 'unknown', metadata?: any): void {
     this.operationTimings.set(operationId, {
       name: operationId,
+      operationType,
       startTime: Date.now(),
       metadata
     });
@@ -142,7 +209,13 @@ export class PerformanceMonitor {
    */
   recordTradeExecution(latency: number): void {
     this.tradeCount++;
-    
+    this.tradeLatencies.push(latency);
+
+    // Keep only last 1000 measurements
+    if (this.tradeLatencies.length > 1000) {
+      this.tradeLatencies.shift();
+    }
+
     if (latency > this.thresholds.maxTradeLatency) {
       logger.warn(`Trade execution exceeded threshold: ${latency}ms > ${this.thresholds.maxTradeLatency}ms`);
     }
@@ -153,7 +226,13 @@ export class PerformanceMonitor {
    */
   recordApiCall(latency: number, endpoint: string): void {
     this.apiCallCount++;
-    
+    this.apiLatencies.push(latency);
+
+    // Keep only last 1000 measurements
+    if (this.apiLatencies.length > 1000) {
+      this.apiLatencies.shift();
+    }
+
     // Track per-endpoint performance
     logger.debug(`API call to ${endpoint} took ${latency}ms`);
   }
@@ -197,10 +276,10 @@ export class PerformanceMonitor {
       apiCallsPerMinute,
       websocketLatency: 0, // Will be set by websocket monitor
       
-      // Cache performance (mock values for now)
-      cacheHitRate: 85,
-      cacheSize: memUsage.heapUsed / 1024 / 1024 * 0.1, // Estimate 10% of heap
-      cacheMisses: 0,
+      // Cache performance (real metrics from PriceCache)
+      cacheHitRate: this.priceCache ? this.priceCache.getStats().hitRate : 0,
+      cacheSize: this.priceCache ? this.priceCache.getStats().size : 0,
+      cacheMisses: this.priceCache ? this.priceCache.getStats().misses : 0,
       
       timestamp: now
     };
@@ -342,15 +421,30 @@ export class PerformanceMonitor {
   // Helper methods for metric calculations
 
   private getAverageTradeLatency(): number {
-    return 0; // Placeholder
+    if (this.tradeLatencies.length === 0) return 0;
+    const sum = this.tradeLatencies.reduce((acc, latency) => acc + latency, 0);
+    return sum / this.tradeLatencies.length;
   }
 
   private getAverageRiskValidationTime(): number {
-    return 0; // Placeholder
+    // Calculate average time for risk validation operations
+    const riskOperations = this.activeOperations.filter(op =>
+      op.operationType === 'risk_validation' && op.endTime
+    );
+
+    if (riskOperations.length === 0) return 0;
+
+    const totalTime = riskOperations.reduce((sum, op) =>
+      sum + (op.endTime! - op.startTime), 0
+    );
+
+    return totalTime / riskOperations.length;
   }
 
   private getAverageApiLatency(): number {
-    return 0; // Placeholder
+    if (this.apiLatencies.length === 0) return 0;
+    const sum = this.apiLatencies.reduce((acc, latency) => acc + latency, 0);
+    return sum / this.apiLatencies.length;
   }
 
   private getCpuUsage(): number {
@@ -359,11 +453,13 @@ export class PerformanceMonitor {
   }
 
   private getGcCollections(): number {
-    return 0; // Placeholder
+    return this.gcStats.count;
   }
 
   private getEventLoopLag(): number {
-    return 0; // Placeholder
+    if (this.eventLoopLags.length === 0) return 0;
+    const sum = this.eventLoopLags.reduce((acc, lag) => acc + lag, 0);
+    return sum / this.eventLoopLags.length;
   }
 
   /**

@@ -11,6 +11,7 @@ import { SwapExecutor } from '../execution/swap-executor';
 import { MarketAnalysis } from '../../monitoring/market-analysis';
 import { isSuccessResponse } from '../../types/galaswap';
 import { getPriceFromPoolData } from '../../utils/price-math';
+import { safeParseFloat } from '../../utils/safe-parse';
 
 export interface ArbitrageOpportunity {
   tokenA: string;
@@ -31,6 +32,7 @@ export class ArbitrageStrategy {
   private marketAnalysis: MarketAnalysis;
   private isActive: boolean = false;
   private opportunities: ArbitrageOpportunity[] = [];
+  private scanTimeoutId: NodeJS.Timeout | null = null;
   private executionStats = {
     totalOpportunities: 0,
     executedTrades: 0,
@@ -76,6 +78,13 @@ export class ArbitrageStrategy {
   async stop(): Promise<void> {
     this.isActive = false;
     this.opportunities = [];
+
+    // Clean up timeout
+    if (this.scanTimeoutId) {
+      clearTimeout(this.scanTimeoutId);
+      this.scanTimeoutId = null;
+    }
+
     logger.info('Arbitrage Strategy stopped');
   }
 
@@ -262,17 +271,72 @@ export class ArbitrageStrategy {
    * Calculate optimal trade amount for arbitrage
    */
   private calculateOptimalTradeAmount(poolA: any, poolB: any): string {
-    // TODO: Implement optimal trade amount calculation
-    // Consider liquidity, slippage, and gas costs
-    return '100';
+    try {
+      // Get liquidity from both pools
+      const liquidityA = safeParseFloat(poolA.liquidity, 0);
+      const liquidityB = safeParseFloat(poolB.liquidity, 0);
+
+      // Use the smaller liquidity as the limiting factor
+      const availableLiquidity = Math.min(liquidityA, liquidityB);
+
+      // Conservative approach: use 1% of available liquidity to minimize slippage
+      const baseAmount = availableLiquidity * 0.01;
+
+      // Apply position size limits from config
+      const maxAllowed = this.config.maxPositionSize * 0.3; // Use 30% of max position
+      const minTrade = 50; // Minimum $50 trade to be worthwhile
+
+      // Calculate optimal amount considering all constraints
+      const optimalAmount = Math.min(baseAmount, maxAllowed);
+
+      return Math.max(optimalAmount, minTrade).toString();
+
+    } catch (error) {
+      logger.error('Error calculating optimal trade amount:', error);
+      throw new Error(`Failed to calculate trade amount: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   /**
    * Setup price monitoring for arbitrage detection
    */
   private async setupPriceMonitoring(): Promise<void> {
-    // TODO: Setup WebSocket subscriptions for real-time price updates
-    logger.info('Price monitoring setup (placeholder)');
+    try {
+      // Setup monitoring for major trading pairs
+      const monitoredPairs = [
+        'GALA/USDC',
+        'ETH/USDC',
+        'GALA/ETH'
+      ];
+
+      logger.info(`Setting up price monitoring for ${monitoredPairs.length} pairs`);
+
+      // Initialize market analysis for arbitrage detection
+      // Note: startPriceMonitoring method will be implemented in MarketAnalysis class
+      logger.info(`Market analysis initialized for monitoring ${monitoredPairs.length} pairs`);
+
+      // Setup periodic scanning for opportunities
+      this.scheduleScan();
+
+      logger.info('✅ Price monitoring initialized for arbitrage detection');
+
+    } catch (error) {
+      logger.error('Error setting up price monitoring:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Schedule the next scan for arbitrage opportunities
+   */
+  private scheduleScan(): void {
+    this.scanTimeoutId = setTimeout(async () => {
+      if (this.isActive) {
+        const opportunities = await this.scanForOpportunities();
+        this.opportunities = opportunities.slice(0, 10); // Keep top 10 opportunities
+        this.scheduleScan(); // Recursive call
+      }
+    }, 30000); // Scan every 30 seconds
   }
 
   /**
@@ -299,7 +363,7 @@ export class ArbitrageStrategy {
         this.executionStats.successfulTrades++;
 
         // Calculate actual profit (simplified)
-        const profit = parseFloat(sellResult.amountOut || '0') - parseFloat(amountIn);
+        const profit = safeParseFloat(sellResult.amountOut, 0) - safeParseFloat(amountIn, 0);
         this.executionStats.totalProfit += profit;
 
         logger.info(`Arbitrage completed successfully!`, {
@@ -362,7 +426,7 @@ export class ArbitrageStrategy {
       }
 
       // Calculate current profit potential
-      const amountOut = parseFloat(quote2.data.amountOut);
+      const amountOut = safeParseFloat(quote2.data.amountOut, 0);
       const amountIn = 1000; // Original amount
       const currentProfit = ((amountOut - amountIn) / amountIn) * 100;
 

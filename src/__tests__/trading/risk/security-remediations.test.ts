@@ -9,7 +9,6 @@ import { GalaSwapClient } from '../../../api/GalaSwapClient';
 import { SwapExecutor } from '../../../trading/execution/swap-executor';
 import { LiquidityManager } from '../../../trading/execution/liquidity-manager';
 import TestHelpers from '../../utils/test-helpers';
-import { logger } from '../../../utils/logger';
 
 // Mock external dependencies
 jest.mock('../../../utils/logger');

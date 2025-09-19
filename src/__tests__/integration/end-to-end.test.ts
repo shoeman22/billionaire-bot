@@ -7,6 +7,7 @@ import { TradingEngine } from '../../trading/TradingEngine';
 import { GalaSwapClient } from '../../api/GalaSwapClient';
 import TestHelpers from '../utils/test-helpers';
 import { logger } from '../../utils/logger';
+import '../setup';
 
 // Mock external dependencies but allow real internal logic
 jest.mock('../../utils/logger');
@@ -49,18 +50,18 @@ describe('End-to-End Integration Tests', () => {
     // Setup mock API responses for complete workflow
     mockAxiosInstance.request
       .mockImplementation((config: any) => {
-        const { url, method, data } = config;
+        const { url } = config;
 
         // Mock different endpoints
         if (url.includes('/quote')) {
           return Promise.resolve({
-            data: testUtils.createMockQuoteResponse()
+            data: TestHelpers.createMockQuoteResponse()
           });
         }
 
         if (url.includes('/swap-payload')) {
           return Promise.resolve({
-            data: testUtils.createMockApiResponse({
+            data: TestHelpers.createMockApiResponse({
               payload: 'mock-swap-payload',
               signature: 'mock-signature'
             })
@@ -69,7 +70,7 @@ describe('End-to-End Integration Tests', () => {
 
         if (url.includes('/bundle')) {
           return Promise.resolve({
-            data: testUtils.createMockApiResponse('tx-123456')
+            data: TestHelpers.createMockApiResponse('tx-123456')
           });
         }
 
@@ -87,13 +88,13 @@ describe('End-to-End Integration Tests', () => {
 
         if (url.includes('/health')) {
           return Promise.resolve({
-            data: testUtils.createMockApiResponse({ status: 'ok' })
+            data: TestHelpers.createMockApiResponse({ status: 'ok' })
           });
         }
 
         // Default success response
         return Promise.resolve({
-          data: testUtils.createMockApiResponse({ success: true })
+          data: TestHelpers.createMockApiResponse({ success: true })
         });
       });
 
@@ -154,8 +155,8 @@ describe('End-to-End Integration Tests', () => {
 
         // Get positions to verify
         const positions = await galaSwapClient.getUserPositions();
-        expect(positions.Status).toBe(1);
-        expect(Array.isArray(positions.Data.positions)).toBe(true);
+        expect(positions.status).toBe(1);
+        expect(Array.isArray(positions.data.positions)).toBe(true);
 
       } finally {
         await tradingEngine.stop();
@@ -228,7 +229,7 @@ describe('End-to-End Integration Tests', () => {
           });
         }
         return Promise.resolve({
-          data: testUtils.createMockApiResponse({ success: true })
+          data: TestHelpers.createMockApiResponse({ success: true })
         });
       });
 
@@ -265,7 +266,7 @@ describe('End-to-End Integration Tests', () => {
       mockAxiosInstance.request.mockImplementation((config: any) => {
         if (config.url.includes('/quote')) {
           return Promise.resolve({
-            data: testUtils.createMockApiResponse({
+            data: TestHelpers.createMockApiResponse({
               amountOut: '800', // Lower than expected (high slippage)
               newSqrtPrice: '79228162514264337593543950336',
               priceImpact: 0.15 // 15% slippage
@@ -273,7 +274,7 @@ describe('End-to-End Integration Tests', () => {
           });
         }
         return Promise.resolve({
-          data: testUtils.createMockApiResponse({ success: true })
+          data: TestHelpers.createMockApiResponse({ success: true })
         });
       });
 
@@ -316,14 +317,14 @@ describe('End-to-End Integration Tests', () => {
       mockAxiosInstance.request.mockImplementation((config: any) => {
         if (config.url.includes('/price')) {
           return Promise.resolve({
-            data: testUtils.createMockApiResponse({
+            data: TestHelpers.createMockApiResponse({
               price: arbitrageOpportunity.routes[0].price,
               volume: '1000000'
             })
           });
         }
         return Promise.resolve({
-          data: testUtils.createMockApiResponse({ success: true })
+          data: TestHelpers.createMockApiResponse({ success: true })
         });
       });
 
@@ -396,7 +397,8 @@ describe('End-to-End Integration Tests', () => {
 
     it('should track position changes over time', async () => {
       // Get initial portfolio
-      const initialPortfolio = await tradingEngine.getPortfolio();
+      // Get initial portfolio (for future comparison)
+      await tradingEngine.getPortfolio();
 
       // Execute a trade
       await tradingEngine.executeManualTrade({
@@ -430,8 +432,8 @@ describe('End-to-End Integration Tests', () => {
 
       // Trigger price update
       mockSocket.on.mock.calls
-        .filter(([event]) => event === 'price_update')
-        .forEach(([, handler]) => handler(priceUpdateEvent));
+        .filter(([event]: [string, any]) => event === 'price_update')
+        .forEach(([, handler]: [string, any]) => handler(priceUpdateEvent));
 
       expect(priceUpdates.length).toBeGreaterThan(0);
       expect(priceUpdates[0]).toHaveProperty('type', 'price_update');
@@ -454,8 +456,8 @@ describe('End-to-End Integration Tests', () => {
       const txUpdateEvent = TestHelpers.createMockWebSocketEvents().transactionUpdate;
 
       mockSocket.on.mock.calls
-        .filter(([event]) => event === 'transaction_update')
-        .forEach(([, handler]) => handler(txUpdateEvent));
+        .filter(([event]: [string, any]) => event === 'transaction_update')
+        .forEach(([, handler]: [string, any]) => handler(txUpdateEvent));
 
       expect(transactionUpdates.length).toBeGreaterThan(0);
       expect(transactionUpdates[0]).toHaveProperty('type', 'transaction_update');
@@ -479,7 +481,7 @@ describe('End-to-End Integration Tests', () => {
           return Promise.reject(new Error('Temporary failure'));
         }
         return Promise.resolve({
-          data: testUtils.createMockApiResponse({ success: true })
+          data: TestHelpers.createMockApiResponse({ success: true })
         });
       });
 

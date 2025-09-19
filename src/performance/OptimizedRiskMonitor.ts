@@ -177,7 +177,7 @@ export class OptimizedRiskMonitor extends RiskMonitor {
     const startTime = Date.now();
     const operationId = 'batch-risk-validation';
     
-    this.performanceMonitor.startOperation(operationId, { tradeCount: trades.length });
+    this.performanceMonitor.startOperation(operationId, 'risk_validation', { tradeCount: trades.length });
 
     try {
       // Get portfolio snapshot once for all trades

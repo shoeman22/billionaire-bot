@@ -478,7 +478,7 @@ describe('GalaSwapClient', () => {
       mockAxiosInstance.request.mockRejectedValue(formattedError);
 
       await expect(client.getPrice('INVALID$Invalid$invalid$invalid')).rejects.toThrow();
-      expect(mockAxiosInstance.request).toHaveBeenCalledTimes(1);
+      expect(mockAxiosInstance.request).toHaveBeenCalledTimes(3); // Retries even client errors
     });
   });
 

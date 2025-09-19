@@ -37,7 +37,7 @@ async function testRiskManagementSystem(): Promise<void> {
 
     // Test 1: Position Limits System
     logger.info('🧪 Testing Position Limits System...');
-    const positionLimits = new PositionLimits(config.trading);
+    const positionLimits = new PositionLimits(config.trading, galaSwapClient);
 
     // Test limits checking
     const limitsTest = await positionLimits.checkLimits(config.wallet.address);

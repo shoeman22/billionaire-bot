@@ -17,6 +17,7 @@ import { SwapExecutor } from './execution/swap-executor';
 import { LiquidityManager } from './execution/liquidity-manager';
 import { MarketAnalysis } from '../monitoring/market-analysis';
 import { AlertSystem } from '../monitoring/alerts';
+import { safeParseFloat } from '../utils/safe-parse';
 
 export class TradingEngine {
   private config: BotConfig;
@@ -38,8 +39,12 @@ export class TradingEngine {
     successfulTrades: 0,
     totalVolume: 0,
     totalProfit: 0,
-    startTime: Date.now()
+    startTime: Date.now(),
+    initialBalance: 1000 // Default initial balance, will be updated on first portfolio calculation
   };
+  private dailyStartValue: number = 0;
+  private lastDailyReset: Date = new Date();
+  private tradingIntervalId: NodeJS.Timeout | null = null;
 
   constructor(config: BotConfig) {
     this.config = config;
@@ -54,7 +59,7 @@ export class TradingEngine {
 
     // Initialize core systems
     this.priceTracker = new PriceTracker(this.galaSwapClient);
-    this.positionLimits = new PositionLimits(config.trading);
+    this.positionLimits = new PositionLimits(config.trading, this.galaSwapClient);
     this.slippageProtection = new SlippageProtection(config.trading);
     this.riskMonitor = new RiskMonitor(config.trading, this.galaSwapClient);
 
@@ -104,8 +109,8 @@ export class TradingEngine {
       logger.info('Starting Trading Engine...');
 
       // Health check API connection
-      const isHealthy = await this.galaSwapClient.healthCheck();
-      if (!isHealthy) {
+      const healthStatus = await this.galaSwapClient.healthCheck();
+      if (!healthStatus.isHealthy) {
         throw new Error('GalaSwap API health check failed');
       }
 
@@ -156,6 +161,12 @@ export class TradingEngine {
       // Stop price tracking
       await this.priceTracker.stop();
 
+      // Clear trading interval
+      if (this.tradingIntervalId) {
+        clearInterval(this.tradingIntervalId);
+        this.tradingIntervalId = null;
+      }
+
       // Disconnect WebSocket
       await this.galaSwapClient.disconnectWebSocket();
 
@@ -172,10 +183,13 @@ export class TradingEngine {
    * Main trading loop
    */
   private startTradingLoop(): void {
-    const tradingInterval = setInterval(async () => {
+    this.tradingIntervalId = setInterval(async () => {
       try {
         if (!this.isRunning) {
-          clearInterval(tradingInterval);
+          if (this.tradingIntervalId) {
+            clearInterval(this.tradingIntervalId);
+            this.tradingIntervalId = null;
+          }
           return;
         }
 
@@ -203,8 +217,8 @@ export class TradingEngine {
       }
 
       // 2. Check system health
-      const isHealthy = await this.galaSwapClient.healthCheck();
-      if (!isHealthy) {
+      const healthStatus = await this.galaSwapClient.healthCheck();
+      if (!healthStatus.isHealthy) {
         this.emergencyControls.recordApiFailure('API health check failed');
         logger.warn('GalaSwap API unhealthy, skipping cycle');
         return;
@@ -253,13 +267,14 @@ export class TradingEngine {
       const marketCondition = await this.marketAnalysis.analyzeMarket();
 
       // 6. Check for critical market conditions and emergency triggers
+      const portfolioSnapshot = await this.getPortfolioSnapshot();
       const emergencyCheck = await this.emergencyControls.checkEmergencyConditions({
-        totalValue: 1000, // TODO: Get real portfolio value
-        dailyPnL: 0, // TODO: Get real daily P&L
-        totalPnL: 0, // TODO: Get real total P&L
-        baselineValue: 1000, // TODO: Get real baseline
-        dailyStartValue: 1000, // TODO: Get real daily start
-        maxConcentration: 0.3, // TODO: Get real concentration
+        totalValue: portfolioSnapshot.totalValue,
+        dailyPnL: portfolioSnapshot.dailyPnL,
+        totalPnL: portfolioSnapshot.totalPnL,
+        baselineValue: portfolioSnapshot.baselineValue,
+        dailyStartValue: portfolioSnapshot.dailyStartValue,
+        maxConcentration: portfolioSnapshot.maxConcentration,
         volatility: marketCondition.volatility === 'extreme' ? 0.6 : 0.1
       });
 
@@ -391,7 +406,7 @@ export class TradingEngine {
           const riskValidation = await this.riskMonitor.validateTrade({
             tokenIn: params.tokenIn,
             tokenOut: params.tokenOut,
-            amountIn: parseFloat(params.amountIn),
+            amountIn: safeParseFloat(params.amountIn, 0),
             currentPortfolio,
             marketConditions: {} // TODO: Get real market conditions
           });
@@ -415,7 +430,7 @@ export class TradingEngine {
       // 3. Position limits validation
       const positionCheck = await this.positionLimits.canOpenPosition(
         params.tokenIn,
-        parseFloat(params.amountIn),
+        safeParseFloat(params.amountIn, 0),
         this.config.wallet.address
       );
 
@@ -442,7 +457,7 @@ export class TradingEngine {
       if (result.success) {
         this.tradingStats.totalTrades++;
         this.tradingStats.successfulTrades++;
-        this.tradingStats.totalVolume += parseFloat(params.amountIn);
+        this.tradingStats.totalVolume += safeParseFloat(params.amountIn, 0);
         this.emergencyControls.recordSuccess();
 
         logger.info('Manual trade executed successfully:', {
@@ -487,12 +502,11 @@ export class TradingEngine {
       // Get liquidity positions
       const positions = await this.liquidityManager.getPositions(this.config.wallet.address);
 
-      // TODO: Get token balances from wallet
-      const balances: any[] = [];
+      // Get token balances from wallet
+      const balances = await this.getTokenBalances();
 
       // Calculate total portfolio value
-      let totalValue = 0;
-      // TODO: Calculate portfolio value based on current prices
+      const totalValue = await this.calculatePortfolioValue(positions, balances);
 
       return {
         positions,
@@ -509,6 +523,182 @@ export class TradingEngine {
         totalValue: 0,
         pnl: 0
       };
+    }
+  }
+
+  /**
+   * Get token balances from wallet
+   */
+  private async getTokenBalances(): Promise<any[]> {
+    try {
+      if (!this.config.wallet?.address) {
+        return [];
+      }
+
+      // Get user positions which include token balances
+      const positionsResponse = await this.galaSwapClient.getUserPositions(this.config.wallet.address);
+
+      if (!positionsResponse || positionsResponse.error) {
+        return [];
+      }
+
+      const balances = new Map<string, number>();
+
+      if (positionsResponse.data?.Data?.positions) {
+        for (const position of positionsResponse.data.Data.positions) {
+          // Extract token balances from liquidity positions
+          if (position.token0Symbol && position.liquidity) {
+            const token0 = position.token0Symbol;
+            const amount0 = safeParseFloat(position.liquidity, 0) / 2; // Simplified allocation
+            balances.set(token0, (balances.get(token0) || 0) + amount0);
+          }
+
+          if (position.token1Symbol && position.liquidity) {
+            const token1 = position.token1Symbol;
+            const amount1 = safeParseFloat(position.liquidity, 0) / 2; // Simplified allocation
+            balances.set(token1, (balances.get(token1) || 0) + amount1);
+          }
+        }
+      }
+
+      return Array.from(balances.entries()).map(([token, amount]) => ({
+        token,
+        amount,
+        value: 0 // Will be calculated in calculatePortfolioValue
+      }));
+
+    } catch (error) {
+      logger.error('Error getting token balances:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Calculate total portfolio value (optimized to avoid N+1 queries)
+   */
+  private async calculatePortfolioValue(positions: any[], balances: any[]): Promise<number> {
+    try {
+      let totalValue = 0;
+
+      // Batch fetch prices for all unique tokens to avoid N+1 queries
+      if (balances.length > 0) {
+        const uniqueTokens = [...new Set(balances.map(b => b.token))];
+
+        try {
+          // Single batched price request for all tokens
+          const pricesResponse = await this.galaSwapClient.getPrices(uniqueTokens);
+          const priceMap = new Map<string, number>();
+
+          if (pricesResponse.data && Array.isArray(pricesResponse.data)) {
+            // Build price lookup map
+            uniqueTokens.forEach((token, index) => {
+              if (pricesResponse.data[index] !== undefined) {
+                priceMap.set(token, safeParseFloat(pricesResponse.data[index], 0));
+              }
+            });
+          }
+
+          // Calculate value from token balances using cached prices
+          for (const balance of balances) {
+            const price = priceMap.get(balance.token) || 0;
+            if (price > 0) {
+              totalValue += balance.amount * price;
+            }
+          }
+        } catch (error) {
+          logger.warn('Batch price fetch failed, falling back to individual requests:', error);
+
+          // Fallback to individual requests if batch fails
+          for (const balance of balances) {
+            try {
+              const prices = await this.galaSwapClient.getPrices([balance.token]);
+              if (prices.data && prices.data.length > 0) {
+                const price = safeParseFloat(prices.data[0], 0);
+                totalValue += balance.amount * price;
+              }
+            } catch (error) {
+              logger.debug(`Could not get price for ${balance.token}:`, error);
+            }
+          }
+        }
+      }
+
+      // Add value from liquidity positions
+      for (const position of positions) {
+        if (position.valueUSD) {
+          totalValue += safeParseFloat(position.valueUSD, 0);
+        }
+      }
+
+      return totalValue;
+
+    } catch (error) {
+      logger.error('Error calculating portfolio value:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Get portfolio snapshot for risk management
+   */
+  private async getPortfolioSnapshot(): Promise<{
+    totalValue: number;
+    dailyPnL: number;
+    totalPnL: number;
+    baselineValue: number;
+    dailyStartValue: number;
+    maxConcentration: number;
+  }> {
+    try {
+      const portfolio = await this.getPortfolio();
+      const totalValue = portfolio.totalValue;
+
+      // Check for daily reset
+      await this.checkDailyReset();
+
+      // Use trading stats for P&L calculations
+      const totalPnL = ((totalValue - this.tradingStats.initialBalance) / this.tradingStats.initialBalance) * 100;
+      const dailyPnL = ((totalValue - this.dailyStartValue) / this.dailyStartValue) * 100;
+
+      // Calculate concentration (simplified - largest position percentage)
+      let maxConcentration = 0;
+      if (portfolio.balances.length > 0 && totalValue > 0) {
+        const maxBalance = Math.max(...portfolio.balances.map(b => b.amount * (b.price || 0)));
+        maxConcentration = maxBalance / totalValue;
+      }
+
+      return {
+        totalValue,
+        dailyPnL,
+        totalPnL,
+        baselineValue: this.tradingStats.initialBalance,
+        dailyStartValue: this.dailyStartValue,
+        maxConcentration
+      };
+
+    } catch (error) {
+      logger.error('Error getting portfolio snapshot:', error);
+      return {
+        totalValue: 0,
+        dailyPnL: 0,
+        totalPnL: 0,
+        baselineValue: 0,
+        dailyStartValue: 0,
+        maxConcentration: 0
+      };
+    }
+  }
+
+  /**
+   * Check if daily reset is needed and reset values
+   */
+  private async checkDailyReset(): Promise<void> {
+    const now = new Date();
+    if (now.getDate() !== this.lastDailyReset.getDate()) {
+      const portfolio = await this.getPortfolio();
+      this.dailyStartValue = portfolio.totalValue;
+      this.lastDailyReset = now;
+      logger.info(`Daily P&L reset: Starting value ${this.dailyStartValue}`);
     }
   }
 
@@ -666,6 +856,32 @@ export class TradingEngine {
    */
   getSwapExecutor(): SwapExecutor {
     return this.swapExecutor;
+  }
+
+  /**
+   * Enable arbitrage strategy
+   */
+  async enableArbitrageStrategy(): Promise<void> {
+    try {
+      await this.arbitrageStrategy.initialize();
+      logger.info('✅ Arbitrage strategy enabled');
+    } catch (error) {
+      logger.error('❌ Failed to enable arbitrage strategy:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Enable market making strategy
+   */
+  async enableMarketMakingStrategy(): Promise<void> {
+    try {
+      await this.marketMakingStrategy.initialize();
+      logger.info('✅ Market making strategy enabled');
+    } catch (error) {
+      logger.error('❌ Failed to enable market making strategy:', error);
+      throw error;
+    }
   }
 
   /**

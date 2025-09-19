@@ -20,6 +20,9 @@ export interface TradingConfig {
   maxSlippage?: number;
   maxPortfolioConcentration?: number;
   emergencyStopLoss?: number;
+  wallet?: {
+    address?: string;
+  };
   riskThresholds?: {
     [key: string]: any;
   };

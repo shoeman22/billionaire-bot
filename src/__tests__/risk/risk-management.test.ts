@@ -27,11 +27,28 @@ describe('Risk Management System', () => {
   describe('Position Limits', () => {
     let PositionLimits: any;
     let positionLimits: any;
+    let mockGalaSwapClient: any;
 
     beforeEach(() => {
+      // Create mock GalaSwap client for Position Limits
+      mockGalaSwapClient = {
+        getUserPositions: jest.fn().mockResolvedValue({
+          error: false,
+          data: {
+            Data: {
+              positions: []
+            }
+          }
+        }),
+        getPrice: jest.fn().mockResolvedValue({
+          error: false,
+          data: { price: '1.0', priceUsd: '1.0' }
+        })
+      };
+
       // Import the actual class for testing
       PositionLimits = require('../../trading/risk/position-limits').PositionLimits;
-      positionLimits = new PositionLimits(mockConfig.trading);
+      positionLimits = new PositionLimits(mockConfig.trading, mockGalaSwapClient);
     });
 
     it('should initialize with correct limits', () => {
@@ -111,8 +128,31 @@ describe('Risk Management System', () => {
     });
 
     it('should provide violations report', async () => {
-      // Create some violations
-      await positionLimits.recordTrade('GALA', 15000); // Exceed daily volume
+      // Mock positions that exceed limits to trigger violations
+      mockGalaSwapClient.getUserPositions.mockResolvedValueOnce({
+        error: false,
+        data: {
+          Data: {
+            positions: [
+              {
+                token0Symbol: 'GALA',
+                token1Symbol: 'USDC',
+                amount0: '2000000',  // Very large position to exceed position size limit
+                amount1: '100',
+                liquidity: '2000000'
+              }
+            ]
+          }
+        }
+      });
+
+      // Mock price to ensure we exceed monetary limits
+      mockGalaSwapClient.getPrice.mockImplementation((_token: string) =>
+        Promise.resolve({
+          error: false,
+          data: { price: '1.0', priceUsd: '1.0' }
+        })
+      );
 
       const violations = await positionLimits.getViolations(mockConfig.wallet.address);
       expect(Array.isArray(violations)).toBe(true);
@@ -301,7 +341,6 @@ describe('Risk Management System', () => {
     });
 
     it('should detect high risk conditions', async () => {
-      const highRiskScenario = TestHelpers.createRiskScenarios().highRisk;
 
       // Create positions that will trigger high risk (very concentrated in GALA)
       const highRiskPosition1 = {
@@ -350,7 +389,6 @@ describe('Risk Management System', () => {
     });
 
     it('should detect high/critical risk conditions and halt trading', async () => {
-      const criticalRiskScenario = TestHelpers.createRiskScenarios().criticalRisk;
 
       // Create positions with extreme GALA concentration to guarantee critical risk
       // Position 1: Pure GALA position with high liquidity
@@ -673,7 +711,6 @@ describe('Risk Management System', () => {
     });
 
     it('should handle normal market conditions', async () => {
-      const normalConditions = TestHelpers.createMockMarketConditions('bull');
       const normalPortfolio = TestHelpers.createRiskScenarios().normalRisk;
 
       // All systems should allow trading
@@ -727,7 +764,7 @@ describe('Risk Management System', () => {
       expect(riskSystem.emergencyControls.isEmergencyStopEnabled()).toBe(true);
 
       // Position limits should reject new positions
-      const positionCheck = await riskSystem.positionLimits.canOpenPosition('GALA', 100, mockConfig.wallet.address);
+      await riskSystem.positionLimits.canOpenPosition('GALA', 100, mockConfig.wallet.address);
       // Note: This test assumes position limits check emergency state
       // Implementation may vary
 

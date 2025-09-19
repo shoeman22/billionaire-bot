@@ -9,6 +9,7 @@ import { logger } from '../../utils/logger';
 import { AlertSystem } from '../../monitoring/alerts';
 import { SwapExecutor } from '../execution/swap-executor';
 import { LiquidityManager } from '../execution/liquidity-manager';
+import { safeParseFloat } from '../../utils/safe-parse';
 
 export interface EmergencyState {
   isEmergencyActive: boolean;
@@ -99,11 +100,11 @@ export class EmergencyControls {
 
     // Initialize triggers from environment
     this.triggers = {
-      portfolioLossPercent: parseFloat(process.env.EMERGENCY_PORTFOLIO_LOSS || '0.20'),
-      dailyLossPercent: parseFloat(process.env.EMERGENCY_DAILY_LOSS || '0.10'),
-      volatilityThreshold: parseFloat(process.env.EMERGENCY_VOLATILITY || '0.50'),
-      liquidityThreshold: parseFloat(process.env.EMERGENCY_LOW_LIQUIDITY || '0.10'),
-      priceDropThreshold: parseFloat(process.env.EMERGENCY_PRICE_DROP || '0.30'),
+      portfolioLossPercent: safeParseFloat(process.env.EMERGENCY_PORTFOLIO_LOSS, 0.20),
+      dailyLossPercent: safeParseFloat(process.env.EMERGENCY_DAILY_LOSS, 0.10),
+      volatilityThreshold: safeParseFloat(process.env.EMERGENCY_VOLATILITY, 0.50),
+      liquidityThreshold: safeParseFloat(process.env.EMERGENCY_LOW_LIQUIDITY, 0.10),
+      priceDropThreshold: safeParseFloat(process.env.EMERGENCY_PRICE_DROP, 0.30),
       systemErrorCount: parseInt(process.env.EMERGENCY_ERROR_COUNT || '5'),
       apiFailureCount: parseInt(process.env.EMERGENCY_API_FAILURES || '10')
     };
@@ -501,12 +502,12 @@ export class EmergencyControls {
       const result = await this.liquidityManager.removeLiquidity({
         positionId,
         liquidity: plan.amount.toString(),
-        userAddress: 'emergency_liquidation_address' // TODO: Get actual user address
+        userAddress: this.galaSwapClient.getWalletAddress()
       });
 
       return {
         success: result.success,
-        value: parseFloat(result.amount0 || '0') + parseFloat(result.amount1 || '0'), // Use amount0/amount1 from result
+        value: safeParseFloat(result.amount0, 0) + safeParseFloat(result.amount1, 0), // Use amount0/amount1 from result
         error: result.error
       };
     } catch (error) {
@@ -562,7 +563,7 @@ export class EmergencyControls {
 
       if (positionsResponse.data && positionsResponse.data.Data && positionsResponse.data.Data.positions) {
         for (const position of positionsResponse.data.Data.positions) {
-          const liquidityAmount = parseFloat(position.liquidity);
+          const liquidityAmount = safeParseFloat(position.liquidity, 0);
 
           // Add token0 position if exists
           if (position.token0Symbol && liquidityAmount > 0) {

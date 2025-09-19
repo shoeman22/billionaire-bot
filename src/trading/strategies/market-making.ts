@@ -9,6 +9,7 @@ import { logger } from '../../utils/logger';
 import { LiquidityManager } from '../execution/liquidity-manager';
 import { PriceTracker } from '../../monitoring/price-tracker';
 import { PositionsRequest, Position, isSuccessResponse } from '../../types/galaswap';
+import { safeParseFloat } from '../../utils/safe-parse';
 
 export interface LiquidityPosition {
   poolAddress: string;
@@ -108,8 +109,13 @@ export class MarketMakingStrategy {
    */
   private async loadExistingPositions(): Promise<void> {
     try {
-      // TODO: Get wallet address from config
-      const walletAddress = 'placeholder'; // this.config.wallet.address
+      // Get wallet address from config
+      const walletAddress = this.config.wallet?.address || process.env.WALLET_ADDRESS;
+
+      if (!walletAddress) {
+        logger.warn('No wallet address available for loading positions');
+        return;
+      }
 
       const positionsRequest: PositionsRequest = {
         user: walletAddress,
@@ -132,7 +138,7 @@ export class MarketMakingStrategy {
    */
   private convertToLiquidityPosition(position: Position): LiquidityPosition {
     return {
-      poolAddress: '', // TODO: Get from position data
+      poolAddress: (position as any).poolId || `${position.token0ClassKey?.collection}-${position.token1ClassKey?.collection}-${position.fee}`,
       token0: position.token0ClassKey ? `${position.token0ClassKey.collection}$${position.token0ClassKey.category}$${position.token0ClassKey.type}$${position.token0ClassKey.additionalKey}` : '',
       token1: position.token1ClassKey ? `${position.token1ClassKey.collection}$${position.token1ClassKey.category}$${position.token1ClassKey.type}$${position.token1ClassKey.additionalKey}` : '',
       fee: position.fee,
@@ -161,7 +167,7 @@ export class MarketMakingStrategy {
 
         // Check accumulated fees
         const fees = await this.calculateAccumulatedFees(position);
-        if (parseFloat(fees) > 0) {
+        if (safeParseFloat(fees, 0) > 0) {
           logger.info(`Fees accumulated: ${fees} for ${position.token0}/${position.token1}`);
           // TODO: Consider collecting fees
         }
@@ -213,9 +219,23 @@ export class MarketMakingStrategy {
    */
   private async isPositionInRange(position: LiquidityPosition): Promise<boolean> {
     try {
-      // TODO: Get current pool price and compare with position range
-      // This is a placeholder implementation
-      return Math.random() > 0.2; // 80% chance position is in range
+      // Get current pool price and compare with position range
+      const priceData0 = this.priceTracker.getPrice(position.token0);
+      const priceData1 = this.priceTracker.getPrice(position.token1);
+
+      if (!priceData0 || !priceData1) {
+        logger.warn(`Could not get current price for ${position.token0}/${position.token1}`);
+        return false;
+      }
+
+      // Calculate relative price
+      const currentPrice = priceData0.price / priceData1.price;
+
+      // Convert ticks to prices for comparison
+      const priceLower = this.tickToPrice(position.tickLower);
+      const priceUpper = this.tickToPrice(position.tickUpper);
+
+      return currentPrice >= priceLower && currentPrice <= priceUpper;
 
     } catch (error) {
       logger.error('Error checking position range:', error);
@@ -228,9 +248,19 @@ export class MarketMakingStrategy {
    */
   private async calculateAccumulatedFees(position: LiquidityPosition): Promise<string> {
     try {
-      // TODO: Calculate actual accumulated fees
-      // This is a placeholder implementation
-      return (Math.random() * 10).toFixed(6);
+      // Calculate actual accumulated fees from position data
+      const fees0 = safeParseFloat(position.amount0, 0);
+      const fees1 = safeParseFloat(position.amount1, 0);
+
+      // Get token prices to calculate USD value
+      const priceData0 = this.priceTracker.getPrice(position.token0);
+      const priceData1 = this.priceTracker.getPrice(position.token1);
+
+      const price0 = priceData0?.price || 0;
+      const price1 = priceData1?.price || 0;
+
+      const totalFeesUSD = (fees0 * price0) + (fees1 * price1);
+      return totalFeesUSD.toFixed(6);
 
     } catch (error) {
       logger.error('Error calculating fees:', error);
@@ -251,6 +281,15 @@ export class MarketMakingStrategy {
   }
 
   /**
+   * Convert tick to price (simplified conversion)
+   */
+  private tickToPrice(tick: number): number {
+    // Simplified tick-to-price conversion
+    // In Uniswap V3, price = 1.0001^tick
+    return Math.pow(1.0001, tick);
+  }
+
+  /**
    * Get strategy status
    */
   getStatus(): any {
@@ -258,7 +297,7 @@ export class MarketMakingStrategy {
       isActive: this.isActive,
       activePositions: this.positions.length,
       totalLiquidity: this.positions.reduce(
-        (total, pos) => total + parseFloat(pos.liquidity),
+        (total, pos) => total + safeParseFloat(pos.liquidity, 0),
         0
       ),
       lastCheck: new Date().toISOString(),

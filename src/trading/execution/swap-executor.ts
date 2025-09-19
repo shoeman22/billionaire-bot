@@ -6,6 +6,7 @@
 import { GalaSwapClient } from '../../api/GalaSwapClient';
 import { SlippageProtection, SlippageAnalysis } from '../risk/slippage';
 import { logger } from '../../utils/logger';
+import { safeParseFloat } from '../../utils/safe-parse';
 import {
   QuoteRequest,
   QuoteResponse,
@@ -201,8 +202,8 @@ export class SwapExecutor {
       return false;
     }
 
-    const amount = parseFloat(request.amountIn);
-    if (isNaN(amount) || amount <= 0) {
+    const amount = safeParseFloat(request.amountIn, 0);
+    if (amount <= 0) {
       logger.error('Invalid amount for quote');
       return false;
     }
@@ -224,8 +225,8 @@ export class SwapExecutor {
       return false;
     }
 
-    const amountOut = parseFloat(quote.data.amountOut);
-    if (isNaN(amountOut) || amountOut <= 0) {
+    const amountOut = safeParseFloat(quote.data.amountOut, 0);
+    if (amountOut <= 0) {
       logger.error('Invalid amount out in quote response');
       return false;
     }
@@ -242,21 +243,24 @@ export class SwapExecutor {
   ): Promise<SlippageAnalysis> {
     // Get current market price
     const priceResponse = await this.galaSwapClient.getPrice(request.tokenIn);
-    const currentPrice = parseFloat(priceResponse.data.price);
+    const currentPrice = safeParseFloat(priceResponse.data.price, 0);
 
     // Calculate quoted price
-    const amountIn = parseFloat(request.amountIn);
-    const amountOut = parseFloat(quote.data.amountOut);
-    const quotedPrice = amountOut / amountIn;
+    const amountIn = safeParseFloat(request.amountIn, 0);
+    const amountOut = safeParseFloat(quote.data.amountOut, 0);
+    const quotedPrice = amountIn > 0 ? amountOut / amountIn : 0;
+
+    // Get real market data for analysis
+    const marketData = await this.getMarketData(request.tokenIn, request.tokenOut);
 
     // Prepare trade parameters for analysis
     const tradeParams = {
       tokenIn: request.tokenIn,
       tokenOut: request.tokenOut,
       amountIn: request.amountIn,
-      poolLiquidity: '1000000', // TODO: Get actual pool liquidity
-      volatility24h: 0.05, // TODO: Get actual volatility
-      volume24h: '100000', // TODO: Get actual volume
+      poolLiquidity: marketData.poolLiquidity,
+      volatility24h: marketData.volatility24h,
+      volume24h: marketData.volume24h,
     };
 
     return this.slippageProtection.analyzeSlippage(
@@ -276,7 +280,7 @@ export class SwapExecutor {
       }
 
       // Enhanced slippage calculation with bounds checking
-      const expectedOutput = parseFloat(quote.data.amountOut);
+      const expectedOutput = safeParseFloat(quote.data.amountOut, 0);
       const slippageTolerance = request.slippageTolerance || 0.01;
 
       // Validate slippage tolerance
@@ -287,7 +291,7 @@ export class SwapExecutor {
       const minimumAmountOut = (expectedOutput * (1 - slippageTolerance)).toString();
 
       // Validate minimum amount is reasonable
-      if (parseFloat(minimumAmountOut) <= 0) {
+      if (safeParseFloat(minimumAmountOut, 0) <= 0) {
         throw new Error('Calculated minimum amount out is invalid');
       }
 
@@ -351,15 +355,15 @@ export class SwapExecutor {
       throw new Error('Missing token information in payload request');
     }
 
-    if (!request.amountIn || parseFloat(request.amountIn) <= 0) {
+    if (!request.amountIn || safeParseFloat(request.amountIn, 0) <= 0) {
       throw new Error('Invalid amount in payload request');
     }
 
-    if (!request.amountOutMinimum || parseFloat(request.amountOutMinimum) <= 0) {
+    if (!request.amountOutMinimum || safeParseFloat(request.amountOutMinimum, 0) <= 0) {
       throw new Error('Invalid minimum amount out in payload request');
     }
 
-    if (parseFloat(request.amountIn) < parseFloat(request.amountOutMinimum)) {
+    if (safeParseFloat(request.amountIn, 0) < safeParseFloat(request.amountOutMinimum, 0)) {
       logger.warn('Amount in is less than minimum amount out - this may indicate an issue');
     }
   }
@@ -787,8 +791,8 @@ export class SwapExecutor {
       return false;
     }
 
-    const amount = parseFloat(request.amountIn);
-    if (isNaN(amount) || amount <= 0) {
+    const amount = safeParseFloat(request.amountIn, 0);
+    if (amount <= 0) {
       return false;
     }
 
@@ -827,7 +831,7 @@ export class SwapExecutor {
 
         // Analyze price execution if data is available
         if ((executionData as any).executedPrice) {
-          const actualPrice = parseFloat((executionData as any).executedPrice);
+          const actualPrice = safeParseFloat((executionData as any).executedPrice, 0);
           analysis.executedPrice = actualPrice;
 
           const slippageCheck = this.slippageProtection.monitorExecutionSlippage(
@@ -972,6 +976,69 @@ export class SwapExecutor {
     }
 
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Get real market data for trade analysis
+   */
+  private async getMarketData(tokenIn: string, tokenOut: string): Promise<{
+    poolLiquidity: string;
+    volatility24h: number;
+    volume24h: string;
+  }> {
+    try {
+      // Get pool information to extract liquidity
+      const poolResponse = await this.galaSwapClient.getPool(tokenIn, tokenOut, 3000); // Standard fee tier
+
+      let poolLiquidity = '1000000'; // Default fallback
+      if (poolResponse && !poolResponse.error && poolResponse.data) {
+        // Use TVL as a proxy for liquidity, or fallback to default
+        poolLiquidity = poolResponse.data.Data?.tvl || poolResponse.data.Data?.grossPoolLiquidity || poolLiquidity;
+      }
+
+      // Get price history for volatility calculation
+      const priceHistory = await this.galaSwapClient.fetchPriceHistory?.({
+        token: tokenIn,
+        limit: 24,
+        order: 'desc'
+      });
+      let volatility24h = 0.05; // Default 5% volatility
+
+      if (priceHistory && !priceHistory.error && priceHistory.data && Array.isArray(priceHistory.data)) {
+        // Calculate volatility from price history
+        const prices = priceHistory.data.map(p => safeParseFloat(p.price || '0', 0)).filter(p => p > 0);
+        if (prices.length > 1) {
+          const returns = prices.slice(1).map((price, i) => Math.log(price / prices[i]));
+          const avgReturn = returns.reduce((sum, r) => sum + r, 0) / returns.length;
+          const variance = returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / returns.length;
+          volatility24h = Math.sqrt(variance);
+        }
+      }
+
+      // Calculate 24h volume (simplified - would need historical trade data)
+      let volume24h = '100000'; // Default fallback
+      if (poolResponse && !poolResponse.error && poolResponse.data) {
+        // Estimate volume from liquidity (very simplified)
+        const liquidity = safeParseFloat(poolLiquidity, 0);
+        volume24h = (liquidity * 0.1).toString(); // Assume 10% turnover rate
+      }
+
+      return {
+        poolLiquidity,
+        volatility24h,
+        volume24h
+      };
+
+    } catch (error) {
+      logger.error('Error getting market data:', error);
+
+      // Return safe defaults on error
+      return {
+        poolLiquidity: '1000000',
+        volatility24h: 0.05,
+        volume24h: '100000'
+      };
+    }
   }
 
   /**

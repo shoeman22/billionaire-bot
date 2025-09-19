@@ -14,20 +14,24 @@ jest.mock('../../utils/logger');
 jest.mock('../../utils/signing');
 jest.mock('../endpoints');
 
+// Create mock implementations
+const mockHttpClient = {
+  request: jest.fn() as jest.MockedFunction<any>,
+  interceptors: {
+    request: { use: jest.fn() },
+    response: { use: jest.fn() }
+  },
+  get: jest.fn() as jest.MockedFunction<any>
+};
+
 const mockAxios = {
-  create: jest.fn(() => ({
-    request: jest.fn(),
-    interceptors: {
-      request: { use: jest.fn() },
-      response: { use: jest.fn() }
-    },
-    get: jest.fn()
-  })),
+  create: jest.fn(() => mockHttpClient),
   isAxiosError: jest.fn()
 };
 
 const mockSocket = {
   on: jest.fn(),
+  once: jest.fn(),  // Add this - socket.io uses once() for one-time events
   off: jest.fn(),
   emit: jest.fn(),
   connected: true,
@@ -38,12 +42,16 @@ const mockSocket = {
 const mockIo = jest.fn(() => mockSocket);
 
 // Setup mocks
-require('axios').__setMockImplementation(mockAxios);
+jest.mock('axios');
+jest.mock('socket.io-client');
+
+const mockedAxios = jest.mocked(require('axios'));
+mockedAxios.create = mockAxios.create;
+mockedAxios.isAxiosError = mockAxios.isAxiosError;
 require('socket.io-client').io = mockIo;
 
 describe('Enhanced GalaSwapClient', () => {
   let client: GalaSwapClient;
-  let mockHttpClient: any;
 
   const clientConfig = {
     baseUrl: 'https://api.galaswap.com',
@@ -55,15 +63,9 @@ describe('Enhanced GalaSwapClient', () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
-    mockHttpClient = {
-      request: jest.fn(),
-      interceptors: {
-        request: { use: jest.fn() },
-        response: { use: jest.fn() }
-      },
-      get: jest.fn()
-    };
-
+    // Reset mock implementations
+    mockHttpClient.request.mockReset();
+    mockHttpClient.get.mockReset();
     mockAxios.create.mockReturnValue(mockHttpClient);
 
     // Mock endpoints module
@@ -76,10 +78,18 @@ describe('Enhanced GalaSwapClient', () => {
       errors: []
     });
     require('../endpoints').buildQueryUrl = jest.fn().mockImplementation((endpoint, params) => {
-      return endpoint + '?' + new URLSearchParams(params).toString();
+      return endpoint + '?' + new URLSearchParams(params as Record<string, string>).toString();
     });
 
     client = new GalaSwapClient(clientConfig);
+  });
+
+  afterEach(() => {
+    // Cleanup any timers or promises - only if fake timers are active
+    if (jest.isMockFunction(setTimeout)) {
+      jest.runOnlyPendingTimers();
+      jest.useRealTimers();
+    }
   });
 
   describe('Enhanced Error Recovery', () => {
@@ -100,7 +110,7 @@ describe('Enhanced GalaSwapClient', () => {
         return await mockHttpClient.request({ method: 'GET', url: '/test' });
       });
 
-      expect(result).toEqual({ success: true });
+      expect(result).toEqual({ data: { success: true } });
       expect(mockHttpClient.request).toHaveBeenCalledTimes(3);
     });
 
@@ -108,7 +118,8 @@ describe('Enhanced GalaSwapClient', () => {
       const mockError = {
         response: { status: 400 },
         config: {},
-        isAxiosError: true
+        isAxiosError: true,
+        message: 'Bad Request'
       };
 
       mockHttpClient.request.mockRejectedValue(mockError);
@@ -135,7 +146,7 @@ describe('Enhanced GalaSwapClient', () => {
         return await mockHttpClient.request({ method: 'GET', url: '/test' });
       });
 
-      expect(result).toEqual({ success: true });
+      expect(result).toEqual({ data: { success: true } });
       expect(mockHttpClient.request).toHaveBeenCalledTimes(2);
     });
 
@@ -210,8 +221,11 @@ describe('Enhanced GalaSwapClient', () => {
       const connectPromise = client.connectWebSocket();
 
       // Simulate successful connection
-      const connectHandler = mockSocket.on.mock.calls.find(call => call[0] === 'connect')[1];
-      connectHandler();
+      const connectCall = mockSocket.once.mock.calls.find(call => call[0] === 'connect');
+      const connectHandler = connectCall?.[1] as (() => void) | undefined;
+      if (connectHandler) {
+        connectHandler();
+      }
 
       await expect(connectPromise).resolves.toBeUndefined();
 
@@ -226,8 +240,11 @@ describe('Enhanced GalaSwapClient', () => {
       const connectPromise = client.connectWebSocket();
 
       // Simulate connection error
-      const errorHandler = mockSocket.on.mock.calls.find(call => call[0] === 'connect_error')[1];
-      errorHandler(new Error('Connection failed'));
+      const errorCall = mockSocket.on.mock.calls.find(call => call[0] === 'connect_error');
+      const errorHandler = errorCall?.[1] as ((error: Error) => void) | undefined;
+      if (errorHandler) {
+        errorHandler(new Error('Connection failed'));
+      }
 
       await expect(connectPromise).rejects.toThrow('Connection failed');
     });
@@ -235,13 +252,19 @@ describe('Enhanced GalaSwapClient', () => {
     test('should handle websocket disconnections gracefully', async () => {
       // Connect first
       const connectPromise = client.connectWebSocket();
-      const connectHandler = mockSocket.on.mock.calls.find(call => call[0] === 'connect')[1];
-      connectHandler();
+      const connectCall = mockSocket.on.mock.calls.find(call => call[0] === 'connect');
+      const connectHandler = connectCall?.[1] as (() => void) | undefined;
+      if (connectHandler) {
+        connectHandler();
+      }
       await connectPromise;
 
       // Simulate server disconnect
-      const disconnectHandler = mockSocket.on.mock.calls.find(call => call[0] === 'disconnect')[1];
-      disconnectHandler('io server disconnect');
+      const disconnectCall = mockSocket.on.mock.calls.find(call => call[0] === 'disconnect');
+      const disconnectHandler = disconnectCall?.[1] as ((reason: string) => void) | undefined;
+      if (disconnectHandler) {
+        disconnectHandler('io server disconnect');
+      }
 
       // Should attempt reconnection for server disconnects
       expect(mockSocket.on).toHaveBeenCalledWith('disconnect', expect.any(Function));
@@ -250,8 +273,11 @@ describe('Enhanced GalaSwapClient', () => {
     test('should clean up websocket connections properly', async () => {
       // Connect first
       const connectPromise = client.connectWebSocket();
-      const connectHandler = mockSocket.on.mock.calls.find(call => call[0] === 'connect')[1];
-      connectHandler();
+      const connectCall = mockSocket.on.mock.calls.find(call => call[0] === 'connect');
+      const connectHandler = connectCall?.[1] as (() => void) | undefined;
+      if (connectHandler) {
+        connectHandler();
+      }
       await connectPromise;
 
       // Disconnect
@@ -269,15 +295,18 @@ describe('Enhanced GalaSwapClient', () => {
       const monitorPromise = client.monitorTransaction('tx123');
 
       // Simulate transaction update
-      const updateHandler = mockSocket.on.mock.calls.find(call => call[0] === 'transaction_update')[1];
-      updateHandler({
-        transactionId: 'tx123',
-        status: 'CONFIRMED'
-      });
+      const updateCall = mockSocket.on.mock.calls.find(call => call[0] === 'transaction_update');
+      const updateHandler = updateCall?.[1] as ((data: any) => void) | undefined;
+      if (updateHandler) {
+        updateHandler({
+          transactionId: 'tx123',
+          status: 'CONFIRMED'
+        });
+      }
 
       const result = await monitorPromise;
 
-      expect(result.success).toBe(true);
+      expect(result.error).toBe(false);
       expect(result.data.id).toBe('tx123');
       expect(mockSocket.emit).toHaveBeenCalledWith('subscribe_transaction', { transactionId: 'tx123' });
     });
@@ -301,7 +330,7 @@ describe('Enhanced GalaSwapClient', () => {
 
       const result = await client.monitorTransaction('tx123', 10000, 1000);
 
-      expect(result.success).toBe(true);
+      expect(result.error).toBe(false);
       expect(result.data.status).toBe('CONFIRMED');
       expect(mockHttpClient.request).toHaveBeenCalledTimes(2);
     });
@@ -325,11 +354,14 @@ describe('Enhanced GalaSwapClient', () => {
       const monitorPromise = client.monitorTransaction('tx123');
 
       // Simulate failed transaction
-      const updateHandler = mockSocket.on.mock.calls.find(call => call[0] === 'transaction_update')[1];
-      updateHandler({
-        transactionId: 'tx123',
-        status: 'FAILED'
-      });
+      const updateCall = mockSocket.on.mock.calls.find(call => call[0] === 'transaction_update');
+      const updateHandler = updateCall?.[1] as ((data: any) => void) | undefined;
+      if (updateHandler) {
+        updateHandler({
+          transactionId: 'tx123',
+          status: 'FAILED'
+        });
+      }
 
       await expect(monitorPromise).rejects.toThrow('Transaction failed');
     });
@@ -351,7 +383,7 @@ describe('Enhanced GalaSwapClient', () => {
       const result = await client.monitorTransaction('tx123', 30000, 100);
       const elapsed = Date.now() - startTime;
 
-      expect(result.success).toBe(true);
+      expect(result.error).toBe(false);
       expect(elapsed).toBeGreaterThan(300); // Should have waited for backoff
     });
   });
@@ -359,10 +391,10 @@ describe('Enhanced GalaSwapClient', () => {
   describe('Rate Limiting Integration', () => {
     test('should respect rate limits', async () => {
       // Create a client with low rate limits for testing
-      const rateLimitedConfig = {
-        ...clientConfig,
-        rateLimit: { requestsPerSecond: 1, burstLimit: 1 }
-      };
+      // const rateLimitedConfig = {
+      //   ...clientConfig,
+      //   rateLimit: { requestsPerSecond: 1, burstLimit: 1 }
+      // };
 
       // Mock the rate limiter to return rate limited
       const checkSpy = jest.spyOn(RateLimiterManager.prototype, 'waitForEndpointLimit')
@@ -462,7 +494,7 @@ describe('Enhanced GalaSwapClient', () => {
 
       const result = await client.waitForTransaction('tx123');
 
-      expect(result.success).toBe(true);
+      expect(result.error).toBe(false);
       expect(result.data.status).toBe('CONFIRMED');
     });
 
@@ -505,7 +537,8 @@ describe('Enhanced GalaSwapClient', () => {
       }
 
       // Simulate connections
-      const connectHandler = mockSocket.on.mock.calls.find(call => call[0] === 'connect')[1];
+      const connectCall = mockSocket.on.mock.calls.find(call => call[0] === 'connect');
+      const connectHandler = connectCall?.[1] as (() => void) | undefined;
       if (connectHandler) {
         connectHandler();
       }

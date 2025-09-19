@@ -5,6 +5,7 @@
 
 import { TradingConfig } from '../../config/environment';
 import { logger } from '../../utils/logger';
+import { safeParseFloat } from '../../utils/safe-parse';
 
 export interface SlippageAnalysis {
   currentPrice: number;
@@ -82,8 +83,8 @@ export class SlippageProtection {
    */
   private calculatePriceImpact(tradeParams: TradeParameters): number {
     try {
-      const amountIn = parseFloat(tradeParams.amountIn);
-      const poolLiquidity = parseFloat(tradeParams.poolLiquidity);
+      const amountIn = safeParseFloat(tradeParams.amountIn, 0);
+      const poolLiquidity = safeParseFloat(tradeParams.poolLiquidity, 0);
 
       if (poolLiquidity === 0) {
         return 1; // 100% impact if no liquidity
@@ -109,8 +110,8 @@ export class SlippageProtection {
    */
   private assessMarketCondition(tradeParams: TradeParameters): 'normal' | 'volatile' | 'illiquid' {
     const volatility = tradeParams.volatility24h;
-    const volume24h = parseFloat(tradeParams.volume24h);
-    const poolLiquidity = parseFloat(tradeParams.poolLiquidity);
+    const volume24h = safeParseFloat(tradeParams.volume24h, 0);
+    const poolLiquidity = safeParseFloat(tradeParams.poolLiquidity, 0);
 
     // Check for illiquidity
     if (volume24h < poolLiquidity * 0.1) { // Less than 10% of liquidity traded in 24h
@@ -204,8 +205,8 @@ export class SlippageProtection {
     expectedSlippage: number;
     splits: number;
   } {
-    const originalAmount = parseFloat(tradeParams.amountIn);
-    const poolLiquidity = parseFloat(tradeParams.poolLiquidity);
+    const originalAmount = safeParseFloat(tradeParams.amountIn, 0);
+    const poolLiquidity = safeParseFloat(tradeParams.poolLiquidity, 0);
 
     // Calculate amount that would result in target slippage
     const targetAmount = poolLiquidity * maxSlippage;
@@ -490,9 +491,9 @@ export class SlippageProtection {
     recommendation: string;
   } {
     try {
-      const amountIn = parseFloat(tradeParams.amountIn);
-      const poolLiquidity = parseFloat(tradeParams.poolLiquidity);
-      const volume24h = parseFloat(tradeParams.volume24h);
+      const amountIn = safeParseFloat(tradeParams.amountIn, 0);
+      const poolLiquidity = safeParseFloat(tradeParams.poolLiquidity, 0);
+      const volume24h = safeParseFloat(tradeParams.volume24h, 0);
 
       // More sophisticated price impact calculation
       const liquidityRatio = amountIn / poolLiquidity;
@@ -618,9 +619,9 @@ export class SlippageProtection {
     protectionRecommendations: string[];
     delayRecommendation?: number; // milliseconds
   } {
-    const amountIn = parseFloat(tradeParams.amountIn);
-    const poolLiquidity = parseFloat(tradeParams.poolLiquidity);
-    const impactRatio = amountIn / poolLiquidity;
+    const amountIn = safeParseFloat(tradeParams.amountIn, 0);
+    const poolLiquidity = safeParseFloat(tradeParams.poolLiquidity, 0);
+    const impactRatio = poolLiquidity > 0 ? amountIn / poolLiquidity : 0;
 
     let riskLevel: 'low' | 'medium' | 'high';
     const protectionRecommendations: string[] = [];
@@ -663,7 +664,7 @@ export class SlippageProtection {
     estimatedTotalImpact: number;
     timeEstimate: number; // minutes
   } {
-    const poolLiquidity = parseFloat(tradeParams.poolLiquidity);
+    const poolLiquidity = safeParseFloat(tradeParams.poolLiquidity, 0);
 
     // Calculate optimal chunk size to stay under impact threshold
     const maxChunkSize = poolLiquidity * maxAcceptableImpact;
@@ -734,7 +735,7 @@ export class SlippageProtection {
 
     // Trade splitting recommendation
     const splittingRecommendation = this.recommendTradeSplitting(
-      parseFloat(tradeParams.amountIn),
+      safeParseFloat(tradeParams.amountIn, 0),
       tradeParams
     );
 
