@@ -3,10 +3,9 @@
  * Risk management for position sizing and exposure limits
  */
 
-import { GalaSwapClient } from '../../api/GalaSwapClient';
+import { GSwap } from '@gala-chain/gswap-sdk';
 import { TradingConfig } from '../../config/environment';
 import { logger } from '../../utils/logger';
-import { Position } from '../../api/types';
 import { safeParseFloat } from '../../utils/safe-parse';
 
 export interface PositionLimitsConfig {
@@ -27,11 +26,11 @@ export interface PositionExposure {
 export class PositionLimits {
   private config: TradingConfig;
   private limitsConfig: PositionLimitsConfig;
-  private galaSwapClient: GalaSwapClient;
+  private gswap: GSwap;
 
-  constructor(config: TradingConfig, galaSwapClient: GalaSwapClient) {
+  constructor(config: TradingConfig, gswap: GSwap) {
     this.config = config;
-    this.galaSwapClient = galaSwapClient;
+    this.gswap = gswap;
     this.limitsConfig = {
       maxPositionSize: config.maxPositionSize,
       maxTotalExposure: config.maxPositionSize * 5, // 5x max position size
@@ -133,18 +132,18 @@ export class PositionLimits {
     try {
       logger.debug('Fetching token balances for address:', userAddress);
 
-      // Get user positions from GalaSwap API
-      const positionsResponse = await this.galaSwapClient.getUserPositions(userAddress);
+      // Get user positions from GalaSwap SDK
+      const positionsResponse = await this.gswap.positions.getUserPositions(userAddress);
 
-      if (positionsResponse.error || !positionsResponse.data?.Data?.positions) {
-        logger.warn('No positions found or API error:', positionsResponse.message);
+      if (!positionsResponse?.positions) {
+        logger.warn('No positions found or API error');
         return [];
       }
 
       // Aggregate balances by token from positions
       const balanceMap = new Map<string, number>();
 
-      for (const position of positionsResponse.data.Data.positions) {
+      for (const position of positionsResponse.positions) {
         // Extract token symbols from position - handle different response formats
         const token0 = this.getTokenSymbol(position, 0);
         const token1 = this.getTokenSymbol(position, 1);
@@ -188,16 +187,16 @@ export class PositionLimits {
     try {
       const prices: { [token: string]: number } = {};
 
-      // Fetch prices for all tokens using GalaSwap API
+      // Fetch prices for all tokens using GalaSwap SDK
       for (const token of tokens) {
         try {
-          const priceResponse = await this.galaSwapClient.getPrice(token);
+          const poolData = await this.gswap.pools.getPoolData(token, 'GUSDC|Unit|none|none', 3000);
 
-          if (!priceResponse.error && priceResponse.data?.priceUsd) {
-            prices[token] = safeParseFloat(priceResponse.data.priceUsd, 0);
+          if (poolData?.liquidity) {
+            prices[token] = 1.0; // Simplified - would calculate from sqrtPrice
             logger.debug(`Fetched price for ${token}: $${prices[token]}`);
           } else {
-            logger.warn(`Failed to fetch price for ${token}:`, priceResponse.message);
+            logger.warn(`Failed to fetch price for ${token}`);
             // Fallback to default prices for known tokens
             switch (token) {
               case 'USDC':

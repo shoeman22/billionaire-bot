@@ -3,7 +3,7 @@
  * High-performance risk assessment with parallel calculations and caching
  */
 
-import { GalaSwapClient } from '../api/GalaSwapClient';
+import { GSwap } from '@gala-chain/gswap-sdk';
 import { TradingConfig } from '../config/environment';
 import { logger } from '../utils/logger';
 import { PerformanceMonitor } from './PerformanceMonitor';
@@ -41,8 +41,8 @@ export class OptimizedRiskMonitor extends RiskMonitor {
   private readonly RISK_CACHE_TTL = 30000; // 30 seconds
   private readonly PARALLEL_POSITION_PROCESSING = true;
 
-  constructor(config: TradingConfig, galaSwapClient: GalaSwapClient) {
-    super(config, galaSwapClient);
+  constructor(config: TradingConfig, gswap: GSwap) {
+    super(config, gswap);
     
     this.performanceMonitor = new PerformanceMonitor();
     this.priceCache = new PriceCache({
@@ -313,26 +313,26 @@ export class OptimizedRiskMonitor extends RiskMonitor {
     userAddress: string): Promise<{ token: string; amount: number }[]> {
     // Use cached balances if available, otherwise fetch fresh
     try {
-      const positionsResponse = await this.galaSwapClient.getUserPositions(userAddress);
+      const positionsResponse = await this.gswap.positions.getUserPositions(userAddress);
       
-      if (!positionsResponse || positionsResponse.error) {
+      if (!positionsResponse) {
         return [];
       }
 
       const tokenBalances = new Map<string, number>();
 
-      if (positionsResponse.data && positionsResponse.data.Data && positionsResponse.data.Data.positions) {
-        for (const position of positionsResponse.data.Data.positions) {
+      if (positionsResponse.positions) {
+        for (const position of positionsResponse.positions) {
           if (position.token0Symbol && position.liquidity) {
             const token0 = position.token0Symbol;
-            const liquidityAmount = parseFloat(position.liquidity) / 2;
+            const liquidityAmount = parseFloat(position.liquidity.toString()) / 2;
             const current = tokenBalances.get(token0) || 0;
             tokenBalances.set(token0, current + liquidityAmount);
           }
 
           if (position.token1Symbol && position.liquidity) {
             const token1 = position.token1Symbol;
-            const liquidityAmount = parseFloat(position.liquidity) / 2;
+            const liquidityAmount = parseFloat(position.liquidity.toString()) / 2;
             const current = tokenBalances.get(token1) || 0;
             tokenBalances.set(token1, current + liquidityAmount);
           }

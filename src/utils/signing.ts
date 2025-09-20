@@ -5,7 +5,7 @@
 
 import { createHash } from 'crypto';
 import { ec as EC } from 'elliptic';
-import { keccak256 } from 'js-sha3';
+import * as sha3 from 'js-sha3';
 import stringify from 'json-stringify-deterministic';
 import { logger } from './logger';
 
@@ -29,7 +29,7 @@ export interface SignedPayload extends SignablePayload {
 
 export class PayloadSigner {
   private privateKey: string;
-  private keyPair: EC.KeyPair;
+  private keyPair: EC.KeyPair; // EC KeyPair type
   private userAddress: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private galaChainSdk: any = null; // Will be dynamically loaded
@@ -170,7 +170,7 @@ export class PayloadSigner {
   private createKeccakHash(payloadString: string): Buffer {
     try {
       const payloadBuffer = Buffer.from(payloadString, 'utf8');
-      const hash = keccak256(payloadBuffer);
+      const hash = sha3.keccak256(payloadBuffer);
       // keccak256 returns a hex string, convert to buffer
       return Buffer.from(hash, 'hex');
 
@@ -436,7 +436,7 @@ export function deriveAddressFromPublicKey(publicKeyHex: string): string {
     const cleanPublicKey = publicKeyHex.startsWith('04') ? publicKeyHex.slice(2) : publicKeyHex;
 
     // Create keccak256 hash of public key
-    const hashHex = keccak256(Buffer.from(cleanPublicKey, 'hex'));
+    const hashHex = sha3.keccak256(Buffer.from(cleanPublicKey, 'hex'));
 
     // Take last 20 bytes and prepend 'eth|0x'
     const address = 'eth|0x' + hashHex.slice(-40);

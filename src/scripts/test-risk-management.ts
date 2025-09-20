@@ -11,7 +11,7 @@ import { validateEnvironment } from '../config/environment';
 
 // Load environment variables
 config();
-import { GalaSwapClient } from '../api/GalaSwapClient';
+import { GSwap, PrivateKeySigner } from '@gala-chain/gswap-sdk';
 import { PositionLimits } from '../trading/risk/position-limits';
 import { SlippageProtection } from '../trading/risk/slippage';
 import { RiskMonitor } from '../trading/risk/risk-monitor';
@@ -27,17 +27,18 @@ async function testRiskManagementSystem(): Promise<void> {
     const config = validateEnvironment();
     logger.info('✅ Environment configuration validated');
 
-    // Initialize GalaSwap client
-    const galaSwapClient = new GalaSwapClient({
-      baseUrl: config.api.baseUrl,
-      wsUrl: config.api.wsUrl,
+    // Initialize GSwap SDK
+    const gswap = new GSwap({
+      signer: new PrivateKeySigner(config.wallet.privateKey),
       walletAddress: config.wallet.address,
-      privateKey: config.wallet.privateKey
+      gatewayBaseUrl: config.api.baseUrl,
+      dexBackendBaseUrl: config.api.baseUrl,
+      bundlerBaseUrl: config.api.baseUrl.replace('dex-backend', 'bundle-backend')
     });
 
     // Test 1: Position Limits System
     logger.info('🧪 Testing Position Limits System...');
-    const positionLimits = new PositionLimits(config.trading, galaSwapClient);
+    const positionLimits = new PositionLimits(config.trading, gswap);
 
     // Test limits checking
     const limitsTest = await positionLimits.checkLimits(config.wallet.address);
@@ -93,7 +94,7 @@ async function testRiskManagementSystem(): Promise<void> {
 
     // Test 3: Risk Monitor System
     logger.info('🧪 Testing Risk Monitor System...');
-    const riskMonitor = new RiskMonitor(config.trading, galaSwapClient);
+    const riskMonitor = new RiskMonitor(config.trading, gswap);
 
     // Test comprehensive risk check
     const riskCheck = await riskMonitor.performRiskCheck(config.wallet.address);
@@ -130,11 +131,11 @@ async function testRiskManagementSystem(): Promise<void> {
     logger.info('🧪 Testing Emergency Controls System...');
 
     // Initialize required dependencies for emergency controls
-    const swapExecutor = new SwapExecutor(galaSwapClient, slippageProtection);
-    const liquidityManager = new LiquidityManager(galaSwapClient);
+    const swapExecutor = new SwapExecutor(gswap, slippageProtection);
+    const liquidityManager = new LiquidityManager(gswap);
     const emergencyControls = new EmergencyControls(
       config.trading,
-      galaSwapClient,
+      gswap,
       swapExecutor,
       liquidityManager
     );

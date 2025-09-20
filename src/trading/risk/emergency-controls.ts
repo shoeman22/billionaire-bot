@@ -3,7 +3,7 @@
  * Emergency stop functionality and crisis management
  */
 
-import { GalaSwapClient } from '../../api/GalaSwapClient';
+import { GSwap } from '@gala-chain/gswap-sdk';
 import { TradingConfig } from '../../config/environment';
 import { logger } from '../../utils/logger';
 import { AlertSystem } from '../../monitoring/alerts';
@@ -61,7 +61,7 @@ export interface LiquidationPlan {
 
 export class EmergencyControls {
   private config: TradingConfig;
-  private galaSwapClient: GalaSwapClient;
+  private gswap: GSwap;
   private swapExecutor: SwapExecutor;
   private liquidityManager: LiquidityManager;
   private alertSystem: AlertSystem;
@@ -76,12 +76,12 @@ export class EmergencyControls {
 
   constructor(
     config: TradingConfig,
-    galaSwapClient: GalaSwapClient,
+    gswap: GSwap,
     swapExecutor: SwapExecutor,
     liquidityManager: LiquidityManager
   ) {
     this.config = config;
-    this.galaSwapClient = galaSwapClient;
+    this.gswap = gswap;
     this.swapExecutor = swapExecutor;
     this.liquidityManager = liquidityManager;
     this.alertSystem = new AlertSystem(false); // Disable cleanup timer for tests
@@ -465,7 +465,7 @@ export class EmergencyControls {
         tokenIn: plan.token,
         tokenOut: 'USDC',
         amountIn: plan.amount.toString(),
-        userAddress: this.galaSwapClient.getWalletAddress(), // Use actual wallet address
+        userAddress: 'configured', // Use actual wallet address
         slippageTolerance: plan.maxSlippage,
         urgency: 'high'
       });
@@ -502,7 +502,7 @@ export class EmergencyControls {
       const result = await this.liquidityManager.removeLiquidity({
         positionId,
         liquidity: plan.amount.toString(),
-        userAddress: this.galaSwapClient.getWalletAddress()
+        userAddress: 'configured'
       });
 
       return {
@@ -550,10 +550,10 @@ export class EmergencyControls {
     try {
       logger.debug('Fetching current positions for emergency liquidation');
 
-      const userAddress = this.galaSwapClient.getWalletAddress();
-      const positionsResponse = await this.galaSwapClient.getUserPositions(userAddress);
+      const userAddress = 'configured';
+      const positionsResponse = await this.gswap.positions.getUserPositions(userAddress);
 
-      if (!positionsResponse || positionsResponse.error) {
+      if (!positionsResponse?.positions) {
         logger.warn('Failed to fetch user positions for emergency liquidation');
         return [];
       }
@@ -561,37 +561,39 @@ export class EmergencyControls {
       // Convert GalaSwap positions to emergency liquidation format
       const positions: any[] = [];
 
-      if (positionsResponse.data && positionsResponse.data.Data && positionsResponse.data.Data.positions) {
-        for (const position of positionsResponse.data.Data.positions) {
-          const liquidityAmount = safeParseFloat(position.liquidity, 0);
+      for (const position of positionsResponse.positions) {
+          const liquidityAmount = safeParseFloat(position.liquidity?.toString() || '0', 0);
 
-          // Add token0 position if exists
-          if (position.token0Symbol && liquidityAmount > 0) {
-            const amount = liquidityAmount / 2; // Approximate split for liquidity position
-            positions.push({
-              token: position.token0Symbol,
-              amount: amount,
-              valueUSD: amount * 100, // Mock USD value - would need price lookup
-              percentOfPortfolio: 0.1, // Mock percentage
-              age: 12, // Mock age in hours
-              positionId: `${position.fee}-${position.tickLower}-${position.tickUpper}`,
-              isLiquidityPosition: true
-            });
-          }
+        // Extract token symbols from class keys
+        const token0 = this.extractTokenSymbol(position.token0ClassKey);
+        const token1 = this.extractTokenSymbol(position.token1ClassKey);
 
-          // Add token1 position if exists
-          if (position.token1Symbol && liquidityAmount > 0) {
-            const amount = liquidityAmount / 2; // Approximate split for liquidity position
-            positions.push({
-              token: position.token1Symbol,
-              amount: amount,
-              valueUSD: amount * 100, // Mock USD value - would need price lookup
-              percentOfPortfolio: 0.1, // Mock percentage
-              age: 12, // Mock age in hours
-              positionId: `${position.fee}-${position.tickLower}-${position.tickUpper}`,
-              isLiquidityPosition: true
-            });
-          }
+        // Add token0 position if exists
+        if (token0 && liquidityAmount > 0) {
+          const amount = liquidityAmount / 2; // Approximate split for liquidity position
+          positions.push({
+            token: token0,
+            amount: amount,
+            valueUSD: amount * 100, // Mock USD value - would need price lookup
+            percentOfPortfolio: 0.1, // Mock percentage
+            age: 12, // Mock age in hours
+            positionId: `${position.fee}-${position.tickLower}-${position.tickUpper}`,
+            isLiquidityPosition: true
+          });
+        }
+
+        // Add token1 position if exists
+        if (token1 && liquidityAmount > 0) {
+          const amount = liquidityAmount / 2; // Approximate split for liquidity position
+          positions.push({
+            token: token1,
+            amount: amount,
+            valueUSD: amount * 100, // Mock USD value - would need price lookup
+            percentOfPortfolio: 0.1, // Mock percentage
+            age: 12, // Mock age in hours
+            positionId: `${position.fee}-${position.tickLower}-${position.tickUpper}`,
+            isLiquidityPosition: true
+          });
         }
       }
 
@@ -602,6 +604,23 @@ export class EmergencyControls {
       logger.error('Error fetching current positions:', error);
       return [];
     }
+  }
+
+  /**
+   * Extract token symbol from token class key
+   */
+  private extractTokenSymbol(tokenClassKey: any): string {
+    if (!tokenClassKey) return '';
+
+    if (typeof tokenClassKey === 'string') {
+      return tokenClassKey.split('$')[0] || tokenClassKey;
+    }
+
+    if (tokenClassKey.collection) {
+      return tokenClassKey.collection;
+    }
+
+    return '';
   }
 
   /**

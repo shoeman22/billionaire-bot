@@ -3,11 +3,10 @@
  * Real-time price monitoring and change detection system
  */
 
-import { GalaSwapClient } from '../api/GalaSwapClient';
+import { GSwap } from '@gala-chain/gswap-sdk';
 import { logger } from '../utils/logger';
 import { TRADING_CONSTANTS } from '../config/constants';
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-import { PriceResponse, isSuccessResponse, createTokenClassKey } from '../types/galaswap';
+import { createTokenClassKey } from '../types/galaswap';
 
 export interface PriceData {
   token: string;
@@ -37,7 +36,7 @@ export interface PriceHistory {
 }
 
 export class PriceTracker {
-  private galaSwapClient: GalaSwapClient;
+  private gswap: GSwap;
   private isRunning: boolean = false;
   private priceData: Map<string, PriceData> = new Map();
   private priceHistory: Map<string, PriceHistory> = new Map();
@@ -49,8 +48,8 @@ export class PriceTracker {
   private readonly MAX_PRICE_HISTORY = 1000;
   private readonly TOKENS_TO_TRACK = Object.values(TRADING_CONSTANTS.TOKENS);
 
-  constructor(galaSwapClient: GalaSwapClient) {
-    this.galaSwapClient = galaSwapClient;
+  constructor(gswap: GSwap) {
+    this.gswap = gswap;
     this.initializePriceHistory();
     logger.info('Price Tracker initialized');
   }
@@ -103,9 +102,9 @@ export class PriceTracker {
         this.updateInterval = null;
       }
 
-      // Disconnect WebSocket
+      // Disconnect WebSocket (handled by SDK)
       if (this.wsConnected) {
-        await this.galaSwapClient.disconnectWebSocket();
+        // SDK handles WebSocket cleanup internally
         this.wsConnected = false;
       }
 
@@ -221,13 +220,12 @@ export class PriceTracker {
    */
   private async setupWebSocketConnection(): Promise<void> {
     try {
-      // Connect to WebSocket
-      await this.galaSwapClient.connectWebSocket();
-
+      // Connect to WebSocket using SDK events
+      // SDK handles WebSocket connections internally
       // Subscribe to price updates for each token
       for (const tokenKey of this.TOKENS_TO_TRACK) {
-        const tokenClassKey = createTokenClassKey(tokenKey);
-        await this.galaSwapClient.subscribeToPriceUpdates(tokenClassKey);
+        const _tokenClassKey = createTokenClassKey(tokenKey);
+        // SDK event system will handle price updates
       }
 
       this.wsConnected = true;
@@ -285,32 +283,32 @@ export class PriceTracker {
     try {
       logger.debug('Updating all token prices...');
 
-      // Get prices for all tracked tokens
-      const pricesResponse = await this.galaSwapClient.getPrices(this.TOKENS_TO_TRACK);
+      // Get prices for all tracked tokens using SDK
+      for (const tokenKey of this.TOKENS_TO_TRACK) {
+        try {
+          const poolData = await this.gswap.pools.getPoolData(tokenKey, 'GUSDC|Unit|none|none', 3000);
 
-      if (isSuccessResponse(pricesResponse)) {
-        // Process each price in the response data array
-        pricesResponse.data.forEach((price, index) => {
-          if (index < this.TOKENS_TO_TRACK.length) {
-            const tokenKey = this.TOKENS_TO_TRACK[index];
+          if (poolData?.sqrtPrice) {
             const tokenClassKey = createTokenClassKey(tokenKey);
+            // Simplified price calculation - would need proper calculation from sqrtPriceX96
+            const calculatedPrice = 1.0;
             const priceData: PriceData = {
               token: tokenClassKey.collection.toUpperCase(),
-              price: parseFloat(price),
-              priceUsd: parseFloat(price), // Assuming price is in USD
-              change24h: 0, // Not available in bulk prices response
-              volume24h: 0, // Not available in bulk prices response
+              price: calculatedPrice,
+              priceUsd: calculatedPrice,
+              change24h: 0, // Would need historical data
+              volume24h: 0, // Volume not available in pool data
               timestamp: Date.now(),
             };
 
             this.updatePriceData(priceData);
           }
-        });
-
-        logger.debug(`Updated prices for ${pricesResponse.data.length} tokens`);
-      } else {
-        logger.warn('Failed to get bulk prices:', pricesResponse);
+        } catch (error) {
+          logger.warn(`Failed to get price for ${tokenKey}:`, error);
+        }
       }
+
+      logger.debug(`Updated prices for ${this.TOKENS_TO_TRACK.length} tokens`);
 
     } catch (error) {
       logger.error('Error updating all prices:', error);

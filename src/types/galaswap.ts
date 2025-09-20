@@ -487,15 +487,6 @@ export interface BridgeStatusResponse extends BaseResponse {
 // CLIENT CONFIGURATION TYPES
 // ===========================================
 
-export interface GalaSwapClientConfig {
-  baseUrl: string;
-  wsUrl: string;
-  walletAddress: string;
-  privateKey: string;
-  timeout?: number;
-  retryAttempts?: number;
-  retryDelay?: number;
-}
 
 export interface SwapParams {
   tokenIn: string;

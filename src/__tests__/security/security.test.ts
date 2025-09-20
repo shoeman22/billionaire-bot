@@ -296,14 +296,14 @@ describe('Security Tests', () => {
 
     it('should use secure random generation for test keys', () => {
       // Test that we're not using predictable private keys
-      const config1 = TestHelpers.createTestClientConfig();
-      const config2 = TestHelpers.createTestClientConfig();
+      const config1 = TestHelpers.createTestBotConfig();
+      const config2 = TestHelpers.createTestBotConfig();
 
       // Verify keys are long enough and different
-      expect(config1.privateKey).toBeDefined();
-      expect(config2.privateKey).toBeDefined();
-      expect(config1.privateKey.length).toBeGreaterThan(60);
-      expect(config2.privateKey.length).toBeGreaterThan(60);
+      expect(config1.wallet.privateKey).toBeDefined();
+      expect(config2.wallet.privateKey).toBeDefined();
+      expect(config1.wallet.privateKey.length).toBeGreaterThan(60);
+      expect(config2.wallet.privateKey.length).toBeGreaterThan(60);
     });
   });
 

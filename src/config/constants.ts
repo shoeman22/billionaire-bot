@@ -16,6 +16,7 @@ export const TRADING_CONSTANTS = {
   HEARTBEAT_INTERVAL: 30000, // 30 seconds
   TRANSACTION_TIMEOUT: 60000, // 60 seconds
   QUOTE_REFRESH_INTERVAL: 10000, // 10 seconds
+  ARBITRAGE_SCAN_INTERVAL: 5000, // 5 seconds
 
   // Retry configuration
   MAX_RETRIES: 3,

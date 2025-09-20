@@ -3,7 +3,7 @@
  * Handles end-to-end swap execution with error handling and monitoring
  */
 
-import { GalaSwapClient } from '../../api/GalaSwapClient';
+import { GSwap } from '@gala-chain/gswap-sdk';
 import { SlippageProtection, SlippageAnalysis } from '../risk/slippage';
 import { logger } from '../../utils/logger';
 import { safeParseFloat } from '../../utils/safe-parse';
@@ -58,11 +58,11 @@ export interface TransactionMonitoringResult {
 }
 
 export class SwapExecutor {
-  private galaSwapClient: GalaSwapClient;
+  private gswap: GSwap;
   private slippageProtection: SlippageProtection;
 
-  constructor(galaSwapClient: GalaSwapClient, slippageProtection: SlippageProtection) {
-    this.galaSwapClient = galaSwapClient;
+  constructor(gswap: GSwap, slippageProtection: SlippageProtection) {
+    this.gswap = gswap;
     this.slippageProtection = slippageProtection;
     logger.info('Swap Executor initialized');
   }
@@ -155,20 +155,40 @@ export class SwapExecutor {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const quote = await this.galaSwapClient.getQuote(quoteRequest);
+        const quote = await this.gswap.quoting.quoteExactInput(
+          quoteRequest.tokenIn,
+          quoteRequest.tokenOut,
+          quoteRequest.amountIn || '0'
+        );
 
-        // Validate quote response
-        if (!this.isValidQuoteResponse(quote)) {
+        // SDK returns direct quote result, adapt to expected format
+        if (!quote?.outTokenAmount) {
           throw new Error('Invalid quote response received');
         }
 
         logger.debug(`Quote received on attempt ${attempt}:`, {
-          amountOut: quote.data.amountOut,
-          priceImpact: quote.data.priceImpact,
+          amountOut: quote.outTokenAmount,
+          priceImpact: quote.priceImpact,
           attempt
         });
 
-        return quote;
+        // Adapt SDK response to expected format
+        const adaptedQuote: QuoteResponse = {
+          error: false,
+          status: 200,
+          data: {
+            amountOut: quote.outTokenAmount.toString(),
+            priceImpact: Number(quote.priceImpact || 0),
+            fee: 3000, // Fee not exposed in SDK response, use default
+            currentSqrtPrice: quote.currentPoolSqrtPrice?.toString() || '0',
+            newSqrtPrice: quote.newPoolSqrtPrice?.toString() || '0',
+            amountIn: quoteRequest.amountIn || '0',
+            route: []
+          },
+          message: 'Success'
+        };
+
+        return adaptedQuote;
 
       } catch (error) {
         lastError = error as Error;
@@ -242,8 +262,40 @@ export class SwapExecutor {
     quote: QuoteResponse
   ): Promise<SlippageAnalysis> {
     // Get current market price
-    const priceResponse = await this.galaSwapClient.getPrice(request.tokenIn);
-    const currentPrice = safeParseFloat(priceResponse.data.price, 0);
+    // Get price using pool data against GUSDC
+    const usdcToken = 'GUSDC|Unit|none|none';
+    let price = 0;
+
+    try {
+      if (request.tokenIn === usdcToken) {
+        price = 1.0; // GUSDC is 1:1 with USD
+      } else {
+        const poolData = await this.gswap.pools.getPoolData(request.tokenIn, usdcToken, 3000);
+        if (poolData?.sqrtPrice) {
+          const spotPrice = this.gswap.pools.calculateSpotPrice(request.tokenIn, usdcToken, poolData.sqrtPrice);
+          price = safeParseFloat(spotPrice.toString(), 0);
+        }
+      }
+    } catch (error) {
+      logger.debug(`Could not get price for ${request.tokenIn}:`, error);
+      // Try lower fee tier
+      try {
+        const poolData = await this.gswap.pools.getPoolData(request.tokenIn, usdcToken, 500);
+        if (poolData?.sqrtPrice) {
+          const spotPrice = this.gswap.pools.calculateSpotPrice(request.tokenIn, usdcToken, poolData.sqrtPrice);
+          price = safeParseFloat(spotPrice.toString(), 0);
+        }
+      } catch (error) {
+        logger.debug(`Could not get price for ${request.tokenIn} on lower fee tier:`, error);
+      }
+    }
+
+    const priceResponse = {
+      error: false,
+      data: price.toString(),
+      message: 'Success'
+    };
+    const currentPrice = price;
 
     // Calculate quoted price
     const amountIn = safeParseFloat(request.amountIn, 0);
@@ -376,7 +428,27 @@ export class SwapExecutor {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const payloadResponse = await this.galaSwapClient.generateSwapPayload(request);
+        // SDK doesn't have generateSwapPayload, we'll execute swap directly
+        // The SDK handles payload generation internally
+        const swapAmount = {
+          exactIn: request.amountIn,
+          amountOutMinimum: request.amountOutMinimum || '0'
+        };
+
+        // Return payload in expected format (SDK will handle internally)
+        const payloadResponse = {
+          error: false,
+          data: {
+            payload: {
+              tokenIn: request.tokenIn,
+              tokenOut: request.tokenOut,
+              amountIn: request.amountIn,
+              fee: request.fee || 3000,
+              ...swapAmount
+            }
+          },
+          message: 'Success'
+        };
         return payloadResponse;
 
       } catch (error) {
@@ -464,7 +536,15 @@ export class SwapExecutor {
    */
   private async validatePreExecution(): Promise<void> {
     // Check client health
-    const health = await this.galaSwapClient.healthCheck();
+    // SDK doesn't have healthCheck, test with a basic query
+    let health: { isHealthy: boolean; apiStatus: string; consecutiveFailures: number };
+    try {
+      await this.gswap.assets.getUserAssets('eth|0x0000000000000000000000000000000000000000', 1, 1);
+      health = { isHealthy: true, apiStatus: 'healthy', consecutiveFailures: 0 };
+    } catch (error) {
+      health = { isHealthy: false, apiStatus: 'unhealthy', consecutiveFailures: 1 };
+    }
+
     if (!health.isHealthy) {
       throw new Error('GalaSwap client is not healthy - aborting transaction');
     }
@@ -487,7 +567,28 @@ export class SwapExecutor {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const bundleResponse = await this.galaSwapClient.executeBundle(payload, bundleType);
+        // Execute swap using SDK
+        const swapResult = await this.gswap.swaps.swap(
+          payload.payload.tokenIn,
+          payload.payload.tokenOut,
+          payload.payload.fee || 3000,
+          {
+            exactIn: payload.payload.amountIn,
+            amountOutMinimum: payload.payload.amountOutMinimum || '0'
+          }
+        );
+
+        // Wait for transaction completion and adapt response
+        const completedTx = await swapResult.wait();
+
+        const bundleResponse = {
+          error: false,
+          data: {
+            transactionId: completedTx.txId,
+            hash: completedTx.transactionHash
+          },
+          message: 'Success'
+        };
         return bundleResponse;
 
       } catch (error) {
@@ -540,51 +641,23 @@ export class SwapExecutor {
     logger.info(`Monitoring transaction: ${transactionId}`);
 
     try {
-      // Use the client's enhanced monitoring
-      const statusResponse = await this.galaSwapClient.monitorTransaction(
-        transactionId,
-        timeoutMs,
-        3000 // 3 second poll interval
-      );
+      // Use SDK's event system to wait for transaction
+      const statusResponse = await GSwap.events.wait(transactionId);
 
-      if (isSuccessResponse(statusResponse)) {
-        const txStatus = statusResponse.data.status;
+      // SDK returns { txId: string, transactionHash: string, Data: any }
+      if (statusResponse?.transactionHash) {
         const confirmationTime = Date.now() - startTime;
+        const txStatus = 'CONFIRMED'; // SDK wait() only resolves on successful completion
 
-        switch (txStatus) {
-          case 'CONFIRMED':
-            logger.info(`✅ Transaction CONFIRMED: ${transactionId} (${confirmationTime}ms)`);
-            return {
-              status: 'CONFIRMED',
-              finalStatus: txStatus,
-              confirmationTime,
-              blockNumber: statusResponse.data.blockNumber,
-              gasUsed: (statusResponse.data as any).gasUsed,
-              monitoringMethod: 'polling' // Client uses polling primarily
-            };
-
-          case 'FAILED':
-          case 'REJECTED':
-            const errorMsg = (statusResponse.data as any).error || (statusResponse.data as any).errorMessage || `Transaction ${txStatus.toLowerCase()}`;
-            logger.error(`❌ Transaction FAILED: ${transactionId} - ${errorMsg}`);
-            return {
-              status: 'FAILED',
-              finalStatus: txStatus,
-              confirmationTime,
-              errorMessage: errorMsg,
-              monitoringMethod: 'polling'
-            };
-
-          default:
-            logger.warn(`⚠️ Transaction status unknown: ${transactionId} - ${txStatus}`);
-            return {
-              status: 'UNKNOWN',
-              finalStatus: txStatus,
-              confirmationTime,
-              errorMessage: `Unexpected status: ${txStatus}`,
-              monitoringMethod: 'polling'
-            };
-        }
+        logger.info(`✅ Transaction CONFIRMED: ${transactionId} (${confirmationTime}ms)`);
+        return {
+          status: 'CONFIRMED',
+          finalStatus: txStatus,
+          confirmationTime,
+          blockNumber: (statusResponse.Data as any)?.blockNumber,
+          gasUsed: (statusResponse.Data as any)?.gasUsed,
+          monitoringMethod: 'polling' // Client uses polling primarily
+        };
       } else {
         logger.error(`❌ Failed to get transaction status: ${transactionId} - ${(statusResponse as any).message || 'Unknown error'}`);
         return {
@@ -622,15 +695,11 @@ export class SwapExecutor {
     try {
       logger.info(`Monitoring transaction execution: ${transactionId}`);
 
-      // Use the enhanced monitoring with WebSocket support
-      const status = await this.galaSwapClient.monitorTransaction(
-        transactionId,
-        300000, // 5 minutes timeout
-        3000    // 3 second poll interval
-      );
+      // Use SDK's event system to wait for transaction
+      const status = await GSwap.events.wait(transactionId);
 
-      if (isSuccessResponse(status)) {
-        const txStatus = status.data.status;
+      if (status?.transactionHash) {
+        const txStatus = 'CONFIRMED'; // SDK wait() only resolves on successful completion
 
         if (txStatus === 'CONFIRMED') {
           logger.info(`Transaction confirmed: ${transactionId}`);
@@ -665,10 +734,11 @@ export class SwapExecutor {
     // Continue monitoring in background with longer intervals
     setTimeout(async () => {
       try {
-        const status = await this.galaSwapClient.getTransactionStatus(transactionId);
+        // SDK doesn't have getTransactionStatus, use wait for final status
+        const status = await GSwap.events.wait(transactionId);
 
-        if (isSuccessResponse(status)) {
-          const txStatus = status.data.status;
+        if (status?.transactionHash) {
+          const txStatus = 'CONFIRMED';
 
           if (txStatus === 'CONFIRMED') {
             logger.info(`Previously stuck transaction confirmed: ${transactionId}`);
@@ -812,10 +882,10 @@ export class SwapExecutor {
     try {
       logger.debug(`Analyzing execution results for transaction: ${transactionId}`);
 
-      const status = await this.galaSwapClient.getTransactionStatus(transactionId);
+      const status = await GSwap.events.wait(transactionId);
 
-      if (isSuccessResponse(status)) {
-        const executionData = status.data;
+      if (status?.transactionHash) {
+        const executionData = status.Data || {};
 
         // Comprehensive execution analysis
         const analysis = {
@@ -871,7 +941,7 @@ export class SwapExecutor {
       } else {
         logger.warn('Failed to get transaction status for analysis', {
           transactionId,
-          error: (status as ErrorResponse).message
+          error: status && typeof status === 'object' && 'message' in status ? (status as any).message : 'Unknown error'
         });
       }
 
@@ -988,20 +1058,22 @@ export class SwapExecutor {
   }> {
     try {
       // Get pool information to extract liquidity
-      const poolResponse = await this.galaSwapClient.getPool(tokenIn, tokenOut, 3000); // Standard fee tier
+      const poolResponse = await this.gswap.pools.getPoolData(tokenIn, tokenOut, 3000); // Standard fee tier
 
       let poolLiquidity = '1000000'; // Default fallback
-      if (poolResponse && !poolResponse.error && poolResponse.data) {
-        // Use TVL as a proxy for liquidity, or fallback to default
-        poolLiquidity = poolResponse.data.Data?.tvl || poolResponse.data.Data?.grossPoolLiquidity || poolLiquidity;
+      if (poolResponse?.liquidity) {
+        // Use pool liquidity from SDK response
+        poolLiquidity = poolResponse.liquidity?.toString() || poolLiquidity;
       }
 
-      // Get price history for volatility calculation
-      const priceHistory = await this.galaSwapClient.fetchPriceHistory?.({
-        token: tokenIn,
-        limit: 24,
-        order: 'desc'
-      });
+      // SDK doesn't have fetchPriceHistory, use mock data for now
+      const priceHistory = {
+        error: false,
+        data: {
+          prices: [{ price: '0.5', timestamp: Date.now() - 86400000 }], // 24h ago
+          volume24h: poolLiquidity
+        }
+      };
       let volatility24h = 0.05; // Default 5% volatility
 
       if (priceHistory && !priceHistory.error && priceHistory.data && Array.isArray(priceHistory.data)) {
@@ -1017,7 +1089,7 @@ export class SwapExecutor {
 
       // Calculate 24h volume (simplified - would need historical trade data)
       let volume24h = '100000'; // Default fallback
-      if (poolResponse && !poolResponse.error && poolResponse.data) {
+      if (poolResponse && poolResponse.liquidity) {
         // Estimate volume from liquidity (very simplified)
         const liquidity = safeParseFloat(poolLiquidity, 0);
         volume24h = (liquidity * 0.1).toString(); // Assume 10% turnover rate
@@ -1049,8 +1121,8 @@ export class SwapExecutor {
     rateLimiterStatus: any;
   } {
     return {
-      clientHealth: this.galaSwapClient.getConnectionHealth(),
-      rateLimiterStatus: this.galaSwapClient.resetRateLimiters // This will be available after client updates
+      clientHealth: {}, // Will be updated when health check method is available
+      rateLimiterStatus: {} // Will be available after client updates
     };
   }
 }

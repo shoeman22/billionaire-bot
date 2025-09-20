@@ -3,7 +3,7 @@
  * Provides liquidity to earn fees from trading volume
  */
 
-import { GalaSwapClient } from '../../api/GalaSwapClient';
+import { GSwap, GetUserPositionsResult } from '@gala-chain/gswap-sdk';
 import { TradingConfig } from '../../config/environment';
 import { logger } from '../../utils/logger';
 import { LiquidityManager } from '../execution/liquidity-manager';
@@ -25,7 +25,7 @@ export interface LiquidityPosition {
 }
 
 export class MarketMakingStrategy {
-  private galaSwapClient: GalaSwapClient;
+  private gswap: GSwap;
   private config: TradingConfig;
   private liquidityManager: LiquidityManager;
   private priceTracker: PriceTracker;
@@ -39,12 +39,12 @@ export class MarketMakingStrategy {
   };
 
   constructor(
-    galaSwapClient: GalaSwapClient,
+    gswap: GSwap,
     config: TradingConfig,
     liquidityManager: LiquidityManager,
     priceTracker: PriceTracker
   ) {
-    this.galaSwapClient = galaSwapClient;
+    this.gswap = gswap;
     this.config = config;
     this.liquidityManager = liquidityManager;
     this.priceTracker = priceTracker;
@@ -121,10 +121,10 @@ export class MarketMakingStrategy {
         user: walletAddress,
         limit: 100
       };
-      const positionsResponse = await this.galaSwapClient.getPositions(positionsRequest);
+      const positionsResponse = await this.gswap.positions.getUserPositions(walletAddress);
 
-      if (isSuccessResponse(positionsResponse)) {
-        this.positions = positionsResponse.data.Data.positions.map(this.convertToLiquidityPosition);
+      if (positionsResponse?.positions) {
+        this.positions = positionsResponse.positions.map(this.convertToLiquidityPosition);
         logger.info(`Loaded ${this.positions.length} existing liquidity positions`);
       }
 
@@ -136,7 +136,7 @@ export class MarketMakingStrategy {
   /**
    * Convert API position to internal liquidity position
    */
-  private convertToLiquidityPosition(position: Position): LiquidityPosition {
+  private convertToLiquidityPosition(position: GetUserPositionsResult): LiquidityPosition {
     return {
       poolAddress: (position as any).poolId || `${position.token0ClassKey?.collection}-${position.token1ClassKey?.collection}-${position.fee}`,
       token0: position.token0ClassKey ? `${position.token0ClassKey.collection}$${position.token0ClassKey.category}$${position.token0ClassKey.type}$${position.token0ClassKey.additionalKey}` : '',
@@ -144,9 +144,9 @@ export class MarketMakingStrategy {
       fee: position.fee,
       tickLower: position.tickLower,
       tickUpper: position.tickUpper,
-      liquidity: position.liquidity,
-      amount0: position.tokensOwed0,
-      amount1: position.tokensOwed1,
+      liquidity: position.liquidity?.toString() || '0',
+      amount0: '0', // Not available in SDK response
+      amount1: '0', // Not available in SDK response
       expectedFees: '0', // TODO: Calculate expected fees
     };
   }

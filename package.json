@@ -41,6 +41,7 @@
   },
   "dependencies": {
     "@gala-chain/api": "^2.4.3",
+    "@gala-chain/gswap-sdk": "^0.0.7",
     "axios": "^1.12.2",
     "bn.js": "^5.2.2",
     "class-transformer": "^0.5.1",

@@ -10,7 +10,7 @@
  */
 export function sqrtPriceX96ToPrice(sqrtPriceX96: string): number {
   try {
-    const Q96 = BigInt(2) ** BigInt(96);
+    const Q96 = BigInt('79228162514264337593543950336'); // 2^96 as string literal
     const sqrtPrice = BigInt(sqrtPriceX96);
 
     // Calculate price = (sqrtPrice / 2^96)^2
@@ -33,7 +33,7 @@ export function sqrtPriceX96ToPrice(sqrtPriceX96: string): number {
 export function priceToSqrtPriceX96(price: number): string {
   try {
     const sqrtPrice = Math.sqrt(price);
-    const Q96 = BigInt(2) ** BigInt(96);
+    const Q96 = BigInt('79228162514264337593543950336'); // 2^96 as string literal
     const sqrtPriceX96 = BigInt(Math.floor(sqrtPrice * Number(Q96)));
 
     return sqrtPriceX96.toString();

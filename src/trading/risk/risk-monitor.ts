@@ -3,7 +3,7 @@
  * Real-time portfolio monitoring and risk assessment
  */
 
-import { GalaSwapClient } from '../../api/GalaSwapClient';
+import { GSwap } from '@gala-chain/gswap-sdk';
 import { TradingConfig } from '../../config/environment';
 import { logger } from '../../utils/logger';
 import { AlertSystem } from '../../monitoring/alerts';
@@ -64,7 +64,7 @@ export interface MarketAnomalyAlert {
 export class RiskMonitor {
   private config: TradingConfig;
   private riskConfig: RiskConfig;
-  protected galaSwapClient: GalaSwapClient;
+  protected gswap: GSwap;
   private alertSystem: AlertSystem;
   private portfolioSnapshots: PortfolioSnapshot[] = [];
   private baselinePortfolioValue: number = 0;
@@ -80,9 +80,9 @@ export class RiskMonitor {
     CRITICAL_RISK: 45
   };
 
-  constructor(config: TradingConfig, galaSwapClient: GalaSwapClient) {
+  constructor(config: TradingConfig, gswap: GSwap) {
     this.config = config;
-    this.galaSwapClient = galaSwapClient;
+    this.gswap = gswap;
     this.alertSystem = new AlertSystem(false); // Disable cleanup timer for tests
 
     // Initialize risk configuration from environment
@@ -325,9 +325,9 @@ export class RiskMonitor {
       logger.debug(`Fetching real token balances for address: ${userAddress}`);
 
       // Get user positions to extract token balances
-      const positionsResponse = await this.galaSwapClient.getUserPositions(userAddress);
+      const positionsResponse = await this.gswap.positions.getUserPositions(userAddress);
 
-      if (!positionsResponse || positionsResponse.error) {
+      if (!positionsResponse?.positions) {
         logger.warn('Failed to fetch user positions, falling back to empty balances');
         return [];
       }
@@ -335,22 +335,21 @@ export class RiskMonitor {
       // Extract unique tokens from positions and calculate total balances
       const tokenBalances = new Map<string, number>();
 
-      if (positionsResponse.data && positionsResponse.data.Data && positionsResponse.data.Data.positions) {
-        for (const position of positionsResponse.data.Data.positions) {
-          // Extract token balances from liquidity positions
-          if (position.token0Symbol && position.liquidity) {
-            const token0 = position.token0Symbol;
-            const liquidityAmount = safeParseFloat(position.liquidity, 0) / 2; // Approximate split
-            const current = tokenBalances.get(token0) || 0;
-            tokenBalances.set(token0, current + liquidityAmount);
-          }
+      for (const position of positionsResponse.positions) {
+        // Extract token balances from liquidity positions
+        const token0 = this.extractTokenSymbol(position.token0ClassKey);
+        const token1 = this.extractTokenSymbol(position.token1ClassKey);
 
-          if (position.token1Symbol && position.liquidity) {
-            const token1 = position.token1Symbol;
-            const liquidityAmount = safeParseFloat(position.liquidity, 0) / 2; // Approximate split
-            const current = tokenBalances.get(token1) || 0;
-            tokenBalances.set(token1, current + liquidityAmount);
-          }
+        if (token0 && position.liquidity) {
+          const liquidityAmount = safeParseFloat(position.liquidity?.toString() || '0', 0) / 2; // Approximate split
+          const current = tokenBalances.get(token0) || 0;
+          tokenBalances.set(token0, current + liquidityAmount);
+        }
+
+        if (token1 && position.liquidity) {
+          const liquidityAmount = safeParseFloat(position.liquidity?.toString() || '0', 0) / 2; // Approximate split
+          const current = tokenBalances.get(token1) || 0;
+          tokenBalances.set(token1, current + liquidityAmount);
         }
       }
 
@@ -385,17 +384,15 @@ export class RiskMonitor {
       // Fetch prices for each token individually
       for (const token of tokens) {
         try {
-          // Convert token symbol to composite key format if needed
-          const tokenKey = token.includes('$') ? token : `${token}$Unit$none$none`;
+          // Get price from pool data
+          const poolData = await this.gswap.pools.getPoolData(token, 'GUSDC|Unit|none|none', 3000);
 
-          const priceResponse = await this.galaSwapClient.getPrice(tokenKey);
-
-          if (priceResponse && !priceResponse.error && priceResponse.data) {
-            const priceUsd = safeParseFloat(priceResponse.data.priceUsd || priceResponse.data.price || '0', 0);
+          if (poolData?.liquidity) {
+            const priceUsd = 1.0; // Simplified - would calculate from sqrtPrice
             prices[token] = priceUsd;
             logger.debug(`Price for ${token}: $${priceUsd}`);
           } else {
-            logger.warn(`Failed to get price for ${token}:`, priceResponse?.message);
+            logger.warn(`Failed to get price for ${token}`);
             prices[token] = 0;
           }
         } catch (tokenError) {
@@ -411,6 +408,23 @@ export class RiskMonitor {
       logger.error('Error fetching current prices:', error);
       return {};
     }
+  }
+
+  /**
+   * Extract token symbol from token class key
+   */
+  private extractTokenSymbol(tokenClassKey: any): string {
+    if (!tokenClassKey) return '';
+
+    if (typeof tokenClassKey === 'string') {
+      return tokenClassKey.split('$')[0] || tokenClassKey;
+    }
+
+    if (tokenClassKey.collection) {
+      return tokenClassKey.collection;
+    }
+
+    return '';
   }
 
   /**

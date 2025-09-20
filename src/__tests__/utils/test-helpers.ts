@@ -3,22 +3,19 @@
  * Utilities for creating test data and scenarios
  */
 
-import { GalaSwapClientConfig } from '../../api/GalaSwapClient';
+import { GSwap } from '@gala-chain/gswap-sdk';
 import { BotConfig } from '../../config/environment';
 
 export class TestHelpers {
   /**
    * Create a test GalaSwap client configuration
    */
-  static createTestClientConfig(): GalaSwapClientConfig {
+  static createTestSDKConfig() {
     return {
-      baseUrl: 'http://localhost:3001/mock',
-      wsUrl: 'http://localhost:3001/ws',
-      walletAddress: 'client|0x1234567890123456789012345678901234567890',
-      privateKey: '0123456789012345678901234567890123456789012345678901234567890123',
-      timeout: 5000,
-      retryAttempts: 2,
-      retryDelay: 100
+      gatewayBaseUrl: 'http://localhost:3001/mock',
+      dexBackendBaseUrl: 'http://localhost:3001/mock',
+      bundlerBaseUrl: 'http://localhost:3001/mock',
+      walletAddress: 'client|0x1234567890123456789012345678901234567890'
     };
   }
 

@@ -3,7 +3,7 @@
  * Core trading orchestrator for the billionaire bot
  */
 
-import { GalaSwapClient } from '../api/GalaSwapClient';
+import { GSwap, PrivateKeySigner } from '@gala-chain/gswap-sdk';
 import { BotConfig } from '../config/environment';
 import { logger } from '../utils/logger';
 import { PriceTracker } from '../monitoring/price-tracker';
@@ -21,7 +21,7 @@ import { safeParseFloat } from '../utils/safe-parse';
 
 export class TradingEngine {
   private config: BotConfig;
-  protected galaSwapClient: GalaSwapClient;
+  protected gswap: GSwap;
   private priceTracker: PriceTracker;
   private arbitrageStrategy: ArbitrageStrategy;
   private marketMakingStrategy: MarketMakingStrategy;
@@ -49,45 +49,46 @@ export class TradingEngine {
   constructor(config: BotConfig) {
     this.config = config;
 
-    // Initialize API client
-    this.galaSwapClient = new GalaSwapClient({
-      baseUrl: config.api.baseUrl,
-      wsUrl: config.api.wsUrl,
+    // Initialize GSwap SDK
+    this.gswap = new GSwap({
+      signer: new PrivateKeySigner(config.wallet.privateKey),
       walletAddress: config.wallet.address,
-      privateKey: config.wallet.privateKey
+      gatewayBaseUrl: config.api.baseUrl,
+      dexBackendBaseUrl: config.api.baseUrl,
+      bundlerBaseUrl: config.api.baseUrl.replace('dex-backend', 'bundle-backend')
     });
 
     // Initialize core systems
-    this.priceTracker = new PriceTracker(this.galaSwapClient);
-    this.positionLimits = new PositionLimits(config.trading, this.galaSwapClient);
+    this.priceTracker = new PriceTracker(this.gswap);
+    this.positionLimits = new PositionLimits(config.trading, this.gswap);
     this.slippageProtection = new SlippageProtection(config.trading);
-    this.riskMonitor = new RiskMonitor(config.trading, this.galaSwapClient);
+    this.riskMonitor = new RiskMonitor(config.trading, this.gswap);
 
     // Initialize execution systems
-    this.swapExecutor = new SwapExecutor(this.galaSwapClient, this.slippageProtection);
-    this.liquidityManager = new LiquidityManager(this.galaSwapClient);
+    this.swapExecutor = new SwapExecutor(this.gswap, this.slippageProtection);
+    this.liquidityManager = new LiquidityManager(this.gswap);
 
     // Initialize emergency controls (must be after execution systems)
     this.emergencyControls = new EmergencyControls(
       config.trading,
-      this.galaSwapClient,
+      this.gswap,
       this.swapExecutor,
       this.liquidityManager
     );
 
     // Initialize monitoring systems
-    this.marketAnalysis = new MarketAnalysis(this.priceTracker, this.galaSwapClient);
+    this.marketAnalysis = new MarketAnalysis(this.priceTracker, this.gswap);
     this.alertSystem = new AlertSystem();
 
     // Initialize trading strategies
     this.arbitrageStrategy = new ArbitrageStrategy(
-      this.galaSwapClient,
+      this.gswap,
       config.trading,
       this.swapExecutor,
       this.marketAnalysis
     );
     this.marketMakingStrategy = new MarketMakingStrategy(
-      this.galaSwapClient,
+      this.gswap,
       config.trading,
       this.liquidityManager,
       this.priceTracker
@@ -108,14 +109,17 @@ export class TradingEngine {
     try {
       logger.info('Starting Trading Engine...');
 
-      // Health check API connection
-      const healthStatus = await this.galaSwapClient.healthCheck();
-      if (!healthStatus.isHealthy) {
-        throw new Error('GalaSwap API health check failed');
+      // Health check API connection (SDK doesn't have healthCheck, implement basic check)
+      try {
+        // Test SDK connectivity by attempting to get a basic asset query
+        await this.gswap.assets.getUserAssets(this.config.wallet.address, 1, 1);
+        logger.info('GSwap SDK connectivity verified');
+      } catch (error) {
+        throw new Error('GSwap SDK connection failed: ' + (error instanceof Error ? error.message : 'Unknown error'));
       }
 
       // Connect WebSocket for real-time data
-      await this.galaSwapClient.connectWebSocket();
+      await GSwap.events.connectEventSocket();
 
       // Start price tracking
       await this.priceTracker.start();
@@ -168,7 +172,7 @@ export class TradingEngine {
       }
 
       // Disconnect WebSocket
-      await this.galaSwapClient.disconnectWebSocket();
+      GSwap.events.disconnectEventSocket();
 
       this.isRunning = false;
       logger.info('✅ Trading Engine stopped successfully');
@@ -216,14 +220,14 @@ export class TradingEngine {
         return;
       }
 
-      // 2. Check system health
-      const healthStatus = await this.galaSwapClient.healthCheck();
-      if (!healthStatus.isHealthy) {
-        this.emergencyControls.recordApiFailure('API health check failed');
-        logger.warn('GalaSwap API unhealthy, skipping cycle');
-        return;
-      } else {
+      // 2. Check system health (basic connectivity test)
+      try {
+        await this.gswap.assets.getUserAssets(this.config.wallet.address, 1, 1);
         this.emergencyControls.recordSuccess();
+      } catch (error) {
+        this.emergencyControls.recordApiFailure('SDK connectivity check failed');
+        logger.warn('GSwap SDK unhealthy, skipping cycle');
+        return;
       }
 
       // 3. Comprehensive risk assessment
@@ -536,27 +540,23 @@ export class TradingEngine {
         return [];
       }
 
-      // Get user positions which include token balances
-      const positionsResponse = await this.galaSwapClient.getUserPositions(this.config.wallet.address);
-
-      if (!positionsResponse || positionsResponse.error) {
-        return [];
-      }
+      // Get user positions using SDK
+      const positionsResponse = await this.gswap.positions.getUserPositions(this.config.wallet.address);
 
       const balances = new Map<string, number>();
 
-      if (positionsResponse.data?.Data?.positions) {
-        for (const position of positionsResponse.data.Data.positions) {
+      if (positionsResponse?.positions) {
+        for (const position of positionsResponse.positions) {
           // Extract token balances from liquidity positions
           if (position.token0Symbol && position.liquidity) {
             const token0 = position.token0Symbol;
-            const amount0 = safeParseFloat(position.liquidity, 0) / 2; // Simplified allocation
+            const amount0 = safeParseFloat(position.liquidity.toString(), 0) / 2; // Simplified allocation
             balances.set(token0, (balances.get(token0) || 0) + amount0);
           }
 
           if (position.token1Symbol && position.liquidity) {
             const token1 = position.token1Symbol;
-            const amount1 = safeParseFloat(position.liquidity, 0) / 2; // Simplified allocation
+            const amount1 = safeParseFloat(position.liquidity.toString(), 0) / 2; // Simplified allocation
             balances.set(token1, (balances.get(token1) || 0) + amount1);
           }
         }
@@ -586,17 +586,36 @@ export class TradingEngine {
         const uniqueTokens = [...new Set(balances.map(b => b.token))];
 
         try {
-          // Single batched price request for all tokens
-          const pricesResponse = await this.galaSwapClient.getPrices(uniqueTokens);
+          // Get prices by fetching pool data against GUSDC (USD stable coin)
+          const usdcToken = 'GUSDC|Unit|none|none';
           const priceMap = new Map<string, number>();
 
-          if (pricesResponse.data && Array.isArray(pricesResponse.data)) {
-            // Build price lookup map
-            uniqueTokens.forEach((token, index) => {
-              if (pricesResponse.data[index] !== undefined) {
-                priceMap.set(token, safeParseFloat(pricesResponse.data[index], 0));
+          for (const token of uniqueTokens) {
+            if (token === usdcToken) {
+              priceMap.set(token, 1.0); // GUSDC is 1:1 with USD
+              continue;
+            }
+
+            try {
+              // Try to get pool data for this token paired with GUSDC
+              const poolData = await this.gswap.pools.getPoolData(token, usdcToken, 3000);
+              if (poolData?.sqrtPrice) {
+                const price = this.gswap.pools.calculateSpotPrice(token, usdcToken, poolData.sqrtPrice);
+                priceMap.set(token, safeParseFloat(price.toString(), 0));
               }
-            });
+            } catch (error) {
+              logger.debug(`Could not get pool price for ${token}:`, error);
+              // Try with lower fee tier
+              try {
+                const poolData = await this.gswap.pools.getPoolData(token, usdcToken, 500);
+                if (poolData?.sqrtPrice) {
+                  const price = this.gswap.pools.calculateSpotPrice(token, usdcToken, poolData.sqrtPrice);
+                  priceMap.set(token, safeParseFloat(price.toString(), 0));
+                }
+              } catch (error) {
+                logger.debug(`Could not get pool price for ${token} on lower fee tier:`, error);
+              }
+            }
           }
 
           // Calculate value from token balances using cached prices
@@ -607,20 +626,7 @@ export class TradingEngine {
             }
           }
         } catch (error) {
-          logger.warn('Batch price fetch failed, falling back to individual requests:', error);
-
-          // Fallback to individual requests if batch fails
-          for (const balance of balances) {
-            try {
-              const prices = await this.galaSwapClient.getPrices([balance.token]);
-              if (prices.data && prices.data.length > 0) {
-                const price = safeParseFloat(prices.data[0], 0);
-                totalValue += balance.amount * price;
-              }
-            } catch (error) {
-              logger.debug(`Could not get price for ${balance.token}:`, error);
-            }
-          }
+          logger.warn('Price calculation failed:', error);
         }
       }
 
@@ -848,10 +854,10 @@ export class TradingEngine {
   }
 
   /**
-   * Get GalaSwap client for external access
+   * Get GSwap SDK for external access
    */
-  getClient(): GalaSwapClient {
-    return this.galaSwapClient;
+  getClient(): GSwap {
+    return this.gswap;
   }
 
   /**
