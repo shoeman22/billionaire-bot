@@ -3,7 +3,7 @@
  * Real-time price monitoring and change detection system
  */
 
-import { GSwap } from '@gala-chain/gswap-sdk';
+import { GSwapWrapper as GSwap } from '../services/gswap-wrapper';
 import { logger } from '../utils/logger';
 import { TRADING_CONSTANTS } from '../config/constants';
 import { createTokenClassKey } from '../types/galaswap';
@@ -37,7 +37,7 @@ export interface PriceHistory {
 }
 
 export class PriceTracker {
-  private gswap: GSwap;
+  private gswap: GSwap | any;
   private isRunning: boolean = false;
   private priceData: Map<string, PriceData> = new Map();
   private priceHistory: Map<string, PriceHistory> = new Map();
@@ -49,7 +49,7 @@ export class PriceTracker {
   private readonly MAX_PRICE_HISTORY = 1000;
   private readonly TOKENS_TO_TRACK = Object.values(TRADING_CONSTANTS.TOKENS);
 
-  constructor(gswap: GSwap) {
+  constructor(gswap: GSwap | any) {
     this.gswap = gswap;
     this.initializePriceHistory();
     logger.info('Price Tracker initialized');
@@ -287,22 +287,28 @@ export class PriceTracker {
       // Get prices for all tracked tokens using SDK
       for (const tokenKey of this.TOKENS_TO_TRACK) {
         try {
-          const poolData = await this.gswap.pools.getPoolData(tokenKey, 'GUSDC$Unit$none$none', 3000);
+          const poolData = await this.gswap.pools.getPoolData(tokenKey, 'GUSDC$Unit$none$none', 10000);
 
           if (poolData?.sqrtPrice) {
             const tokenClassKey = createTokenClassKey(tokenKey);
-            // Simplified price calculation - would need proper calculation from sqrtPriceX96
-            const calculatedPrice = 1.0;
-            const priceData: PriceData = {
-              token: tokenClassKey.collection.toUpperCase(),
-              price: calculatedPrice,
-              priceUsd: calculatedPrice,
-              change24h: 0, // Would need historical data
-              volume24h: 0, // Volume not available in pool data
-              timestamp: Date.now(),
-            };
+            // Calculate real price from sqrtPriceX96 using SDK
+            const priceResult = this.gswap.pools.calculateSpotPrice(tokenKey, 'GUSDC$Unit$none$none', poolData.sqrtPrice);
+            const calculatedPrice = priceResult ? safeParseFloat(priceResult.toString(), 0) : 0;
 
-            this.updatePriceData(priceData);
+            if (calculatedPrice > 0) {
+              const priceData: PriceData = {
+                token: tokenClassKey.collection.toUpperCase(),
+                price: calculatedPrice,
+                priceUsd: calculatedPrice,
+                change24h: 0, // Would need historical data
+                volume24h: 0, // Volume not available in pool data
+                timestamp: Date.now(),
+              };
+
+              this.updatePriceData(priceData);
+            } else {
+              logger.warn(`Invalid price calculated for ${tokenKey}: ${calculatedPrice}`);
+            }
           }
         } catch (error) {
           logger.warn(`Failed to get price for ${tokenKey}:`, error);
