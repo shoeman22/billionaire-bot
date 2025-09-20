@@ -6,6 +6,7 @@
 import { GSwap } from '@gala-chain/gswap-sdk';
 import { TradingConfig } from '../config/environment';
 import { logger } from '../utils/logger';
+import { safeParseFloat } from '../utils/safe-parse';
 import { PerformanceMonitor } from './PerformanceMonitor';
  
 import { PriceCache } from './PriceCache';
@@ -325,14 +326,14 @@ export class OptimizedRiskMonitor extends RiskMonitor {
         for (const position of positionsResponse.positions) {
           if (position.token0Symbol && position.liquidity) {
             const token0 = position.token0Symbol;
-            const liquidityAmount = parseFloat(position.liquidity.toString()) / 2;
+            const liquidityAmount = safeParseFloat(position.liquidity.toString(), 0) / 2;
             const current = tokenBalances.get(token0) || 0;
             tokenBalances.set(token0, current + liquidityAmount);
           }
 
           if (position.token1Symbol && position.liquidity) {
             const token1 = position.token1Symbol;
-            const liquidityAmount = parseFloat(position.liquidity.toString()) / 2;
+            const liquidityAmount = safeParseFloat(position.liquidity.toString(), 0) / 2;
             const current = tokenBalances.get(token1) || 0;
             tokenBalances.set(token1, current + liquidityAmount);
           }
@@ -520,6 +521,19 @@ export class OptimizedRiskMonitor extends RiskMonitor {
       timestamp: Date.now(),
       ttl: this.RISK_CACHE_TTL
     });
+  }
+
+  /**
+   * Cleanup method to prevent memory leaks
+   */
+  destroy(): void {
+    // Stop performance monitoring
+    this.performanceMonitor.stopMonitoring();
+
+    // Destroy price cache
+    this.priceCache.destroy();
+
+    logger.info('OptimizedRiskMonitor destroyed');
   }
 
 }

@@ -29,7 +29,7 @@ async function testRiskManagementSystem(): Promise<void> {
 
     // Initialize GSwap SDK
     const gswap = new GSwap({
-      signer: new PrivateKeySigner(config.wallet.privateKey),
+      signer: new PrivateKeySigner(process.env.WALLET_PRIVATE_KEY || '0x'),
       walletAddress: config.wallet.address,
       gatewayBaseUrl: config.api.baseUrl,
       dexBackendBaseUrl: config.api.baseUrl,

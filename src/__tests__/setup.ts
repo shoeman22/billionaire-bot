@@ -3,6 +3,7 @@
  * Global test configuration and utilities
  */
 
+import { safeParseFloat } from '../utils/safe-parse';
 // import { logger } from '../utils/logger'; // Unused - commenting out to fix linting
 
 // Mock console for tests to reduce noise
@@ -153,7 +154,7 @@ expect.extend({
   },
 
   toBeValidTokenAmount(received: string | number) {
-    const amount = typeof received === 'string' ? parseFloat(received) : received;
+    const amount = typeof received === 'string' ? safeParseFloat(received, NaN) : received;
     const isValid = !isNaN(amount) && amount > 0;
 
     return {

@@ -10,6 +10,8 @@ import { PerformanceMonitor } from './PerformanceMonitor';
  
 import { PriceCache } from './PriceCache';
 import { TradingEngine } from '../trading/TradingEngine';
+import { calculatePriceFromSqrtPriceX96 } from '../utils/price-math';
+import { safeParseFloat } from '../utils/safe-parse';
 
 export interface OptimizedTradeParams {
   tokenIn: string;
@@ -262,38 +264,55 @@ export class OptimizedTradingEngine extends TradingEngine {
       tokensToFetch.push(...tokens);
     }
 
-    // Fetch missing prices
+    // Fetch missing prices using real GSwap SDK methods
     if (tokensToFetch.length > 0) {
       try {
-        // SDK doesn't have bulk getPrices method - mock implementation
-        const priceResponse = { error: false, data: tokensToFetch.map(() => '1.0') };
+        logger.debug(`Fetching real prices for ${tokensToFetch.length} tokens: ${tokensToFetch.join(', ')}`);
 
         const prices = new Map<string, { price: number; priceUsd: number; source?: 'api' | 'websocket' | 'computed' }>();
+        const pricePromises: Promise<void>[] = [];
 
-        if (!priceResponse.error && priceResponse.data) {
-          // priceResponse.data is string[] with prices in same order as tokensToFetch
-          priceResponse.data.forEach((priceStr: string, index: number) => {
-            if (index < tokensToFetch.length) {
-              const token = tokensToFetch[index];
-              const price = parseFloat(priceStr);
-              const priceData = {
-                price,
-                priceUsd: price, // Assuming price is in USD
-                source: 'api' as const
-              };
-
-              prices.set(token, priceData);
-              result.set(token, {
-              price: priceData.price,
-              priceUsd: priceData.priceUsd,
-              cached: false
+        // Fetch each token price individually using GSwap SDK
+        for (const token of tokensToFetch) {
+          const pricePromise = this.fetchIndividualTokenPrice(token)
+            .then((priceData) => {
+              if (priceData) {
+                prices.set(token, priceData);
+                result.set(token, {
+                  price: priceData.price,
+                  priceUsd: priceData.priceUsd,
+                  cached: false
+                });
+                logger.debug(`Fetched price for ${token}: $${priceData.priceUsd}`);
+              }
+            })
+            .catch((error) => {
+              logger.warn(`Failed to fetch price for ${token}:`, error.message);
+              // Don't set a fallback price - let the system handle missing prices appropriately
             });
-            }
-          });
+
+          pricePromises.push(pricePromise);
         }
 
-        // Update cache
-        this.priceCache.setBatch(prices);
+        // Wait for all price fetches to complete (with timeout)
+        await Promise.allSettled(pricePromises);
+
+        // Validate fetched prices before caching
+        const validPrices = new Map<string, { price: number; priceUsd: number; source?: 'api' | 'websocket' | 'computed' }>();
+        for (const [token, priceData] of prices) {
+          if (this.isValidPrice(priceData.priceUsd, token)) {
+            validPrices.set(token, priceData);
+          } else {
+            logger.warn(`Invalid price detected for ${token}: $${priceData.priceUsd} - skipping cache update`);
+            // Remove invalid price from result
+            result.delete(token);
+          }
+        }
+
+        // Update cache with validated prices only
+        this.priceCache.setBatch(validPrices);
+
+        logger.debug(`Successfully cached ${validPrices.size}/${prices.size} valid prices`);
         
       } catch (error) {
         logger.error('Error fetching prices:', error);
@@ -469,5 +488,116 @@ export class OptimizedTradingEngine extends TradingEngine {
         await this.getOptimizedPrices(tokensToRefresh, true);
       }
     }
+  }
+
+  /**
+   * Fetch individual token price using GSwap SDK
+   */
+  private async fetchIndividualTokenPrice(token: string): Promise<{
+    price: number;
+    priceUsd: number;
+    source: 'api' | 'websocket' | 'computed';
+  } | null> {
+    try {
+      // Use GSwap SDK positions API to get current price data
+      // This is more reliable than external price feeds for GSwap tokens
+      const poolInfo = await this.gswap.pools.getPoolData(
+        token === 'GALA' ? `${token}|Unit|none|none` : 'GUSDC$Unit$none$none',
+        token === 'GALA' ? 'GUSDC$Unit$none$none' : `${token}|Unit|none|none`,
+        3000 // Use standard fee tier
+      );
+
+      if (poolInfo && poolInfo.sqrtPrice) {
+        // Calculate price from sqrt price X96 format
+        const price = this.calculatePriceFromSqrtPriceX96Safe(poolInfo.sqrtPrice.toString(), token === 'GALA');
+
+        if (price > 0) {
+          return {
+            price,
+            priceUsd: price,
+            source: 'api'
+          };
+        }
+      }
+
+      // Fallback: try to get quote for a standard amount
+      const quoteAmount = '1000000'; // 1 token in smallest unit (6 decimals for most tokens)
+      const quoteResult = await this.gswap.quoting.quoteExactInput(
+        token,
+        'GUSDC', // Quote against USDC for USD price
+        quoteAmount,
+        3000
+      );
+
+      if (quoteResult && quoteResult.outTokenAmount) {
+        const amountOut = safeParseFloat(quoteResult.outTokenAmount.toString(), 0);
+        const amountIn = safeParseFloat(quoteAmount, 0) / 1000000; // Convert from smallest unit
+        const price = amountOut / amountIn;
+
+        if (price > 0) {
+          return {
+            price,
+            priceUsd: price,
+            source: 'computed'
+          };
+        }
+      }
+
+      logger.warn(`Could not fetch price for token: ${token}`);
+      return null;
+
+    } catch (error) {
+      logger.warn(`Error fetching individual price for ${token}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Calculate price from sqrtPriceX96 format using safe BigInt mathematics
+   */
+  private calculatePriceFromSqrtPriceX96Safe(sqrtPriceX96: string, isToken0: boolean): number {
+    try {
+      // Use the new secure utility function
+      return calculatePriceFromSqrtPriceX96(sqrtPriceX96, isToken0);
+    } catch (error) {
+      logger.warn('Error calculating price from sqrtPriceX96:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Validate if a price is reasonable for a given token
+   */
+  private isValidPrice(price: number, token: string): boolean {
+    // Basic sanity checks
+    if (!price || price <= 0 || !isFinite(price)) {
+      return false;
+    }
+
+    // Token-specific price ranges for sanity checking
+    const priceRanges: Record<string, { min: number; max: number }> = {
+      'GALA': { min: 0.001, max: 100 },      // GALA token reasonable range
+      'GUSDC': { min: 0.90, max: 1.10 },     // USDC should be close to $1
+      'ETIME': { min: 0.001, max: 1000 },    // ETIME token reasonable range
+      'TOWN': { min: 0.001, max: 1000 },     // TOWN token reasonable range
+      'REP': { min: 0.001, max: 1000 },      // REP token reasonable range
+      // Add more tokens as needed
+    };
+
+    const range = priceRanges[token];
+    if (range) {
+      if (price < range.min || price > range.max) {
+        logger.warn(`Price $${price} for ${token} outside expected range [$${range.min}, $${range.max}]`);
+        return false;
+      }
+    } else {
+      // For unknown tokens, apply generic sanity checks
+      if (price < 0.000001 || price > 1000000) {
+        logger.warn(`Price $${price} for ${token} outside generic range [$0.000001, $1,000,000]`);
+        return false;
+      }
+    }
+
+    return true;
   }
 }

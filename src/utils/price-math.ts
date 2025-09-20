@@ -1,154 +1,136 @@
 /**
  * Price Mathematics Utilities
- * Converts between ticks, sqrtPrice, and human-readable prices for V3 AMM
+ * Safe calculations for sqrtPriceX96 and other financial mathematics
  */
+
+import { logger } from './logger';
 
 /**
- * Convert sqrtPriceX96 to readable price
- * @param sqrtPriceX96 Square root price scaled by 2^96
- * @returns Human-readable price
+ * Constants for price calculations
  */
-export function sqrtPriceX96ToPrice(sqrtPriceX96: string): number {
-  try {
-    const Q96 = BigInt('79228162514264337593543950336'); // 2^96 as string literal
-    const sqrtPrice = BigInt(sqrtPriceX96);
-
-    // Calculate price = (sqrtPrice / 2^96)^2
-    const price = Number(sqrtPrice) / Number(Q96);
-    const actualPrice = price * price;
-
-    return actualPrice;
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.warn('Error converting sqrtPriceX96 to price:', error);
-    return 0;
-  }
-}
+export const Q96 = 2n ** 96n; // BigInt for accurate calculation
+export const Q192 = Q96 * Q96; // For squared calculations
 
 /**
- * Convert price to sqrtPriceX96
- * @param price Human-readable price
- * @returns Square root price scaled by 2^96
+ * Safely calculate price from sqrtPriceX96 format
+ * @param sqrtPriceX96 - The sqrt price in X96 format (string or BigInt)
+ * @param isToken0 - Whether this is for token0 (true) or token1 (false)
+ * @param decimals0 - Decimals for token0 (default 18)
+ * @param decimals1 - Decimals for token1 (default 18)
+ * @returns The price as a number, or 0 if calculation fails
  */
-export function priceToSqrtPriceX96(price: number): string {
+export function calculatePriceFromSqrtPriceX96(
+  sqrtPriceX96: string | bigint | number,
+  isToken0: boolean = false,
+  decimals0: number = 18,
+  decimals1: number = 18
+): number {
   try {
-    const sqrtPrice = Math.sqrt(price);
-    const Q96 = BigInt('79228162514264337593543950336'); // 2^96 as string literal
-    const sqrtPriceX96 = BigInt(Math.floor(sqrtPrice * Number(Q96)));
+    // Convert input to BigInt
+    let sqrtPrice: bigint;
 
-    return sqrtPriceX96.toString();
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.warn('Error converting price to sqrtPriceX96:', error);
-    return '0';
-  }
-}
-
-/**
- * Convert tick to price
- * @param tick Tick value
- * @returns Human-readable price
- */
-export function tickToPrice(tick: number): number {
-  try {
-    // price = 1.0001^tick
-    return Math.pow(1.0001, tick);
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.warn('Error converting tick to price:', error);
-    return 0;
-  }
-}
-
-/**
- * Convert price to tick
- * @param price Human-readable price
- * @returns Tick value
- */
-export function priceToTick(price: number): number {
-  try {
-    if (price <= 0) return 0;
-    // tick = log(price) / log(1.0001)
-    return Math.floor(Math.log(price) / Math.log(1.0001));
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.warn('Error converting price to tick:', error);
-    return 0;
-  }
-}
-
-/**
- * Get price from pool data using sqrtPrice
- * @param poolData Pool data containing sqrtPrice
- * @returns Human-readable price
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function getPriceFromPoolData(poolData: any): number {
-  try {
-    const sqrtPriceX96 = poolData?.Data?.sqrtPrice || poolData?.sqrtPrice;
-
-    if (!sqrtPriceX96) {
-      // eslint-disable-next-line no-console
-      console.warn('No sqrtPrice found in pool data');
+    if (typeof sqrtPriceX96 === 'string') {
+      sqrtPrice = BigInt(sqrtPriceX96);
+    } else if (typeof sqrtPriceX96 === 'bigint') {
+      sqrtPrice = sqrtPriceX96;
+    } else if (typeof sqrtPriceX96 === 'number') {
+      sqrtPrice = BigInt(Math.floor(sqrtPriceX96));
+    } else {
+      logger.error('Invalid sqrtPriceX96 type:', typeof sqrtPriceX96);
       return 0;
     }
 
-    return sqrtPriceX96ToPrice(sqrtPriceX96);
+    // Validate input
+    if (sqrtPrice <= 0n) {
+      logger.warn('Invalid sqrtPriceX96 value (zero or negative):', sqrtPrice.toString());
+      return 0;
+    }
+
+    // Calculate price ratio: (sqrtPrice/Q96)^2
+    const priceRatio = (sqrtPrice * sqrtPrice) / Q192;
+
+    // Adjust for token decimals
+    const decimalAdjustment = BigInt(10) ** BigInt(decimals1 - decimals0);
+    const adjustedPriceRatio = priceRatio * decimalAdjustment;
+
+    // Convert to float with appropriate precision
+    const price = Number(adjustedPriceRatio) / Math.pow(10, decimals1);
+
+    // Return appropriate price based on token direction
+    const finalPrice = isToken0 ? (1 / price) : price;
+
+    // Validate result
+    if (!isFinite(finalPrice) || finalPrice <= 0) {
+      logger.warn('Invalid calculated price:', finalPrice);
+      return 0;
+    }
+
+    return finalPrice;
+
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.warn('Error getting price from pool data:', error);
+    logger.error('Error calculating price from sqrtPriceX96:', error);
     return 0;
   }
 }
 
 /**
- * Calculate price impact for a given trade
- * @param currentPrice Current pool price
- * @param newPrice Price after trade
- * @returns Price impact percentage
+ * Get price from pool data with error handling
+ * @param poolData - Pool data containing sqrtPrice
+ * @param isToken0 - Whether this is for token0
+ * @param decimals0 - Token0 decimals
+ * @param decimals1 - Token1 decimals
+ * @returns Price or throws error if invalid
  */
-export function calculatePriceImpact(currentPrice: number, newPrice: number): number {
+export function getPoolPrice(
+  poolData: { sqrtPrice: string | bigint | number },
+  isToken0: boolean = false,
+  decimals0: number = 18,
+  decimals1: number = 18
+): number {
+  if (!poolData || !poolData.sqrtPrice) {
+    throw new Error('Pool data missing sqrtPrice');
+  }
+
+  const price = calculatePriceFromSqrtPriceX96(
+    poolData.sqrtPrice,
+    isToken0,
+    decimals0,
+    decimals1
+  );
+
+  if (price <= 0) {
+    throw new Error('Failed to calculate valid price from pool data');
+  }
+
+  return price;
+}
+
+/**
+ * Calculate spot price between two tokens using pool data
+ * @param tokenASymbol - Symbol of token A
+ * @param tokenBSymbol - Symbol of token B
+ * @param sqrtPriceX96 - The sqrt price from pool
+ * @returns Spot price of tokenA in terms of tokenB
+ */
+export function calculateSpotPrice(
+  tokenASymbol: string,
+  tokenBSymbol: string,
+  sqrtPriceX96: string | bigint | number
+): number {
   try {
-    if (currentPrice === 0) return 0;
-    return Math.abs((newPrice - currentPrice) / currentPrice) * 100;
+    // For most GalaSwap pairs, we can assume 18 decimals
+    const decimals = 18;
+
+    // Calculate base price (tokenB per tokenA)
+    const price = calculatePriceFromSqrtPriceX96(sqrtPriceX96, false, decimals, decimals);
+
+    // Log for debugging
+    logger.debug(`Spot price calculated: 1 ${tokenASymbol} = ${price} ${tokenBSymbol}`);
+
+    return price;
+
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.warn('Error calculating price impact:', error);
-    return 0;
+    logger.error(`Error calculating spot price for ${tokenASymbol}/${tokenBSymbol}:`, error);
+    throw new Error(`Failed to calculate spot price for ${tokenASymbol}/${tokenBSymbol}`);
   }
-}
-
-/**
- * Calculate the nearest valid tick for a given price and tick spacing
- * @param price Target price
- * @param tickSpacing Tick spacing (e.g., 60 for 0.3% fee tier)
- * @returns Nearest valid tick
- */
-export function getNearestValidTick(price: number, tickSpacing: number): number {
-  try {
-    const tick = priceToTick(price);
-    return Math.round(tick / tickSpacing) * tickSpacing;
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.warn('Error getting nearest valid tick:', error);
-    return 0;
-  }
-}
-
-/**
- * Constants for common tick spacings by fee tier
- */
-export const TICK_SPACINGS = {
-  500: 10,     // 0.05% fee tier
-  3000: 60,    // 0.30% fee tier
-  10000: 200   // 1.00% fee tier
-} as const;
-
-/**
- * Get tick spacing for a fee tier
- * @param fee Fee tier (500, 3000, 10000)
- * @returns Tick spacing
- */
-export function getTickSpacing(fee: number): number {
-  return TICK_SPACINGS[fee as keyof typeof TICK_SPACINGS] || 60;
 }

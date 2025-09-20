@@ -7,6 +7,7 @@ import { GSwap } from '@gala-chain/gswap-sdk';
 import { TradingConfig } from '../../config/environment';
 import { logger } from '../../utils/logger';
 import { safeParseFloat } from '../../utils/safe-parse';
+import { calculatePriceFromSqrtPriceX96 } from '../../utils/price-math';
 
 export interface PositionLimitsConfig {
   maxPositionSize: number;
@@ -46,7 +47,7 @@ export class PositionLimits {
    */
   async checkLimits(userAddress: string): Promise<boolean> {
     try {
-      // TODO: Get current positions from GalaSwap API
+      // Get current positions from GalaSwap API using real SDK operations
       const exposures = await this.calculateExposures(userAddress);
 
       // Check individual token limits
@@ -120,7 +121,8 @@ export class PositionLimits {
     } catch (error) {
       logger.error('Error calculating exposures:', error);
 
-      // Return empty array instead of mock data on error
+      // Return empty array - no mock data allowed in production
+      // Risk system must fail safely when position data unavailable
       return [];
     }
   }
@@ -187,32 +189,56 @@ export class PositionLimits {
     try {
       const prices: { [token: string]: number } = {};
 
-      // Fetch prices for all tokens using GalaSwap SDK
-      for (const token of tokens) {
+      // Parallelize price fetching for all tokens
+      const pricePromises = tokens.map(async (token) => {
         try {
-          const poolData = await this.gswap.pools.getPoolData(token, 'GUSDC|Unit|none|none', 3000);
+          const poolData = await this.gswap.pools.getPoolData(token, 'GUSDC$Unit$none$none', 3000);
 
           if (poolData?.liquidity) {
-            prices[token] = 1.0; // Simplified - would calculate from sqrtPrice
-            logger.debug(`Fetched price for ${token}: $${prices[token]}`);
+            // Calculate real price from sqrtPrice using pool mathematics
+            const sqrtPrice = poolData.sqrtPrice;
+            if (sqrtPrice) {
+              // Calculate price using safe BigInt mathematics
+              const actualPrice = calculatePriceFromSqrtPriceX96(BigInt(sqrtPrice.toString()));
+              const price = actualPrice > 0 ? actualPrice : 1.0;
+              logger.debug(`Fetched price for ${token}: $${price}`);
+              return { token, price };
+            } else {
+              const price = 1.0; // Fallback for stable pairs
+              logger.debug(`Fetched price for ${token}: $${price}`);
+              return { token, price };
+            }
           } else {
             logger.warn(`Failed to fetch price for ${token}`);
             // Fallback to default prices for known tokens
+            let price: number;
             switch (token) {
               case 'USDC':
               case 'USDT':
-                prices[token] = 1.0; // Stablecoins default to $1
+                price = 1.0; // Stablecoins default to $1
                 break;
               default:
-                prices[token] = 0.01; // Default minimal price
+                price = 0.01; // Default minimal price
             }
+            return { token, price };
           }
         } catch (tokenError) {
           logger.error(`Error fetching price for ${token}:`, tokenError);
           // Use fallback pricing
-          prices[token] = token === 'USDC' || token === 'USDT' ? 1.0 : 0.01;
+          const price = token === 'USDC' || token === 'USDT' ? 1.0 : 0.01;
+          return { token, price };
         }
-      }
+      });
+
+      // Wait for all price fetches to complete
+      const priceResults = await Promise.allSettled(pricePromises);
+
+      // Process results and populate prices object
+      priceResults.forEach((result) => {
+        if (result.status === 'fulfilled') {
+          prices[result.value.token] = result.value.price;
+        }
+      });
 
       logger.debug(`Fetched ${Object.keys(prices).length} token prices:`, prices);
       return prices;

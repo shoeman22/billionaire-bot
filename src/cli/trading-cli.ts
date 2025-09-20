@@ -7,6 +7,7 @@ import { program } from 'commander';
 import { TradingEngine } from '../trading/TradingEngine';
 import { validateEnvironment } from '../config/environment';
 import { logger } from '../utils/logger';
+// safeParseFloat removed - not used in CLI anymore
 import dotenv from 'dotenv';
 
 // Load environment variables
@@ -29,7 +30,7 @@ program
   .command('auto-trade')
   .description('Start automated trading with all strategies')
   .option('-d, --duration <duration>', 'Trading duration in minutes', '60')
-  .option('-s, --strategies <strategies>', 'Comma-separated list of strategies', 'arbitrage,market-making')
+  .option('-s, --strategies <strategies>', 'Comma-separated list of strategies', 'arbitrage')
   .action(async (options) => {
     try {
       logger.info('🤖 Starting auto-trade mode...');
@@ -45,7 +46,7 @@ program
         await tradingEngine.enableArbitrageStrategy();
       }
       if (strategies.includes('market-making')) {
-        await tradingEngine.enableMarketMakingStrategy();
+        logger.warn('Market-making strategy is not available - SDK v0.0.7 does not support liquidity operations');
       }
 
       // Run for specified duration
@@ -71,46 +72,10 @@ program
   });
 
 /**
- * Backtest command - Run strategy backtesting
+ * Backtest command - REMOVED: No historical data available yet
+ * TODO: Implement when historical price data and trade tracking is available
  */
-program
-  .command('backtest')
-  .description('Run backtesting for trading strategies')
-  .option('-s, --strategy <strategy>', 'Strategy to backtest', 'arbitrage')
-  .option('-d, --days <days>', 'Number of days to backtest', '30')
-  .option('-a, --amount <amount>', 'Initial amount for backtesting', '1000')
-  .action(async (options) => {
-    try {
-      logger.info('📊 Starting backtest...');
-
-      const tradingEngine = await initializeTradingEngine();
-      const strategy = options.strategy;
-      const days = parseInt(options.days);
-      const initialAmount = parseFloat(options.amount);
-
-      logger.info(`Backtesting ${strategy} strategy over ${days} days with $${initialAmount}`);
-
-      // Simplified backtest implementation
-      const backtestResults = await runBacktest(tradingEngine, strategy, days, initialAmount);
-
-      // Display results
-      logger.info('📈 Backtest Results:');
-      logger.info(`Strategy: ${backtestResults.strategy}`);
-      logger.info(`Period: ${backtestResults.days} days`);
-      logger.info(`Initial Amount: $${backtestResults.initialAmount}`);
-      logger.info(`Final Amount: $${backtestResults.finalAmount.toFixed(2)}`);
-      logger.info(`Total Return: ${backtestResults.totalReturn.toFixed(2)}%`);
-      logger.info(`Win Rate: ${backtestResults.winRate.toFixed(2)}%`);
-      logger.info(`Max Drawdown: ${backtestResults.maxDrawdown.toFixed(2)}%`);
-
-      await tradingEngine.stop();
-      process.exit(0);
-
-    } catch (error) {
-      logger.error('❌ Backtest failed:', error);
-      process.exit(1);
-    }
-  });
+// Backtest command removed - requires historical data not yet available in SDK v0.0.7
 
 /**
  * Export command - Export trading data and reports
@@ -132,7 +97,7 @@ program
 
       logger.info(`Exporting ${exportType} data in ${format} format to ${outputPath}`);
 
-      const exportData = await generateExportData(tradingEngine, exportType);
+      const exportData = await generateRealExportData(tradingEngine, exportType);
       await saveExportData(exportData, format, outputPath);
 
       logger.info(`✅ Export completed: ${outputPath}`);
@@ -174,88 +139,53 @@ program
     }
   });
 
-/**
- * Helper function to run backtest
- */
-async function runBacktest(
-  tradingEngine: TradingEngine,
-  strategy: string,
-  days: number,
-  initialAmount: number
-): Promise<{
-  strategy: string;
-  days: number;
-  initialAmount: number;
-  finalAmount: number;
-  totalReturn: number;
-  winRate: number;
-  maxDrawdown: number;
-}> {
-  // Simplified backtest implementation
-  // In a real implementation, this would use historical data
-
-  let currentAmount = initialAmount;
-  let trades = 0;
-  let winningTrades = 0;
-  let maxAmount = initialAmount;
-  let minAmount = initialAmount;
-
-  // Simulate trading over the specified days
-  for (let day = 0; day < days; day++) {
-    // Simulate daily trading results (simplified)
-    const dailyReturn = (Math.random() - 0.4) * 0.05; // -2% to +3% daily range
-    const dailyAmount = currentAmount * (1 + dailyReturn);
-
-    currentAmount = dailyAmount;
-    trades++;
-
-    if (dailyReturn > 0) {
-      winningTrades++;
-    }
-
-    maxAmount = Math.max(maxAmount, currentAmount);
-    minAmount = Math.min(minAmount, currentAmount);
-  }
-
-  const finalAmount = currentAmount;
-  const totalReturn = ((finalAmount - initialAmount) / initialAmount) * 100;
-  const winRate = (winningTrades / trades) * 100;
-  const maxDrawdown = ((maxAmount - minAmount) / maxAmount) * 100;
-
-  return {
-    strategy,
-    days,
-    initialAmount,
-    finalAmount,
-    totalReturn,
-    winRate,
-    maxDrawdown
-  };
-}
+// Backtest function removed - mock implementations not allowed
 
 /**
- * Helper function to generate export data
+ * Helper function to generate real export data from TradingEngine
  */
-async function generateExportData(tradingEngine: TradingEngine, exportType: string): Promise<any[]> { // eslint-disable-line @typescript-eslint/no-explicit-any
+async function generateRealExportData(tradingEngine: TradingEngine, exportType: string): Promise<any[]> { // eslint-disable-line @typescript-eslint/no-explicit-any
   const status = tradingEngine.getStatus();
+  const portfolio = await tradingEngine.getPortfolio();
 
   switch (exportType) {
     case 'trades':
-      return [
-        { timestamp: new Date().toISOString(), type: 'arbitrage', amount: 100, profit: 5.5 },
-        { timestamp: new Date().toISOString(), type: 'market-making', amount: 200, profit: 3.2 }
-      ];
+      // TODO: Implement real trade history when TradingEngine supports trade tracking
+      // For now, return empty array as no mock data is allowed
+      logger.warn('Trade export not yet implemented - no trade history tracking in current TradingEngine');
+      return [];
 
     case 'performance':
       return [
-        { date: new Date().toISOString(), portfolio_value: status.positions.totalValue, daily_pnl: status.risk.dailyPnL }
+        {
+          date: new Date().toISOString(),
+          portfolio_value: portfolio.totalValue || 0,
+          daily_pnl: portfolio.pnl || 0,
+          total_pnl: portfolio.pnl || 0, // Use pnl field (totalPnL doesn't exist)
+          uptime_minutes: Math.floor((status.uptime || 0) / 60),
+          api_health: status.apiHealth ? 'healthy' : 'unhealthy',
+          active_strategies: Object.keys(status.strategies || {}).filter(s => status.strategies[s]?.isActive).join(',')
+        }
       ];
 
     case 'positions':
-      return [
-        { token: 'GALA', amount: 1000, value_usd: 500 },
-        { token: 'USDC', amount: 500, value_usd: 500 }
-      ];
+      // Use real portfolio positions if available
+      if (portfolio.positions && portfolio.positions.length > 0) {
+        return portfolio.positions.map((position: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
+          token: position.token || position.symbol || 'unknown',
+          amount: position.amount || position.balance || 0,
+          value_usd: position.valueUsd || position.value || 0
+        }));
+      } else if (portfolio.balances && portfolio.balances.length > 0) {
+        return portfolio.balances.map((balance: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
+          token: balance.token || balance.symbol || 'unknown',
+          amount: balance.amount || balance.balance || 0,
+          value_usd: balance.valueUsd || balance.value || 0
+        }));
+      } else {
+        logger.warn('No position data available - portfolio may be empty');
+        return [];
+      }
 
     default:
       throw new Error(`Unknown export type: ${exportType}`);

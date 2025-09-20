@@ -4,6 +4,7 @@
  */
 
 import BN from 'bn.js';
+import { safeParseFloat } from './safe-parse';
 
 export interface TokenInfo {
   symbol: string;
@@ -47,11 +48,11 @@ export class TokenFormatter {
       const rawValue = wholePart.toString() + '.' + fractionalStr;
 
       // Trim trailing zeros and format for display
-      const displayValue = parseFloat(rawValue).toFixed(displayDecimals);
-      const trimmedDisplay = parseFloat(displayValue).toString();
+      const displayValue = safeParseFloat(rawValue, 0).toFixed(displayDecimals);
+      const trimmedDisplay = safeParseFloat(displayValue, 0).toString();
 
       // Scientific notation for very large or small numbers
-      const scientificValue = parseFloat(rawValue).toExponential(displayDecimals);
+      const scientificValue = safeParseFloat(rawValue, 0).toExponential(displayDecimals);
 
       return {
         raw: rawValue,
@@ -104,7 +105,7 @@ export class TokenFormatter {
     quoteCurrency?: string
   ): string {
     try {
-      const priceNum = parseFloat(price.toString());
+      const priceNum = safeParseFloat(price.toString(), 0);
 
       if (priceNum === 0) return '0';
 
@@ -121,7 +122,7 @@ export class TokenFormatter {
       }
 
       const formatted = priceNum.toFixed(decimals);
-      const trimmed = parseFloat(formatted).toString();
+      const trimmed = safeParseFloat(formatted, 0).toString();
 
       const suffix = quoteCurrency ? ` ${quoteCurrency}/${baseCurrency}` : ` ${baseCurrency}`;
 
@@ -141,7 +142,7 @@ export class TokenFormatter {
     includeSign: boolean = false
   ): string {
     try {
-      const percentage = parseFloat(value.toString()) * 100;
+      const percentage = safeParseFloat(value.toString(), 0) * 100;
       const formatted = percentage.toFixed(decimals);
       const sign = includeSign && percentage > 0 ? '+' : '';
 
@@ -160,7 +161,7 @@ export class TokenFormatter {
     decimals: number = 2
   ): string {
     try {
-      const num = parseFloat(value.toString());
+      const num = safeParseFloat(value.toString(), 0);
 
       if (num === 0) return '0';
 
@@ -175,7 +176,7 @@ export class TokenFormatter {
       const scaled = num / Math.pow(1000, index);
       const formatted = scaled.toFixed(decimals);
 
-      return parseFloat(formatted).toString() + suffixes[index];
+      return safeParseFloat(formatted, 0).toString() + suffixes[index];
 
     } catch (_error) {
       throw new Error(`Failed to format large number: ${_error}`);
@@ -228,8 +229,8 @@ export class TokenFormatter {
         return { isValid: false, error: 'Amount cannot be empty' };
       }
 
-      // Check for valid number format
-      const num = parseFloat(amount);
+      // Check for valid number format using safe parsing
+      const num = safeParseFloat(amount, NaN);
       if (isNaN(num)) {
         return { isValid: false, error: 'Invalid number format' };
       }

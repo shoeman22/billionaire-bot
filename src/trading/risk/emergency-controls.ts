@@ -10,6 +10,8 @@ import { AlertSystem } from '../../monitoring/alerts';
 import { SwapExecutor } from '../execution/swap-executor';
 import { LiquidityManager } from '../execution/liquidity-manager';
 import { safeParseFloat } from '../../utils/safe-parse';
+import { calculatePriceFromSqrtPriceX96 } from '../../utils/price-math';
+import { createTokenClassKey, FEE_TIERS } from '../../types/galaswap';
 
 export interface EmergencyState {
   isEmergencyActive: boolean;
@@ -414,13 +416,18 @@ export class EmergencyControls {
    * Determine best liquidation method for position
    */
   private determineLiquidationMethod(position: any): 'MARKET_SELL' | 'REMOVE_LIQUIDITY' | 'EMERGENCY_SWAP' {
-    // In emergency situations, prioritize liquidity removal to ensure immediate execution
+    // In emergency situations, prioritize the most reliable liquidation method
     if (position.type === 'liquidity' || position.isLiquidityPosition) {
       return 'REMOVE_LIQUIDITY';
     }
 
-    // For other positions, use emergency swap as fallback
-    return 'REMOVE_LIQUIDITY'; // Default to remove liquidity for test compatibility
+    // For token positions, use market sell for immediate liquidity
+    if (position.token && position.amount > 0) {
+      return 'MARKET_SELL';
+    }
+
+    // For complex positions, use emergency swap as fallback
+    return 'EMERGENCY_SWAP';
   }
 
   /**
@@ -528,17 +535,63 @@ export class EmergencyControls {
     error?: string;
   }> {
     try {
-      // TODO: Implement market sell
-      return {
-        success: false,
-        value: 0,
-        error: 'Market sell not implemented'
+      logger.error(`🚨 EMERGENCY MARKET SELL: ${plan.token} - ${plan.amount}`);
+
+      // Determine output token (sell to USDC for emergency liquidity)
+      const outputToken = 'USDC';
+
+      // Calculate minimum amount out with high slippage tolerance for emergency
+      const estimatedOutput = plan.estimatedValue * (1 - plan.maxSlippage);
+      const amountOutMinimum = Math.max(estimatedOutput * 0.8, 0.01); // 80% of estimated with emergency floor
+
+      // Execute emergency swap using GSwap SDK
+      const swapParams = {
+        tokenIn: createTokenClassKey(plan.token),
+        tokenOut: createTokenClassKey(outputToken),
+        amountIn: plan.amount.toString(),
+        amountOutMinimum: amountOutMinimum.toString(),
+        userAddress: 'configured', // Will be resolved by swap executor
+        fee: FEE_TIERS.STANDARD, // Use standard fee tier for emergency
+        slippageTolerance: plan.maxSlippage,
+        deadline: Math.floor(Date.now() / 1000) + 1800 // 30 minute deadline for emergency
       };
+
+      // Use the existing swap executor for emergency market sell
+      const result = await this.swapExecutor.executeSwap({
+        tokenIn: plan.token,
+        tokenOut: outputToken,
+        amountIn: plan.amount.toString(),
+        userAddress: 'configured',
+        slippageTolerance: plan.maxSlippage,
+        urgency: 'high'
+      });
+
+      if (result.success) {
+        const outputValue = safeParseFloat(result.amountOut, 0);
+        logger.info(`✅ Emergency market sell completed: ${plan.token} → ${outputValue} ${outputToken}`);
+
+        return {
+          success: true,
+          value: outputValue,
+          error: undefined
+        };
+      } else {
+        logger.error(`❌ Emergency market sell failed: ${result.error}`);
+        return {
+          success: false,
+          value: 0,
+          error: result.error || 'Market sell execution failed'
+        };
+      }
+
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown market sell error';
+      logger.error(`💥 Emergency market sell exception:`, error);
+
       return {
         success: false,
         value: 0,
-        error: error instanceof Error ? error.message : 'Market sell failed'
+        error: errorMessage
       };
     }
   }
@@ -574,9 +627,9 @@ export class EmergencyControls {
           positions.push({
             token: token0,
             amount: amount,
-            valueUSD: amount * 100, // Mock USD value - would need price lookup
-            percentOfPortfolio: 0.1, // Mock percentage
-            age: 12, // Mock age in hours
+            valueUSD: await this.calculateRealPositionValue(token0, amount),
+            percentOfPortfolio: await this.calculatePortfolioPercentage(token0, amount),
+            age: this.calculatePositionAge(position),
             positionId: `${position.fee}-${position.tickLower}-${position.tickUpper}`,
             isLiquidityPosition: true
           });
@@ -588,9 +641,9 @@ export class EmergencyControls {
           positions.push({
             token: token1,
             amount: amount,
-            valueUSD: amount * 100, // Mock USD value - would need price lookup
-            percentOfPortfolio: 0.1, // Mock percentage
-            age: 12, // Mock age in hours
+            valueUSD: await this.calculateRealPositionValue(token1, amount),
+            percentOfPortfolio: await this.calculatePortfolioPercentage(token1, amount),
+            age: this.calculatePositionAge(position),
             positionId: `${position.fee}-${position.tickLower}-${position.tickUpper}`,
             isLiquidityPosition: true
           });
@@ -830,10 +883,9 @@ export class EmergencyControls {
 
       // Test 3: Portfolio liquidation
       testsExecuted.push('Portfolio Liquidation');
-      const mockPositions = [
-        { token: 'GALA', amount: 1000, valueUSD: 50, percentOfPortfolio: 0.5, age: 12 }
-      ];
-      const plan = this.createLiquidationPlan(mockPositions);
+      // Test liquidation plan creation with real position data
+      const testPositions = await this.getCurrentPositions();
+      const plan = this.createLiquidationPlan(testPositions);
       if (plan.length === 0) {
         errors.push('Liquidation plan creation failed');
       }
@@ -865,6 +917,82 @@ export class EmergencyControls {
         allTestsPassed: false,
         results: testsExecuted.map(test => ({ testName: test, passed: false }))
       };
+    }
+  }
+
+  /**
+   * Calculate real position value using current market prices
+   */
+  private async calculateRealPositionValue(token: string, amount: number): Promise<number> {
+    try {
+      // Get current price from GalaSwap SDK
+      const poolData = await this.gswap.pools.getPoolData(token, 'GUSDC$Unit$none$none', 3000);
+
+      if (poolData?.sqrtPrice) {
+        // Calculate price using safe BigInt mathematics
+        const actualPrice = calculatePriceFromSqrtPriceX96(BigInt(poolData.sqrtPrice.toString()));
+        return amount * (actualPrice > 0 ? actualPrice : 1.0);
+      }
+
+      // Fallback pricing for known stable tokens
+      if (token === 'USDC' || token === 'USDT') {
+        return amount * 1.0; // $1 for stablecoins
+      }
+
+      // Conservative fallback for unknown tokens
+      return amount * 0.01; // Minimal value to avoid inflated risk calculations
+
+    } catch (error) {
+      logger.error(`Error calculating real position value for ${token}:`, error);
+      return amount * 0.01; // Conservative fallback
+    }
+  }
+
+  /**
+   * Calculate portfolio percentage using real portfolio value
+   */
+  private async calculatePortfolioPercentage(token: string, amount: number): Promise<number> {
+    try {
+      const positionValue = await this.calculateRealPositionValue(token, amount);
+
+      // Get total portfolio value from current positions
+      const allPositions = await this.getCurrentPositions();
+      const totalPortfolioValue = allPositions.reduce((sum, pos) => sum + pos.valueUSD, 0);
+
+      return totalPortfolioValue > 0 ? positionValue / totalPortfolioValue : 0;
+
+    } catch (error) {
+      logger.error(`Error calculating portfolio percentage for ${token}:`, error);
+      return 0; // Safe fallback
+    }
+  }
+
+  /**
+   * Calculate position age from liquidity position timestamp
+   */
+  private calculatePositionAge(position: any): number {
+    try {
+      // Extract timestamp from position if available
+      if (position.timestamp) {
+        const positionTime = typeof position.timestamp === 'string' ?
+          parseInt(position.timestamp) : position.timestamp;
+        return (Date.now() - positionTime) / (1000 * 60 * 60); // Convert to hours
+      }
+
+      // Fallback: use creation block number as approximation
+      if (position.blockNumber) {
+        // Approximate: each block is ~12 seconds on average
+        const currentBlock = Date.now() / 1000 / 12; // Rough approximation
+        const blocksDiff = currentBlock - position.blockNumber;
+        return (blocksDiff * 12) / 3600; // Convert to hours
+      }
+
+      // If no timestamp data available, return 0 (new position)
+      return 0;
+
+    } catch (error) {
+      logger.error('Error calculating position age:', error);
+      return 0; // Safe fallback
     }
   }
 }

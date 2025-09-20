@@ -5,10 +5,11 @@
 
 import { GSwap, PrivateKeySigner } from '@gala-chain/gswap-sdk';
 import { BotConfig } from '../config/environment';
+import { TRADING_CONSTANTS } from '../config/constants';
 import { logger } from '../utils/logger';
 import { PriceTracker } from '../monitoring/price-tracker';
 import { ArbitrageStrategy } from './strategies/arbitrage';
-import { MarketMakingStrategy } from './strategies/market-making';
+// Market-making strategy removed - requires SDK liquidity operations not available in v0.0.7
 import { PositionLimits } from './risk/position-limits';
 import { SlippageProtection } from './risk/slippage';
 import { RiskMonitor } from './risk/risk-monitor';
@@ -24,7 +25,7 @@ export class TradingEngine {
   protected gswap: GSwap;
   private priceTracker: PriceTracker;
   private arbitrageStrategy: ArbitrageStrategy;
-  private marketMakingStrategy: MarketMakingStrategy;
+  // Market-making strategy removed - SDK v0.0.7 doesn't support liquidity operations
   private positionLimits: PositionLimits;
   private slippageProtection: SlippageProtection;
   private riskMonitor: RiskMonitor;
@@ -49,9 +50,15 @@ export class TradingEngine {
   constructor(config: BotConfig) {
     this.config = config;
 
-    // Initialize GSwap SDK
+    // Validate private key exists in environment
+    const privateKey = process.env.WALLET_PRIVATE_KEY;
+    if (!privateKey) {
+      throw new Error('WALLET_PRIVATE_KEY environment variable is required');
+    }
+
+    // Initialize GSwap SDK - access private key directly from environment for security
     this.gswap = new GSwap({
-      signer: new PrivateKeySigner(config.wallet.privateKey),
+      signer: new PrivateKeySigner(privateKey),
       walletAddress: config.wallet.address,
       gatewayBaseUrl: config.api.baseUrl,
       dexBackendBaseUrl: config.api.baseUrl,
@@ -87,12 +94,7 @@ export class TradingEngine {
       this.swapExecutor,
       this.marketAnalysis
     );
-    this.marketMakingStrategy = new MarketMakingStrategy(
-      this.gswap,
-      config.trading,
-      this.liquidityManager,
-      this.priceTracker
-    );
+    // Market-making strategy removed - SDK v0.0.7 doesn't support required liquidity operations
 
     logger.info('Trading Engine initialized with all components');
   }
@@ -129,7 +131,7 @@ export class TradingEngine {
 
       // Initialize strategies
       await this.arbitrageStrategy.initialize();
-      await this.marketMakingStrategy.initialize();
+      // Market-making strategy removed - SDK v0.0.7 doesn't support liquidity operations
 
       // Start trading loops
       this.startTradingLoop();
@@ -157,13 +159,16 @@ export class TradingEngine {
 
       // Stop strategies
       await this.arbitrageStrategy.stop();
-      await this.marketMakingStrategy.stop();
+      // Market-making strategy removed - SDK v0.0.7 doesn't support liquidity operations
 
       // Stop risk monitoring
       this.riskMonitor.stopMonitoring();
 
       // Stop price tracking
       await this.priceTracker.stop();
+
+      // Stop alert system
+      this.alertSystem.destroy();
 
       // Clear trading interval
       if (this.tradingIntervalId) {
@@ -320,14 +325,12 @@ export class TradingEngine {
           // Strong bullish trend - favor arbitrage (only if not high risk)
           await this.arbitrageStrategy.execute();
         } else if (marketCondition.volatility === 'low' && marketCondition.liquidity === 'good' && riskCheck.riskLevel === 'low') {
-          // Low volatility, good liquidity, low risk - favor market making
-          await this.marketMakingStrategy.execute();
+          // Low volatility, good liquidity, low risk - would favor market making but strategy not available
+          // Fall back to arbitrage if conditions are favorable
+          await this.arbitrageStrategy.execute();
         } else if (marketCondition.confidence > 50 && riskCheck.riskLevel === 'low') {
-          // Balanced conditions, low risk - run both strategies
-          await Promise.all([
-            this.arbitrageStrategy.execute(),
-            this.marketMakingStrategy.execute()
-          ]);
+          // Balanced conditions, low risk - only arbitrage available
+          await this.arbitrageStrategy.execute();
         } else {
           logger.debug('Conditions not suitable for strategy execution', {
             marketCondition: marketCondition.overall,
@@ -587,13 +590,13 @@ export class TradingEngine {
 
         try {
           // Get prices by fetching pool data against GUSDC (USD stable coin)
-          const usdcToken = 'GUSDC|Unit|none|none';
+          const usdcToken = TRADING_CONSTANTS.TOKENS.GUSDC;
           const priceMap = new Map<string, number>();
 
-          for (const token of uniqueTokens) {
+          // Parallelize price fetching for all tokens
+          const pricePromises = uniqueTokens.map(async (token) => {
             if (token === usdcToken) {
-              priceMap.set(token, 1.0); // GUSDC is 1:1 with USD
-              continue;
+              return { token, price: 1.0 }; // GUSDC is 1:1 with USD
             }
 
             try {
@@ -601,7 +604,7 @@ export class TradingEngine {
               const poolData = await this.gswap.pools.getPoolData(token, usdcToken, 3000);
               if (poolData?.sqrtPrice) {
                 const price = this.gswap.pools.calculateSpotPrice(token, usdcToken, poolData.sqrtPrice);
-                priceMap.set(token, safeParseFloat(price.toString(), 0));
+                return { token, price: safeParseFloat(price.toString(), 0) };
               }
             } catch (error) {
               logger.debug(`Could not get pool price for ${token}:`, error);
@@ -610,13 +613,25 @@ export class TradingEngine {
                 const poolData = await this.gswap.pools.getPoolData(token, usdcToken, 500);
                 if (poolData?.sqrtPrice) {
                   const price = this.gswap.pools.calculateSpotPrice(token, usdcToken, poolData.sqrtPrice);
-                  priceMap.set(token, safeParseFloat(price.toString(), 0));
+                  return { token, price: safeParseFloat(price.toString(), 0) };
                 }
               } catch (error) {
                 logger.debug(`Could not get pool price for ${token} on lower fee tier:`, error);
               }
             }
-          }
+
+            return { token, price: 0 };
+          });
+
+          // Wait for all price fetches to complete
+          const priceResults = await Promise.allSettled(pricePromises);
+
+          // Process results and populate price map
+          priceResults.forEach((result) => {
+            if (result.status === 'fulfilled') {
+              priceMap.set(result.value.token, result.value.price);
+            }
+          });
 
           // Calculate value from token balances using cached prices
           for (const balance of balances) {
@@ -716,8 +731,7 @@ export class TradingEngine {
     // Get strategy statistics
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const arbitrageStats = this.arbitrageStrategy.getStatus();
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const marketMakingStats = this.marketMakingStrategy.getStatus();
+    // Market-making strategy removed - SDK v0.0.7 doesn't support liquidity operations
 
     // Update aggregated stats
     // TODO: Implement proper statistics aggregation
@@ -747,7 +761,7 @@ export class TradingEngine {
       apiHealth: true, // TODO: Get actual health status
       strategies: {
         arbitrage: this.arbitrageStrategy.getStatus(),
-        marketMaking: this.marketMakingStrategy.getStatus(),
+        // Market making removed - SDK v0.0.7 doesn't support liquidity operations
       },
       performance: {
         totalTrades: this.tradingStats.totalTrades,
@@ -881,16 +895,10 @@ export class TradingEngine {
   }
 
   /**
-   * Enable market making strategy
+   * Market making strategy - NOT AVAILABLE (SDK v0.0.7 limitation)
    */
   async enableMarketMakingStrategy(): Promise<void> {
-    try {
-      await this.marketMakingStrategy.initialize();
-      logger.info('✅ Market making strategy enabled');
-    } catch (error) {
-      logger.error('❌ Failed to enable market making strategy:', error);
-      throw error;
-    }
+    throw new Error('Market making strategy not available - SDK v0.0.7 does not support liquidity operations');
   }
 
   /**

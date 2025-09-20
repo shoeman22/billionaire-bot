@@ -4,6 +4,7 @@
  */
 
 import { logger } from '../utils/logger';
+import { safeParseFloat } from '../utils/safe-parse';
 
 export interface BotConfig {
   trading: TradingConfig;
@@ -38,7 +39,7 @@ export interface ApiConfig {
 
 export interface WalletConfig {
   address: string;
-  privateKey: string;
+  // Private key removed for security - use SignerService instead
 }
 
 export interface DevelopmentConfig {
@@ -83,9 +84,9 @@ export function validateEnvironment(): BotConfig {
 
   const config: BotConfig = {
     trading: {
-      maxPositionSize: parseFloat(process.env.MAX_POSITION_SIZE || '1000'),
-      defaultSlippageTolerance: parseFloat(process.env.DEFAULT_SLIPPAGE_TOLERANCE || '0.01'),
-      minProfitThreshold: parseFloat(process.env.MIN_PROFIT_THRESHOLD || '0.001'),
+      maxPositionSize: safeParseFloat(process.env.MAX_POSITION_SIZE, 1000),
+      defaultSlippageTolerance: safeParseFloat(process.env.DEFAULT_SLIPPAGE_TOLERANCE, 0.01),
+      minProfitThreshold: safeParseFloat(process.env.MIN_PROFIT_THRESHOLD, 0.001),
     },
     api: {
       baseUrl: process.env.GALASWAP_API_URL!,
@@ -93,7 +94,7 @@ export function validateEnvironment(): BotConfig {
     },
     wallet: {
       address: walletAddress,
-      privateKey: privateKey,
+      // Private key no longer stored in config for security
     },
     development: {
       nodeEnv: process.env.NODE_ENV || 'development',

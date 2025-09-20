@@ -1,20 +1,16 @@
 /**
  * Liquidity Manager
- * Manages liquidity positions for market making and yield farming
+ * Manages liquidity positions for yield farming (market making not supported by SDK v0.0.7)
  */
 
 import { GSwap } from '@gala-chain/gswap-sdk';
 import { logger } from '../../utils/logger';
 import { safeParseFloat } from '../../utils/safe-parse';
 import {
-  AddLiquidityPayloadRequest,
-  RemoveLiquidityPayloadRequest,
   CollectFeesPayloadRequest,
-  AddLiquidityEstimateRequest,
-  PoolResponse,
-  ErrorResponse,
+  createTokenClassKey,
   isSuccessResponse,
-  createTokenClassKey
+  ErrorResponse
 } from '../../types/galaswap';
 
 export interface LiquidityPosition {
@@ -55,7 +51,20 @@ export class LiquidityManager {
 
   constructor(gswap: GSwap) {
     this.gswap = gswap;
+    this.validateSDKCapabilities();
     logger.info('Liquidity Manager initialized');
+  }
+
+  /**
+   * Validate SDK capabilities for liquidity operations
+   */
+  private validateSDKCapabilities(): void {
+    logger.warn('SDK v0.0.7 Liquidity Limitations Detected:');
+    logger.warn('- Add liquidity operations not available');
+    logger.warn('- Remove liquidity operations not available');
+    logger.warn('- Fee collection operations not available');
+    logger.warn('- Position management limited to read-only');
+    logger.info('Available operations: Pool data queries, Position queries');
   }
 
   /**
@@ -82,9 +91,18 @@ export class LiquidityManager {
       // Step 2: Get current pool state
       const pool = await this.gswap.pools.getPoolData(params.token0, params.token1, params.fee);
       if (!pool) {
+        logger.error(`Pool not found: ${params.token0}/${params.token1}/${params.fee}`);
         return {
           success: false,
-          error: 'Failed to get pool information',
+          error: `Pool not found for ${params.token0}/${params.token1} with ${params.fee} fee tier`,
+        };
+      }
+
+      if (!pool.liquidity || pool.liquidity.toString() === '0') {
+        logger.error(`Pool has no liquidity: ${params.token0}/${params.token1}/${params.fee}`);
+        return {
+          success: false,
+          error: 'Pool has insufficient liquidity for position creation',
         };
       }
 
@@ -105,7 +123,7 @@ export class LiquidityManager {
         // Store position locally
         const position: LiquidityPosition = {
           id: result.positionId,
-          poolAddress: 'N/A', // Pool address not available in current response
+          poolAddress: `${params.token0}/${params.token1}/${params.fee}`, // Pool identifier
           token0: params.token0,
           token1: params.token1,
           fee: params.fee,
@@ -244,33 +262,47 @@ export class LiquidityManager {
         };
       }
 
-      // Execute fee collection using SDK (SDK doesn't have collectFees method)
-      // For now, return mock success response
-      const bundleResponse = {
-        error: false,
-        status: 200,
-        data: {
-          transactionId: 'collect-fees-' + Date.now(),
-          hash: '0x' + Math.random().toString(16).substring(2)
-        },
-        message: 'Success'
-      };
+      // Execute fee collection using SDK positions API
+      try {
+        // Get actual position data to check for accumulated fees
+        const positionData = await this.gswap.positions.getPosition(
+          userAddress,
+          {
+            token0ClassKey: position.token0,
+            token1ClassKey: position.token1,
+            fee: position.fee,
+            tickLower: position.tickLower,
+            tickUpper: position.tickUpper
+          }
+        );
 
-      if (!isSuccessResponse(bundleResponse)) {
+        if (!positionData) {
+          return {
+            success: false,
+            error: 'Position not found on-chain',
+          };
+        }
+
+        // SDK doesn't currently support direct fee collection
+        // This would require removal and re-addition of position
+        // For production safety, fail explicitly rather than mock
         return {
           success: false,
-          error: `Failed to execute collection: ${(bundleResponse as ErrorResponse).message}`,
+          error: 'Fee collection not yet implemented in SDK - requires position management upgrade',
+        };
+      } catch (error) {
+        logger.error('Error during fee collection:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Fee collection failed',
         };
       }
 
-      logger.info(`Fee collection submitted: ${bundleResponse.data.transactionId}`);
-
+      // This section is unreachable due to early return above
+      // Keeping for reference in case SDK upgrade adds fee collection
       return {
-        success: true,
-        transactionId: bundleResponse.data.transactionId,
-        // TODO: Get actual fee amounts from transaction result
-        fees0: '0',
-        fees1: '0',
+        success: false,
+        error: 'Fee collection path should not be reached',
       };
 
     } catch (error) {
@@ -331,14 +363,51 @@ export class LiquidityManager {
       return { valid: false, error: 'Token addresses required' };
     }
 
+    // Validate token format (should be collection$category$type$additionalKey)
+    const tokenRegex = /^[^$]+\$[^$]+\$[^$]+\$[^$]*$/;
+    if (!tokenRegex.test(params.token0)) {
+      return { valid: false, error: `Invalid token0 format: ${params.token0}. Expected: collection$category$type$additionalKey` };
+    }
+    if (!tokenRegex.test(params.token1)) {
+      return { valid: false, error: `Invalid token1 format: ${params.token1}. Expected: collection$category$type$additionalKey` };
+    }
+
+    // Check that tokens are different
+    if (params.token0 === params.token1) {
+      return { valid: false, error: 'Token0 and token1 must be different' };
+    }
+
     // Check amounts
-    if (safeParseFloat(params.amount0, 0) <= 0 || safeParseFloat(params.amount1, 0) <= 0) {
+    const amount0 = safeParseFloat(params.amount0, 0);
+    const amount1 = safeParseFloat(params.amount1, 0);
+    if (amount0 <= 0 || amount1 <= 0) {
       return { valid: false, error: 'Amounts must be positive' };
+    }
+
+    // Check for reasonable amounts (not too large)
+    if (amount0 > 1e18 || amount1 > 1e18) {
+      return { valid: false, error: 'Amounts exceed maximum allowed' };
     }
 
     // Check tick range
     if (params.tickLower >= params.tickUpper) {
-      return { valid: false, error: 'Invalid tick range' };
+      return { valid: false, error: 'Invalid tick range: tickLower must be less than tickUpper' };
+    }
+
+    // Check tick boundaries (reasonable range for Uniswap v3 style)
+    if (params.tickLower < -887272 || params.tickUpper > 887272) {
+      return { valid: false, error: 'Tick range exceeds allowed boundaries' };
+    }
+
+    // Check fee tier validity
+    const validFeeTiers = [100, 500, 3000, 10000]; // 0.01%, 0.05%, 0.3%, 1%
+    if (!validFeeTiers.includes(params.fee)) {
+      return { valid: false, error: `Invalid fee tier: ${params.fee}. Valid options: ${validFeeTiers.join(', ')}` };
+    }
+
+    // Check user address
+    if (!params.userAddress || params.userAddress.length === 0) {
+      return { valid: false, error: 'User address required' };
     }
 
     return { valid: true };
@@ -349,33 +418,57 @@ export class LiquidityManager {
    */
   private async calculateOptimalAmounts(
     params: AddLiquidityParams,
-    poolData: any
+    poolData: { sqrtPrice?: { toString(): string }; liquidity?: { toString(): string } }
   ): Promise<{ amount0: string; amount1: string }> {
     try {
-      // Get liquidity estimate from GalaSwap API
-      // SDK doesn't have estimateAddLiquidity method, use mock calculation
-      const estimateResponse = {
-        error: false,
-        data: {
-          Data: {
-            amount0: params.amount0,
-            amount1: params.amount1
-          }
+      // Calculate optimal amounts using pool ratio
+      try {
+        const currentPrice = poolData.sqrtPrice?.toString();
+        if (!currentPrice) {
+          throw new Error('Pool price not available');
         }
-      };
 
-      if (isSuccessResponse(estimateResponse)) {
+        // Calculate price from sqrtPrice (sqrtPrice^2 = price)
+        const price = Math.pow(Number(currentPrice), 2) / Math.pow(2, 192); // Adjust for Q64.96 format
+
+        // Calculate optimal ratio based on current pool price
+        const amount0Desired = safeParseFloat(params.amount0, 0);
+        const amount1Desired = safeParseFloat(params.amount1, 0);
+
+        // Determine which amount is limiting and adjust the other
+        const ratio = amount1Desired / amount0Desired;
+        const poolRatio = price;
+
+        let optimalAmount0: string, optimalAmount1: string;
+
+        if (ratio > poolRatio) {
+          // amount1 is excessive, reduce it
+          optimalAmount0 = params.amount0;
+          optimalAmount1 = (amount0Desired * poolRatio).toString();
+        } else {
+          // amount0 is excessive, reduce it
+          optimalAmount1 = params.amount1;
+          optimalAmount0 = (amount1Desired / poolRatio).toString();
+        }
+
+        logger.info(`Calculated optimal amounts: ${optimalAmount0} ${params.token0} + ${optimalAmount1} ${params.token1}`);
         return {
-          amount0: estimateResponse.data.Data.amount0,
-          amount1: estimateResponse.data.Data.amount1,
+          amount0: optimalAmount0,
+          amount1: optimalAmount1
         };
-      } else {
-        logger.warn('Failed to get liquidity estimate, using original amounts');
+      } catch (error) {
+        logger.warn('Error calculating pool-based amounts, using original:', error);
         return {
           amount0: params.amount0,
-          amount1: params.amount1,
+          amount1: params.amount1
         };
       }
+
+      // This code path is unreachable due to earlier return
+      return {
+        amount0: params.amount0,
+        amount1: params.amount1,
+      };
     } catch (error) {
       logger.warn('Error calculating optimal amounts:', error);
       return {
@@ -393,34 +486,53 @@ export class LiquidityManager {
     liquidityToRemove: string
   ): Promise<{ amount0: string; amount1: string }> {
     try {
-      // Get removal estimate from GalaSwap API
-      // SDK doesn't have estimateRemoveLiquidity method, use proportional calculation
-      const positionLiquidity = safeParseFloat(position.liquidity, 0);
-      const proportion = positionLiquidity > 0 ? safeParseFloat(liquidityToRemove, 0) / positionLiquidity : 0;
-      const estimateResponse = {
-        error: false,
-        data: {
-          Data: {
-            amount0: (safeParseFloat(position.amount0, 0) * proportion).toString(),
-            amount1: (safeParseFloat(position.amount1, 0) * proportion).toString()
-          }
+      // Calculate removal amounts using position's liquidity ratio
+      try {
+        // Get current pool state for accurate calculations
+        const poolData = await this.gswap.pools.getPoolData(position.token0, position.token1, position.fee);
+        if (!poolData) {
+          throw new Error('Pool data not available for removal calculation');
         }
-      };
 
-      if (isSuccessResponse(estimateResponse)) {
+        const positionLiquidity = safeParseFloat(position.liquidity, 0);
+        const liquidityToRemoveNum = safeParseFloat(liquidityToRemove, 0);
+
+        if (positionLiquidity <= 0) {
+          throw new Error('Position has no liquidity');
+        }
+
+        if (liquidityToRemoveNum > positionLiquidity) {
+          throw new Error('Cannot remove more liquidity than position contains');
+        }
+
+        const proportion = liquidityToRemoveNum / positionLiquidity;
+
+        // Use current pool price to calculate token amounts
+        // Calculate estimated amounts based on liquidity proportion
+        // This is an approximation - actual amounts depend on tick range and current price
+        const estimatedAmount0 = (safeParseFloat(position.amount0, 0) * proportion);
+        const estimatedAmount1 = (safeParseFloat(position.amount1, 0) * proportion);
+
+        logger.info(`Calculated removal amounts: ${estimatedAmount0} ${position.token0} + ${estimatedAmount1} ${position.token1}`);
         return {
-          amount0: estimateResponse.data.Data.amount0,
-          amount1: estimateResponse.data.Data.amount1,
+          amount0: estimatedAmount0.toString(),
+          amount1: estimatedAmount1.toString()
         };
-      } else {
-        logger.warn('Failed to get removal estimate, using proportional calculation');
+      } catch (error) {
+        logger.warn('Error calculating pool-based removal, using proportional fallback:', error);
         const positionLiquidity = safeParseFloat(position.liquidity, 0);
         const proportion = positionLiquidity > 0 ? safeParseFloat(liquidityToRemove, 0) / positionLiquidity : 0;
         return {
           amount0: (safeParseFloat(position.amount0, 0) * proportion).toString(),
-          amount1: (safeParseFloat(position.amount1, 0) * proportion).toString(),
+          amount1: (safeParseFloat(position.amount1, 0) * proportion).toString()
         };
       }
+
+      // This code path is unreachable due to earlier return
+      return {
+        amount0: '0',
+        amount1: '0',
+      };
     } catch (error) {
       logger.warn('Error calculating removal amounts:', error);
       const positionLiquidity = safeParseFloat(position.liquidity, 0);
@@ -435,40 +547,18 @@ export class LiquidityManager {
   /**
    * Prepare liquidity transaction payload
    */
-  private async prepareLiquidityPayload(params: AddLiquidityParams): Promise<any> {
+  private async prepareLiquidityPayload(_params: AddLiquidityParams): Promise<never> {
     try {
-      // Calculate minimum amounts with 1% slippage tolerance
-      const slippageTolerance = 0.01;
-      const amount0Min = (safeParseFloat(params.amount0, 0) * (1 - slippageTolerance)).toString();
-      const amount1Min = (safeParseFloat(params.amount1, 0) * (1 - slippageTolerance)).toString();
+      // This method validates parameters but cannot create payloads in SDK v0.0.7
+      logger.debug('Liquidity payload preparation requested but not supported');
 
-      const addLiquidityRequest: AddLiquidityPayloadRequest = {
-        token0: createTokenClassKey(params.token0),
-        token1: createTokenClassKey(params.token1),
-        fee: params.fee,
-        tickLower: params.tickLower,
-        tickUpper: params.tickUpper,
-        amount0Desired: params.amount0,
-        amount1Desired: params.amount1,
-        amount0Min,
-        amount1Min
-      };
+      // Validate that SDK supports liquidity operations before preparing payload
+      // Current SDK v0.0.7 does not have liquidity addition methods
+      logger.error('SDK liquidity operations not available - cannot prepare payload');
+      throw new Error('Liquidity operations require SDK upgrade from v0.0.7');
 
-      // SDK doesn't have generateAddLiquidityPayload, will prepare for addLiquidityByPrice
-      const payloadResponse = {
-        error: false,
-        status: 200,
-        data: {
-          payload: addLiquidityRequest
-        },
-        message: 'Success'
-      };
-
-      if (!isSuccessResponse(payloadResponse)) {
-        throw new Error(`Failed to generate add liquidity payload: ${(payloadResponse as ErrorResponse).message}`);
-      }
-
-      return payloadResponse.data;
+      // This code path is unreachable due to error thrown above
+      throw new Error('Add liquidity payload generation not implemented');
 
     } catch (error) {
       logger.error('Error preparing liquidity payload:', error);
@@ -479,45 +569,22 @@ export class LiquidityManager {
   /**
    * Prepare liquidity removal payload
    */
-  private async prepareRemovalPayload(params: RemoveLiquidityParams): Promise<any> {
+  private async prepareRemovalPayload(params: RemoveLiquidityParams): Promise<never> {
     try {
-      const position = this.positions.get(params.positionId);
-      if (!position) {
+      const targetPosition = this.positions.get(params.positionId);
+      if (!targetPosition) {
         throw new Error('Position not found');
       }
+      // This method validates parameters but cannot create payloads in SDK v0.0.7
+      logger.debug('Liquidity removal payload preparation requested but not supported');
 
-      // Calculate minimum amounts with 1% slippage tolerance
-      const amounts = await this.calculateRemovalAmounts(position, params.liquidity);
-      const slippageTolerance = 0.01;
-      const amount0Min = (safeParseFloat(amounts.amount0, 0) * (1 - slippageTolerance)).toString();
-      const amount1Min = (safeParseFloat(amounts.amount1, 0) * (1 - slippageTolerance)).toString();
+      // Validate that SDK supports liquidity operations before preparing payload
+      // Current SDK v0.0.7 does not have liquidity removal methods
+      logger.error('SDK liquidity operations not available - cannot prepare removal payload');
+      throw new Error('Liquidity operations require SDK upgrade from v0.0.7');
 
-      const removeLiquidityRequest: RemoveLiquidityPayloadRequest = {
-        token0: createTokenClassKey(position.token0),
-        token1: createTokenClassKey(position.token1),
-        fee: position.fee,
-        tickLower: position.tickLower,
-        tickUpper: position.tickUpper,
-        amount: params.liquidity,
-        amount0Min,
-        amount1Min
-      };
-
-      // SDK doesn't have generateRemoveLiquidityPayload, will prepare for removeLiquidity
-      const payloadResponse = {
-        error: false,
-        status: 200,
-        data: {
-          payload: removeLiquidityRequest
-        },
-        message: 'Success'
-      };
-
-      if (!isSuccessResponse(payloadResponse)) {
-        throw new Error(`Failed to generate remove liquidity payload: ${(payloadResponse as ErrorResponse).message}`);
-      }
-
-      return payloadResponse.data;
+      // This code path is unreachable due to error thrown above
+      throw new Error('Remove liquidity payload generation not implemented');
 
     } catch (error) {
       logger.error('Error preparing removal payload:', error);
@@ -529,7 +596,7 @@ export class LiquidityManager {
    * Execute liquidity transaction
    */
   private async executeLiquidityTransaction(
-    payload: any,
+    _payload: unknown,
     action: 'add' | 'remove'
   ): Promise<{
     success: boolean;
@@ -543,45 +610,20 @@ export class LiquidityManager {
       // Execute using SDK
       let bundleResponse;
       if (action === 'add') {
-        // SDK doesn't have addLiquidityByPrice method, create mock result
-        const mockTxId = 'tx-' + Date.now();
-        const addResult = {
-          txId: mockTxId,
-          wait: async () => ({
-            txId: mockTxId,
-            transactionHash: '0x' + Math.random().toString(16).substring(2)
-          })
-        };
-
-        const completedTx = await addResult.wait();
-        bundleResponse = {
-          error: false,
-          data: {
-            transactionId: addResult.txId || completedTx.txId,
-            hash: completedTx.transactionHash
-          },
-          message: 'Success'
+        // SDK does not currently support direct liquidity addition
+        // This is a critical missing feature for production DeFi operations
+        // Instead of creating fake transactions, fail safely
+        return {
+          success: false,
+          error: 'Add liquidity not implemented in SDK v0.0.7 - upgrade required for production deployment',
         };
       } else {
-        // SDK doesn't have removeLiquidity method, create mock result
-        const mockTxId = 'tx-' + Date.now();
-        const removeResult = {
-          txId: mockTxId,
-          wait: async () => ({
-            txId: mockTxId,
-            transactionHash: '0x' + Math.random().toString(16).substring(2)
-          })
-        };
-
-        const completedTx = await removeResult.wait();
-        bundleResponse = {
-          error: false,
-          status: 200,
-          data: {
-            transactionId: removeResult.txId || completedTx.txId,
-            hash: completedTx.transactionHash
-          },
-          message: 'Success'
+        // SDK does not currently support direct liquidity removal
+        // This is a critical missing feature for production DeFi operations
+        // Instead of creating fake transactions, fail safely
+        return {
+          success: false,
+          error: 'Remove liquidity not implemented in SDK v0.0.7 - upgrade required for production deployment',
         };
       }
 
@@ -603,7 +645,7 @@ export class LiquidityManager {
       return {
         success: true,
         transactionId,
-        positionId: action === 'add' ? transactionId : undefined, // Position ID is typically the transaction ID for new positions
+        positionId: action === 'add' ? `position-${Date.now()}` : undefined, // Position ID generated since payload is not accessible
       };
 
     } catch (error) {
@@ -630,7 +672,7 @@ export class LiquidityManager {
         for (const position of response.positions) {
           const localPosition: LiquidityPosition = {
             id: `${position.tickLower}-${position.tickUpper}-${position.fee}`, // Generate ID from position data
-            poolAddress: '',
+            poolAddress: `${position.token0ClassKey?.collection || 'unknown'}/${position.token1ClassKey?.collection || 'unknown'}/${position.fee}`,
             token0: position.token0ClassKey ? `${position.token0ClassKey.collection}$${position.token0ClassKey.category}$${position.token0ClassKey.type}$${position.token0ClassKey.additionalKey}` : '',
             token1: position.token1ClassKey ? `${position.token1ClassKey.collection}$${position.token1ClassKey.category}$${position.token1ClassKey.type}$${position.token1ClassKey.additionalKey}` : '',
             fee: position.fee,
@@ -648,7 +690,7 @@ export class LiquidityManager {
 
         logger.debug(`Synced ${response.positions.length} positions for ${userAddress}`);
       } else {
-        logger.warn(`Failed to sync positions: ${(response as any)?.message || 'Unknown error'}`);
+        logger.warn(`Failed to sync positions: ${response ? 'Invalid response format' : 'No response received'}`);
       }
     } catch (error) {
       logger.error('Error syncing positions:', error);
@@ -658,10 +700,10 @@ export class LiquidityManager {
   /**
    * Update a single position with latest data
    */
-  private async updatePosition(position: LiquidityPosition, userAddress?: string): Promise<void> {
+  private async updatePosition(position: LiquidityPosition, userAddress = 'configured'): Promise<void> {
     try {
       // Get user address from SDK configuration if not provided
-      const walletAddress = userAddress || 'configured';
+      const walletAddress = userAddress;
 
       // Get fresh position data from GalaSwap API
       const positionResponse = await this.gswap.positions.getPosition(

@@ -294,16 +294,23 @@ describe('Security Tests', () => {
       }
     });
 
-    it('should use secure random generation for test keys', () => {
-      // Test that we're not using predictable private keys
+    it('should use secure environment variable for private keys', () => {
+      // Test that private keys come from environment variables, not config objects
       const config1 = TestHelpers.createTestBotConfig();
       const config2 = TestHelpers.createTestBotConfig();
 
-      // Verify keys are long enough and different
-      expect(config1.wallet.privateKey).toBeDefined();
-      expect(config2.wallet.privateKey).toBeDefined();
-      expect(config1.wallet.privateKey.length).toBeGreaterThan(60);
-      expect(config2.wallet.privateKey.length).toBeGreaterThan(60);
+      // Verify wallet config doesn't contain private keys (security improvement)
+      expect(config1.wallet).not.toHaveProperty('privateKey');
+      expect(config2.wallet).not.toHaveProperty('privateKey');
+
+      // Verify that only address is stored in config
+      expect(config1.wallet.address).toBeDefined();
+      expect(config2.wallet.address).toBeDefined();
+
+      // In production, private key should come from environment variable
+      // This test validates that we don't store private keys in config objects
+      expect(typeof config1.wallet.address).toBe('string');
+      expect(config1.wallet.address.length).toBeGreaterThan(10);
     });
   });
 

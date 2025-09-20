@@ -5,6 +5,7 @@
 
 import { GSwap } from '@gala-chain/gswap-sdk';
 import { BotConfig } from '../../config/environment';
+import { safeParseFloat } from '../../utils/safe-parse';
 
 export class TestHelpers {
   /**
@@ -29,8 +30,7 @@ export class TestHelpers {
         wsUrl: 'http://localhost:3001/ws'
       },
       wallet: {
-        address: 'client|0x1234567890123456789012345678901234567890',
-        privateKey: '0123456789012345678901234567890123456789012345678901234567890123'
+        address: 'client|0x1234567890123456789012345678901234567890'
       },
       trading: {
         maxPositionSize: 1000,
@@ -51,12 +51,8 @@ export class TestHelpers {
             enabled: true,
             minProfitBps: 50,
             maxGasPrice: 100
-          },
-          marketMaking: {
-            enabled: true,
-            spreadBps: 30,
-            inventoryTarget: 0.5
           }
+          // Market making strategy removed - SDK v0.0.7 does not support liquidity operations
         }
       },
       development: {
@@ -86,7 +82,7 @@ export class TestHelpers {
 
       data.push({
         timestamp: now - (i * dayMs),
-        price: parseFloat(price.toFixed(6)),
+        price: safeParseFloat(price.toFixed(6), 0),
         volume: 1000000 + Math.random() * 5000000
       });
     }

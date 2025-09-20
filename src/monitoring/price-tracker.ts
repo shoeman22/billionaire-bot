@@ -7,6 +7,7 @@ import { GSwap } from '@gala-chain/gswap-sdk';
 import { logger } from '../utils/logger';
 import { TRADING_CONSTANTS } from '../config/constants';
 import { createTokenClassKey } from '../types/galaswap';
+import { safeParseFloat } from '../utils/safe-parse';
 
 export interface PriceData {
   token: string;
@@ -245,10 +246,10 @@ export class PriceTracker {
       if (data.token && data.price) {
         const priceData: PriceData = {
           token: data.token.toUpperCase(),
-          price: parseFloat(data.price),
-          priceUsd: parseFloat(data.priceUsd || data.price),
-          change24h: parseFloat(data.change24h || 0),
-          volume24h: parseFloat(data.volume24h || 0),
+          price: safeParseFloat(data.price, 0),
+          priceUsd: safeParseFloat(data.priceUsd || data.price, 0),
+          change24h: safeParseFloat(data.change24h || 0, 0),
+          volume24h: safeParseFloat(data.volume24h || 0, 0),
           timestamp: Date.now(),
         };
 
@@ -286,7 +287,7 @@ export class PriceTracker {
       // Get prices for all tracked tokens using SDK
       for (const tokenKey of this.TOKENS_TO_TRACK) {
         try {
-          const poolData = await this.gswap.pools.getPoolData(tokenKey, 'GUSDC|Unit|none|none', 3000);
+          const poolData = await this.gswap.pools.getPoolData(tokenKey, 'GUSDC$Unit$none$none', 3000);
 
           if (poolData?.sqrtPrice) {
             const tokenClassKey = createTokenClassKey(tokenKey);

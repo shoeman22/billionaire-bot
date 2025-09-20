@@ -5,6 +5,7 @@
 
 // import { TokenFormatter } from './formatting'; // Unused - commenting out to fix linting
 import { TRADING_CONSTANTS } from '../config/constants';
+import { safeParseFloat } from './safe-parse';
 
 export interface ValidationResult {
   isValid: boolean;
@@ -389,7 +390,7 @@ export class InputValidator {
       return { isValid: false, errors, warnings };
     }
 
-    const numAmount = parseFloat(sanitizedAmount);
+    const numAmount = safeParseFloat(sanitizedAmount, 0);
 
     // Check for NaN, Infinity, etc.
     if (!Number.isFinite(numAmount)) {

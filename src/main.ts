@@ -8,6 +8,7 @@ import { Command } from 'commander';
 import { validateEnvironment } from './config/environment';
 import { TradingEngine } from './trading/TradingEngine';
 import { logger } from './utils/logger';
+import { safeParseFloat } from './utils/safe-parse';
 
 const program = new Command();
 
@@ -98,7 +99,7 @@ program
         tokenIn: options.tokenIn,
         tokenOut: options.tokenOut,
         amountIn: options.amount,
-        slippageTolerance: parseFloat(options.slippage) / 100
+        slippageTolerance: safeParseFloat(options.slippage, 0.01) / 100
       });
 
       if (result.success) {
@@ -154,7 +155,7 @@ program
 
       // Test API health by checking if we can get pool data
       try {
-        await client.pools.getPoolData('GUSDC|Unit|none|none', 'TOWN|Unit|none|none', 3000);
+        await client.pools.getPoolData('GUSDC$Unit$none$none', 'TOWN|Unit|none|none', 3000);
         logger.info('✅ GalaSwap API connection healthy');
       } catch (error) {
         logger.warn('⚠️ Could not test API connection:', error);
