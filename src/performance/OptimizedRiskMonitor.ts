@@ -7,7 +7,7 @@ import { GalaSwapClient } from '../api/GalaSwapClient';
 import { TradingConfig } from '../config/environment';
 import { logger } from '../utils/logger';
 import { PerformanceMonitor } from './PerformanceMonitor';
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+ 
 import { PriceCache } from './PriceCache';
 import { 
   RiskMonitor, 
@@ -58,7 +58,7 @@ export class OptimizedRiskMonitor extends RiskMonitor {
   /**
    * Fast risk check with intelligent caching and parallel processing
    */
-  async performFastRiskCheck(// eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async performFastRiskCheck( 
     userAddress: string): Promise<FastRiskCheck> {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const startTime = Date.now();
@@ -70,7 +70,7 @@ export class OptimizedRiskMonitor extends RiskMonitor {
       // Check if we have valid cached risk calculation
       const cached = this.getCachedRisk(userAddress);
       if (cached) {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+         
       const calculationTime = this.performanceMonitor.endOperation(operationId);
         
         return {
@@ -85,7 +85,7 @@ export class OptimizedRiskMonitor extends RiskMonitor {
 
       // Perform full risk check with optimizations
       const result = await this.performOptimizedRiskCheck(userAddress);
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+       
       const calculationTime = this.performanceMonitor.endOperation(operationId);
       
       // Cache the result
@@ -100,7 +100,7 @@ export class OptimizedRiskMonitor extends RiskMonitor {
       };
 
     } catch (error) {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+       
       const calculationTime = this.performanceMonitor.endOperation(operationId);
       logger.error('Fast risk check failed:', error);
       
@@ -118,9 +118,9 @@ export class OptimizedRiskMonitor extends RiskMonitor {
   /**
    * Optimized portfolio snapshot with parallel processing
    */
-  async captureOptimizedPortfolioSnapshot(// eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async captureOptimizedPortfolioSnapshot( 
     userAddress: string): Promise<PortfolioSnapshot> {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+     
     const startTime = Date.now();
 
     try {
@@ -175,7 +175,7 @@ export class OptimizedRiskMonitor extends RiskMonitor {
     tokenIn: string;
     tokenOut: string;
     amountIn: number;
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+     
     userAddress: string;
   }>): Promise<Array<{
     approved: boolean;
@@ -213,7 +213,7 @@ export class OptimizedRiskMonitor extends RiskMonitor {
       });
 
       const results = await Promise.all(validationPromises);
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+       
       const calculationTime = this.performanceMonitor.endOperation(operationId);
       
       logger.debug('Batch risk validation completed: ' + results.length + ' trades in ' + calculationTime + 'ms');
@@ -254,7 +254,7 @@ export class OptimizedRiskMonitor extends RiskMonitor {
 
   // Private optimization methods
 
-  private async performOptimizedRiskCheck(// eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private async performOptimizedRiskCheck( 
     userAddress: string): Promise<Omit<FastRiskCheck, 'calculationTime' | 'cached'>> {
     // Use the base class method but with optimized portfolio capture
     const snapshot = await this.captureOptimizedPortfolioSnapshot(userAddress);
@@ -309,7 +309,7 @@ export class OptimizedRiskMonitor extends RiskMonitor {
     };
   }
 
-  private async getOptimizedTokenBalances(// eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private async getOptimizedTokenBalances( 
     userAddress: string): Promise<{ token: string; amount: number }[]> {
     // Use cached balances if available, otherwise fetch fresh
     try {
@@ -458,7 +458,7 @@ export class OptimizedRiskMonitor extends RiskMonitor {
   }
 
   private async validateTradeOptimized(
-    trade: { tokenIn: string; tokenOut: string; amountIn: number; // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    trade: { tokenIn: string; tokenOut: string; amountIn: number;  
     userAddress: string },
     portfolioSnapshot: PortfolioSnapshot
   ): Promise<{
@@ -497,7 +497,7 @@ export class OptimizedRiskMonitor extends RiskMonitor {
     };
   }
 
-  private getCachedRisk(// eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private getCachedRisk( 
     userAddress: string): RiskCalculationCache | null {
     const cached = this.riskCalculationCache.get(userAddress);
     if (!cached) return null;

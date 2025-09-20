@@ -133,8 +133,8 @@ export class MarketAnalysis {
 
       return condition;
 
-    } catch (error) {
-      logger.error('Error in market analysis:', error);
+    } catch (_error) {
+      logger.error('Error in market analysis:', _error);
 
       // Return safe defaults on error
       return {
@@ -200,8 +200,8 @@ export class MarketAnalysis {
 
       return opportunities;
 
-    } catch (error) {
-      logger.error('Error finding arbitrage opportunities:', error);
+    } catch (_error) {
+      logger.error('Error finding arbitrage opportunities:', _error);
       return [];
     }
   }
@@ -605,8 +605,8 @@ export class MarketAnalysis {
 
       return opportunities;
 
-    } catch (error) {
-      logger.debug(`Error checking arbitrage for ${token0}/${token1}:`, error);
+    } catch (_error) {
+      logger.debug(`Error checking arbitrage for ${token0}/${token1}:`, _error);
       return [];
     }
   }
@@ -653,7 +653,7 @@ export class MarketAnalysis {
         netProfit: priceDiff * 100 - 50, // Mock calculation
       };
 
-    } catch (error) {
+    } catch (_error) {
       return null;
     }
   }
@@ -669,8 +669,8 @@ export class MarketAnalysis {
           this.liquidityAnalyses.set(token, analysis);
         }
       }
-    } catch (error) {
-      logger.error('Error analyzing liquidity:', error);
+    } catch (_error) {
+      logger.error('Error analyzing liquidity:', _error);
     }
   }
 
@@ -704,8 +704,8 @@ export class MarketAnalysis {
 
       return analysis;
 
-    } catch (error) {
-      logger.debug(`Error analyzing liquidity for ${token}:`, error);
+    } catch (_error) {
+      logger.debug(`Error analyzing liquidity for ${token}:`, _error);
       return null;
     }
   }

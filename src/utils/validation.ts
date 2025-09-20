@@ -263,7 +263,7 @@ export class InputValidator {
     // Additional validation for API safety
     if (errors.length === 0) {
       // Check that token doesn't contain control characters that could break API calls
-      // eslint-disable-next-line no-control-regex
+       
       if (/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(token)) {
         errors.push('Token contains control characters that could cause API failures');
       }
@@ -750,11 +750,11 @@ export class InputValidator {
       .replace(/\b(system32|windows|config|sam)\b/gi, '')  // Remove Windows system paths
 
       // Remove potentially dangerous characters for injection attacks
-      // eslint-disable-next-line no-control-regex, no-useless-escape
+       
       .replace(/[<>"'&\\\/#%\|;`\x00-\x1F\x7F-\x9F]/g, '')
 
       // Remove Unicode control characters and full-width characters
-      // eslint-disable-next-line no-control-regex
+       
       .replace(/[\u0000-\u001F\u007F-\u009F\u2000-\u200F\u2028-\u202F\u205F-\u206F\uFEFF]/g, '')
       .replace(/[\uFF00-\uFFEF]/g, '')  // Remove full-width characters (used in Unicode attacks)
 
@@ -854,7 +854,7 @@ export class InputValidator {
         warnings.push(...schemaValidation.warnings);
       }
 
-    } catch (error) {
+    } catch (_error) {
       errors.push('Invalid JSON format');
     }
 

@@ -77,7 +77,7 @@ export function validateEnvironment(): BotConfig {
   const privateKey = process.env.WALLET_PRIVATE_KEY!;
   try {
     Buffer.from(privateKey, 'base64');
-  } catch (error) {
+  } catch (_error) {
     throw new Error('WALLET_PRIVATE_KEY must be a valid base64 encoded key');
   }
 

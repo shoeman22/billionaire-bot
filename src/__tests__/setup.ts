@@ -111,7 +111,7 @@ global.testUtils = {
 
 // Extend Jest matchers
 declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
+   
   namespace jest {
     interface Matchers<R> {
       toBeValidWalletAddress(): R;
@@ -120,7 +120,7 @@ declare global {
     }
   }
 
-  // eslint-disable-next-line no-var
+   
   var testUtils: {
     createMockWallet: () => { address: string; privateKey: string };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -60,8 +60,8 @@ export class TokenFormatter {
         scientific: scientificValue,
       };
 
-    } catch (error) {
-      throw new Error(`Failed to format amount: ${error}`);
+    } catch (_error) {
+      throw new Error(`Failed to format amount: ${_error}`);
     }
   }
 
@@ -90,8 +90,8 @@ export class TokenFormatter {
 
       return result.toString();
 
-    } catch (error) {
-      throw new Error(`Failed to parse amount: ${error}`);
+    } catch (_error) {
+      throw new Error(`Failed to parse amount: ${_error}`);
     }
   }
 
@@ -127,8 +127,8 @@ export class TokenFormatter {
 
       return trimmed + suffix;
 
-    } catch (error) {
-      throw new Error(`Failed to format price: ${error}`);
+    } catch (_error) {
+      throw new Error(`Failed to format price: ${_error}`);
     }
   }
 
@@ -147,8 +147,8 @@ export class TokenFormatter {
 
       return `${sign}${formatted}%`;
 
-    } catch (error) {
-      throw new Error(`Failed to format percentage: ${error}`);
+    } catch (_error) {
+      throw new Error(`Failed to format percentage: ${_error}`);
     }
   }
 
@@ -177,8 +177,8 @@ export class TokenFormatter {
 
       return parseFloat(formatted).toString() + suffixes[index];
 
-    } catch (error) {
-      throw new Error(`Failed to format large number: ${error}`);
+    } catch (_error) {
+      throw new Error(`Failed to format large number: ${_error}`);
     }
   }
 
@@ -210,8 +210,8 @@ export class TokenFormatter {
         isPositive: difference.gte(new BN(0)),
       };
 
-    } catch (error) {
-      throw new Error(`Failed to calculate slippage: ${error}`);
+    } catch (_error) {
+      throw new Error(`Failed to calculate slippage: ${_error}`);
     }
   }
 
@@ -252,7 +252,7 @@ export class TokenFormatter {
 
       return { isValid: true };
 
-    } catch (error) {
+    } catch (_error) {
       return { isValid: false, error: 'Validation error' };
     }
   }
@@ -273,8 +273,8 @@ export class TokenFormatter {
       if (bn1.lt(bn2)) return -1;
       return 0;
 
-    } catch (error) {
-      throw new Error(`Failed to compare amounts: ${error}`);
+    } catch (_error) {
+      throw new Error(`Failed to compare amounts: ${_error}`);
     }
   }
 
@@ -294,8 +294,8 @@ export class TokenFormatter {
 
       return TokenFormatter.formatAmount(result.toString(), decimals).raw;
 
-    } catch (error) {
-      throw new Error(`Failed to add amounts: ${error}`);
+    } catch (_error) {
+      throw new Error(`Failed to add amounts: ${_error}`);
     }
   }
 
@@ -319,8 +319,8 @@ export class TokenFormatter {
 
       return TokenFormatter.formatAmount(result.toString(), decimals).raw;
 
-    } catch (error) {
-      throw new Error(`Failed to subtract amounts: ${error}`);
+    } catch (_error) {
+      throw new Error(`Failed to subtract amounts: ${_error}`);
     }
   }
 
@@ -340,8 +340,8 @@ export class TokenFormatter {
 
       return TokenFormatter.formatAmount(result.toString(), decimals).raw;
 
-    } catch (error) {
-      throw new Error(`Failed to calculate percentage: ${error}`);
+    } catch (_error) {
+      throw new Error(`Failed to calculate percentage: ${_error}`);
     }
   }
 }

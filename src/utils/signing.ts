@@ -51,8 +51,8 @@ export class PayloadSigner {
       // Try to load GalaChain SDK
       this.loadGalaChainSdk();
 
-    } catch (error) {
-      logger.error('Failed to initialize payload signer:', error);
+    } catch (_error) {
+      logger.error('Failed to initialize payload signer:', _error);
       throw new Error('Invalid private key format');
     }
   }
@@ -66,8 +66,8 @@ export class PayloadSigner {
       const galaApi = await import('@gala-chain/api');
       this.galaChainSdk = galaApi;
       logger.info('GalaChain SDK loaded successfully');
-    } catch (error) {
-      logger.warn('GalaChain SDK not available, using fallback signing:', (error as Error)?.message || 'Unknown error');
+    } catch (_error) {
+      logger.warn('GalaChain SDK not available, using fallback signing:', (_error as Error)?.message || 'Unknown error');
       // Fallback implementation will be used
     }
   }
@@ -90,8 +90,8 @@ export class PayloadSigner {
       // Fallback to manual implementation
       return await this.signWithFallback(payload);
 
-    } catch (error) {
-      logger.error('Error signing payload:', error);
+    } catch (_error) {
+      logger.error('Error signing payload:', _error);
       throw new Error('Failed to sign payload');
     }
   }
@@ -115,8 +115,8 @@ export class PayloadSigner {
       logger.debug('Payload signed with GalaChain SDK');
       return signature;
 
-    } catch (error) {
-      logger.warn('GalaChain SDK signing failed, falling back to manual implementation:', error);
+    } catch (_error) {
+      logger.warn('GalaChain SDK signing failed, falling back to manual implementation:', _error);
       return this.signWithFallback(payload);
     }
   }
@@ -140,8 +140,8 @@ export class PayloadSigner {
       logger.debug('Payload signed with fallback implementation');
       return signature;
 
-    } catch (error) {
-      logger.error('Fallback signing failed:', error);
+    } catch (_error) {
+      logger.error('Fallback signing failed:', _error);
       throw new Error('Failed to sign payload with fallback method');
     }
   }
@@ -158,8 +158,8 @@ export class PayloadSigner {
       // Use deterministic JSON stringify
       return stringify(cleanPayload);
 
-    } catch (error) {
-      logger.error('Error creating payload string:', error);
+    } catch (_error) {
+      logger.error('Error creating payload string:', _error);
       throw new Error('Failed to create payload string');
     }
   }
@@ -174,8 +174,8 @@ export class PayloadSigner {
       // keccak256 returns a hex string, convert to buffer
       return Buffer.from(hash, 'hex');
 
-    } catch (error) {
-      logger.error('Error creating keccak hash:', error);
+    } catch (_error) {
+      logger.error('Error creating keccak hash:', _error);
       throw new Error('Failed to create keccak hash');
     }
   }
@@ -204,8 +204,8 @@ export class PayloadSigner {
 
       return r + s + recovery;
 
-    } catch (error) {
-      logger.error('Error signing hash:', error);
+    } catch (_error) {
+      logger.error('Error signing hash:', _error);
       throw new Error('Failed to sign hash');
     }
   }
@@ -232,8 +232,8 @@ export class PayloadSigner {
       // Fallback verification
       return this.verifyWithFallback(payload, signature);
 
-    } catch (error) {
-      logger.error('Error verifying signature:', error);
+    } catch (_error) {
+      logger.error('Error verifying signature:', _error);
       return false;
     }
   }
@@ -248,8 +248,8 @@ export class PayloadSigner {
       logger.debug('GalaChain SDK verification not implemented');
       return this.verifyWithFallback(payload, signature);
 
-    } catch (error) {
-      logger.warn('GalaChain SDK verification failed:', error);
+    } catch (_error) {
+      logger.warn('GalaChain SDK verification failed:', _error);
       return this.verifyWithFallback(payload, signature);
     }
   }
@@ -278,8 +278,8 @@ export class PayloadSigner {
 
       return this.keyPair.verify(hash, sigObj);
 
-    } catch (error) {
-      logger.error('Error in fallback verification:', error);
+    } catch (_error) {
+      logger.error('Error in fallback verification:', _error);
       return false;
     }
   }
@@ -292,8 +292,8 @@ export class PayloadSigner {
       const messageHash = createHash('sha256').update(message).digest();
       return this.signHash(messageHash);
 
-    } catch (error) {
-      logger.error('Error signing message:', error);
+    } catch (_error) {
+      logger.error('Error signing message:', _error);
       throw new Error('Failed to sign message');
     }
   }
@@ -332,8 +332,8 @@ export class PayloadSigner {
 
       return signedTransaction;
 
-    } catch (error) {
-      logger.error('Error creating signed transaction:', error);
+    } catch (_error) {
+      logger.error('Error creating signed transaction:', _error);
       throw new Error('Failed to create signed transaction');
     }
   }
@@ -366,8 +366,8 @@ export class PayloadSigner {
 
       return signedBundle;
 
-    } catch (error) {
-      logger.error('Error signing bundle request:', error);
+    } catch (_error) {
+      logger.error('Error signing bundle request:', _error);
       throw new Error('Failed to sign bundle request');
     }
   }
@@ -422,7 +422,7 @@ export function validatePrivateKey(privateKeyBase64: string): boolean {
 
     return publicKey.length === 130; // 65 bytes * 2 hex chars (uncompressed)
 
-  } catch (error) {
+  } catch (_error) {
     return false;
   }
 }
@@ -443,7 +443,7 @@ export function deriveAddressFromPublicKey(publicKeyHex: string): string {
 
     return address;
 
-  } catch (error) {
+  } catch (_error) {
     throw new Error('Failed to derive address from public key');
   }
 }
@@ -465,7 +465,7 @@ export function generateRandomPrivateKey(): { privateKey: string; address: strin
       publicKey
     };
 
-  } catch (error) {
+  } catch (_error) {
     throw new Error('Failed to generate random private key');
   }
 }

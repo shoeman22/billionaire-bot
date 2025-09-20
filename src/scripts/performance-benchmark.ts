@@ -70,9 +70,9 @@ class PerformanceBenchmark {
       
       return results;
       
-    } catch (error) {
-      logger.error('❌ Benchmark failed:', error);
-      throw error;
+    } catch (_error) {
+      logger.error('❌ Benchmark failed:', _error);
+      throw _error;
     } finally {
       await this.cleanup();
     }
@@ -108,9 +108,9 @@ class PerformanceBenchmark {
         optimizationReport.recommendations.forEach(rec => logger.info('  - ' + rec));
       }
       
-    } catch (error) {
-      logger.error('❌ Optimization test failed:', error);
-      throw error;
+    } catch (_error) {
+      logger.error('❌ Optimization test failed:', _error);
+      throw _error;
     } finally {
       await this.cleanup();
     }
@@ -143,7 +143,7 @@ class PerformanceBenchmark {
             ...trade,
             slippageTolerance: 0.01
           });
-        } catch (error) {
+        } catch (_error) {
           // Expected for test environment
         }
         
@@ -174,9 +174,9 @@ class PerformanceBenchmark {
       logger.info('  Fast Path Average: ' + avgFastPath.toFixed(2) + 'ms');
       logger.info('  Performance Improvement: ' + improvement.toFixed(2) + '%');
       
-    } catch (error) {
-      logger.error('❌ Fast path test failed:', error);
-      throw error;
+    } catch (_error) {
+      logger.error('❌ Fast path test failed:', _error);
+      throw _error;
     } finally {
       await this.cleanup();
     }
@@ -232,9 +232,9 @@ class PerformanceBenchmark {
         logger.warn('⚠️  High memory increase detected - potential memory leak');
       }
       
-    } catch (error) {
-      logger.error('❌ Memory stress test failed:', error);
-      throw error;
+    } catch (_error) {
+      logger.error('❌ Memory stress test failed:', _error);
+      throw _error;
     } finally {
       await this.cleanup();
     }
@@ -250,7 +250,7 @@ class PerformanceBenchmark {
     try {
       await this.tradingEngine.start();
       logger.info('✅ Systems initialized successfully');
-    } catch (error) {
+    } catch (_error) {
       logger.warn('⚠️  Trading engine initialization failed (expected in test environment)');
       // Continue with benchmark - some tests don't require full initialization
     }
@@ -273,7 +273,7 @@ class PerformanceBenchmark {
           amountIn: '1',
           urgency: 'normal'
         });
-      } catch (error) {
+      } catch (_error) {
         // Expected in test environment
       }
       
@@ -353,8 +353,8 @@ class PerformanceBenchmark {
       await this.tradingEngine.stop();
       this.monitor.stopMonitoring();
       this.optimizer.stopAutoOptimization();
-    } catch (error) {
-      logger.warn('Warning during cleanup:', error);
+    } catch (_error) {
+      logger.warn('Warning during cleanup:', _error);
     }
     
     logger.info('✅ Cleanup completed');

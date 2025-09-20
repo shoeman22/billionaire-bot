@@ -7,7 +7,7 @@ import { logger } from '../utils/logger';
 import { performance, PerformanceObserver } from 'perf_hooks';
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import * as v8 from 'v8';
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+ 
 import { PriceCache } from './PriceCache';
 
 export interface PerformanceMetrics {
