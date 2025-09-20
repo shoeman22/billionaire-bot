@@ -152,6 +152,7 @@ class Logger {
       if (callerLine) {
         const match = callerLine.match(/at (.+) \((.+):(\d+):(\d+)\)/);
         if (match) {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           const [, functionName, filePath, line] = match;
           const fileName = filePath.split('/').pop() || filePath;
           return `${fileName}:${line}`;

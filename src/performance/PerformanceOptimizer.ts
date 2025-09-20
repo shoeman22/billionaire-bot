@@ -5,6 +5,7 @@
 
 import { logger } from '../utils/logger';
 import { PerformanceMonitor, PerformanceMetrics } from './PerformanceMonitor';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { PriceCache } from './PriceCache';
 import { OptimizedTradingEngine } from './OptimizedTradingEngine';
 

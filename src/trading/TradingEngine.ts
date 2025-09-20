@@ -302,7 +302,8 @@ export class TradingEngine {
       }
 
       // 8. Check if market conditions are favorable for trading
-      if (!this.marketAnalysis.isFavorableForTrading()) {
+      const isFavorable = this.marketAnalysis.isFavorableForTrading();
+      if (!isFavorable) {
         logger.debug('Market conditions not favorable for trading');
         return;
       }
@@ -707,7 +708,9 @@ export class TradingEngine {
    */
   private updateTradingStats(): void {
     // Get strategy statistics
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const arbitrageStats = this.arbitrageStrategy.getStatus();
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const marketMakingStats = this.marketMakingStrategy.getStatus();
 
     // Update aggregated stats

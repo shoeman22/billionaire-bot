@@ -378,6 +378,7 @@ export class MarketAnalysis {
    */
   private analyzeVolume(
     priceData: any,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     priceHistory: Array<{ price: number; timestamp: number }>
   ): VolumeAnalysis {
     const current = priceData.volume24h || 0;
@@ -493,7 +494,7 @@ export class MarketAnalysis {
 
     // Generate action and confidence
     let action: TradingRecommendation['action'];
-    let confidence = Math.min(Math.abs(score), 100);
+    const confidence = Math.min(Math.abs(score), 100);
 
     if (score > 50) action = 'strong_buy';
     else if (score > 20) action = 'buy';

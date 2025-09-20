@@ -532,6 +532,7 @@ export class AlertSystem {
   /**
    * Send file notification
    */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private async sendFileNotification(alert: Alert, config: any): Promise<void> {
     // This would write to a file in a real implementation
     logger.info(`File notification: ${alert.title}`, alert);

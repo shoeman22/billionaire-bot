@@ -17,6 +17,7 @@ export interface SigningConfig {
 }
 
 export interface SignablePayload {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [key: string]: any;
   uniqueKey?: string;
 }
@@ -30,6 +31,7 @@ export class PayloadSigner {
   private privateKey: string;
   private keyPair: EC.KeyPair;
   private userAddress: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private galaChainSdk: any = null; // Will be dynamically loaded
 
   constructor(config: SigningConfig) {
@@ -150,6 +152,7 @@ export class PayloadSigner {
   private getPayloadToSign(payload: SignablePayload): string {
     try {
       // Remove signature and trace fields if present (GalaChain pattern)
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars, @typescript-eslint/no-explicit-any
       const { signature, trace, ...cleanPayload } = payload as any;
 
       // Use deterministic JSON stringify
@@ -267,6 +270,7 @@ export class PayloadSigner {
 
       const r = signature.slice(0, 64);
       const s = signature.slice(64, 128);
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const recovery = signature.slice(128, 130);
 
       // Verify with public key
@@ -337,7 +341,9 @@ export class PayloadSigner {
   /**
    * Sign bundle request for GalaSwap execution
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async signBundleRequest(bundlePayload: any, operationType: string): Promise<{
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     payload: any;
     signature: string;
     user: string;
@@ -369,6 +375,7 @@ export class PayloadSigner {
   /**
    * Security utility - sanitize objects for logging
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private sanitizeForLogging(obj: any): any {
     const sanitized = { ...obj };
     const sensitiveKeys = ['privateKey', 'private', 'secret', 'key', 'signature'];
@@ -479,6 +486,7 @@ export function normalizeTokenKey(token: string): string {
 /**
  * Validate payload structure for GalaChain
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function validateGalaChainPayload(payload: any): { isValid: boolean; errors: string[] } {
   const errors: string[] = [];
 

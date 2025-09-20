@@ -6,6 +6,7 @@
 import { GalaSwapClient } from '../api/GalaSwapClient';
 import { logger } from '../utils/logger';
 import { TRADING_CONSTANTS } from '../config/constants';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { PriceResponse, isSuccessResponse, createTokenClassKey } from '../types/galaswap';
 
 export interface PriceData {

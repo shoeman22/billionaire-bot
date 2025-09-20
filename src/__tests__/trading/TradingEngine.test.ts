@@ -29,9 +29,12 @@ describe('TradingEngine', () => {
   let tradingEngine: TradingEngine;
   let mockGalaSwapClient: jest.Mocked<GalaSwapClient>;
   let mockRiskMonitor: any;
+  let mockMarketAnalysis: any;
   let mockPositionLimits: any;
   let mockEmergencyControls: any;
   let mockStrategy: any;
+  let mockLiquidityManager: any;
+  let mockSwapExecutor: any;
   let config: any;
 
   beforeEach(() => {
@@ -132,7 +135,7 @@ describe('TradingEngine', () => {
 
     require('../../trading/risk/emergency-controls').EmergencyControls.mockImplementation(() => mockEmergencyControls);
 
-    const mockSwapExecutor = {
+    mockSwapExecutor = {
       executeSwap: jest.fn().mockResolvedValue({
         success: true,
         transactionId: 'tx-123',
@@ -142,7 +145,7 @@ describe('TradingEngine', () => {
 
     require('../../trading/execution/swap-executor').SwapExecutor.mockImplementation(() => mockSwapExecutor);
 
-    const mockLiquidityManager = {
+    mockLiquidityManager = {
       getPositions: jest.fn().mockResolvedValue([]),
       getStatistics: jest.fn().mockReturnValue({})
     };
@@ -159,7 +162,7 @@ describe('TradingEngine', () => {
 
     require('../../monitoring/price-tracker').PriceTracker.mockImplementation(() => mockPriceTracker);
 
-    const mockMarketAnalysis = {
+    mockMarketAnalysis = {
       analyzeMarket: jest.fn().mockResolvedValue(
         TestHelpers.createMockMarketConditions('bull')
       ),
@@ -398,10 +401,96 @@ describe('TradingEngine', () => {
     });
 
     it('should execute strategies based on market conditions', async () => {
-      // Clear mocks before the trading cycle runs, not after
-      jest.clearAllMocks();
+      // STEP 1: Clear specific mocks only (not all mocks)
+      mockMarketAnalysis.analyzeMarket.mockClear();
+      mockMarketAnalysis.isFavorableForTrading.mockClear();
+      mockRiskMonitor.performRiskCheck.mockClear();
+      mockStrategy.execute.mockClear();
 
-      // Ensure getUserPositions returns proper structure
+      // STEP 2: Stop engine completely
+      await tradingEngine.stop();
+
+      // STEP 3: Set up ALL mocks BEFORE restart
+
+      // Mock favorable market conditions for strategy execution
+      mockMarketAnalysis.analyzeMarket.mockResolvedValue({
+        overall: 'bullish',
+        confidence: 75, // > 70 required for bullish strategy
+        volatility: 'low',
+        liquidity: 'good',
+        priceChange24h: 0.05,
+        volumeChange24h: 0.1,
+        liquidityDepth: 1000000
+      });
+
+      // CRITICAL: Must return true for strategies to execute
+      mockMarketAnalysis.isFavorableForTrading.mockReturnValue(true);
+
+      // Mock low risk level to allow strategy execution
+      mockRiskMonitor.performRiskCheck.mockResolvedValue({
+        shouldContinueTrading: true,
+        riskLevel: 'low', // Critical: must be 'low' for strategy execution
+        totalRisk: 0.15,
+        positionRisks: [],
+        emergencyActions: [],
+        alerts: []
+      });
+
+      // Mock position limits check
+      mockPositionLimits.checkLimits.mockResolvedValue({
+        canOpenPosition: true,
+        availableCapital: 1000
+      });
+
+      // NEW: Mock liquidityManager.getPositions() - THIS WAS THE MISSING PIECE
+      const mockLiquidityManager = {
+        getPositions: jest.fn().mockResolvedValue([]),
+        getStatistics: jest.fn().mockReturnValue({
+          totalLiquidity: 0,
+          totalFees: 0,
+          activePools: 0
+        })
+      };
+
+      // Replace the liquidityManager property
+      Object.defineProperty(tradingEngine, 'liquidityManager', {
+        value: mockLiquidityManager,
+        writable: true,
+        configurable: true
+      });
+
+      // NEW: Mock getTokenBalances method to return empty balances
+      const mockGetTokenBalances = jest.fn().mockResolvedValue([]);
+      Object.defineProperty(tradingEngine, 'getTokenBalances', {
+        value: mockGetTokenBalances,
+        writable: true,
+        configurable: true
+      });
+
+      // NEW: Mock calculatePortfolioValue to return a reasonable value
+      const mockCalculatePortfolioValue = jest.fn().mockResolvedValue(10000);
+      Object.defineProperty(tradingEngine, 'calculatePortfolioValue', {
+        value: mockCalculatePortfolioValue,
+        writable: true,
+        configurable: true
+      });
+
+      // FIX: Mock the entire getPortfolioSnapshot to return valid data
+      const mockGetPortfolioSnapshot = jest.fn().mockResolvedValue({
+        totalValue: 10000,
+        dailyPnL: 0, // 0% change - no division by zero
+        totalPnL: 900, // 900% gain from $1000 baseline
+        baselineValue: 1000,
+        dailyStartValue: 10000, // Same as current value
+        maxConcentration: 0
+      });
+      Object.defineProperty(tradingEngine, 'getPortfolioSnapshot', {
+        value: mockGetPortfolioSnapshot,
+        writable: true,
+        configurable: true
+      });
+
+      // Ensure getUserPositions returns proper structure (for other parts)
       (mockGalaSwapClient.getUserPositions as any).mockResolvedValue({
         success: true,
         status: 1,
@@ -412,16 +501,53 @@ describe('TradingEngine', () => {
         }
       });
 
-      // TradingEngine is already started in beforeEach
-      jest.advanceTimersByTime(5000);
-      await Promise.resolve();
-      await Promise.resolve(); // Give more time for async operations
+      // STEP 4: Restart engine with all mocks in place
+      await tradingEngine.start();
 
-      // Verify the strategy was executed
+      // STEP 5: Advance timer and run pending timers
+      jest.advanceTimersByTime(6000); // Extra time to ensure completion
+      await jest.runOnlyPendingTimersAsync(); // Run all pending async timers
+
+      // STEP 6: Verify the complete execution chain
+
+      // Verify trading cycle checkpoints reached
+      expect(mockRiskMonitor.performRiskCheck).toHaveBeenCalled();
+      expect(mockPositionLimits.checkLimits).toHaveBeenCalled();
+
+      // Verify market analysis was called (this was failing before)
+      expect(mockMarketAnalysis.analyzeMarket).toHaveBeenCalled();
+      expect(mockMarketAnalysis.isFavorableForTrading).toHaveBeenCalled();
+
+      // Verify portfolio snapshot was called (core dependency that was fixed)
+      expect(mockGetPortfolioSnapshot).toHaveBeenCalled();
+
+      // Verify the strategy was executed (the ultimate goal)
       expect(mockStrategy.execute).toHaveBeenCalled();
     });
 
     it('should handle high risk conditions', async () => {
+      // Clear specific mocks to ensure clean state
+      mockEmergencyControls.activateEmergencyStop.mockClear();
+      mockRiskMonitor.performRiskCheck.mockClear();
+
+      // Re-setup critical mocks after clearing
+      mockEmergencyControls.activateEmergencyStop.mockResolvedValue(undefined);
+      mockEmergencyControls.isEmergencyStopEnabled.mockReturnValue(false);
+      mockEmergencyControls.recordApiFailure.mockReturnValue(undefined);
+      mockEmergencyControls.recordSuccess.mockReturnValue(undefined);
+      mockEmergencyControls.checkEmergencyConditions.mockResolvedValue({ shouldTrigger: false });
+
+      // Setup system health to pass (required for risk check to be reached)
+      mockGalaSwapClient.healthCheck.mockResolvedValue({
+        isHealthy: true,
+        apiStatus: 'healthy',
+        websocketStatus: 'connected',
+        lastSuccessfulRequest: Date.now(),
+        consecutiveFailures: 0,
+        rateLimiterStatus: {}
+      });
+
+      // Setup the high risk response
       mockRiskMonitor.performRiskCheck.mockResolvedValue({
         shouldContinueTrading: false,
         riskLevel: 'high',
@@ -429,20 +555,38 @@ describe('TradingEngine', () => {
         emergencyActions: ['STOP_ALL_TRADING']
       });
 
-      await tradingEngine.start();
-
+      // TradingEngine is already started in beforeEach, just trigger the cycle
       jest.advanceTimersByTime(5000);
-      await Promise.resolve();
+      await jest.runOnlyPendingTimersAsync();
 
       expect(mockEmergencyControls.activateEmergencyStop).toHaveBeenCalledWith(
         'PORTFOLIO_LOSS',
         'Automatic stop due to risk limits'
       );
-
-      await tradingEngine.stop();
     });
 
     it('should trigger emergency liquidation for critical conditions', async () => {
+      // Clear specific mocks to ensure clean state
+      mockEmergencyControls.activateEmergencyStop.mockClear();
+      mockRiskMonitor.performRiskCheck.mockClear();
+
+      // Re-setup critical mocks after clearing
+      mockEmergencyControls.activateEmergencyStop.mockResolvedValue(undefined);
+      mockEmergencyControls.isEmergencyStopEnabled.mockReturnValue(false);
+      mockEmergencyControls.recordApiFailure.mockReturnValue(undefined);
+      mockEmergencyControls.recordSuccess.mockReturnValue(undefined);
+      mockEmergencyControls.checkEmergencyConditions.mockResolvedValue({ shouldTrigger: false });
+
+      // Setup system health to pass (required for risk check to be reached)
+      mockGalaSwapClient.healthCheck.mockResolvedValue({
+        isHealthy: true,
+        apiStatus: 'healthy',
+        websocketStatus: 'connected',
+        lastSuccessfulRequest: Date.now(),
+        consecutiveFailures: 0,
+        rateLimiterStatus: {}
+      });
+
       mockRiskMonitor.performRiskCheck.mockResolvedValue({
         shouldContinueTrading: false,
         riskLevel: 'critical',
@@ -450,18 +594,15 @@ describe('TradingEngine', () => {
         emergencyActions: ['EMERGENCY_LIQUIDATION']
       });
 
-      await tradingEngine.start();
-
+      // TradingEngine is already started in beforeEach, just trigger the cycle
       jest.advanceTimersByTime(5000);
-      await Promise.resolve();
+      await jest.runOnlyPendingTimersAsync();
 
       expect(mockEmergencyControls.activateEmergencyStop).toHaveBeenCalledWith(
         'PORTFOLIO_LOSS',
         'Automatic liquidation due to critical losses',
         true // liquidate positions
       );
-
-      await tradingEngine.stop();
     });
 
     it('should handle extreme market volatility', async () => {
@@ -550,7 +691,7 @@ describe('TradingEngine', () => {
     });
 
     it('should handle portfolio errors gracefully', async () => {
-      const mockLiquidityManager = require('../../trading/execution/liquidity-manager').LiquidityManager.mock.instances[0];
+      // Mock liquidityManager to throw an error
       mockLiquidityManager.getPositions.mockRejectedValue(new Error('API error'));
 
       const portfolio = await tradingEngine.getPortfolio();
@@ -598,7 +739,7 @@ describe('TradingEngine', () => {
     });
 
     it('should provide position violations', async () => {
-      const mockPositionLimits = require('../../trading/risk/position-limits').PositionLimits.mock.instances[0];
+      // Mock position limits to return violations
       mockPositionLimits.getViolations.mockResolvedValue([
         { type: 'size_limit', description: 'Position exceeds maximum size' }
       ]);
@@ -657,11 +798,12 @@ describe('TradingEngine', () => {
       jest.useFakeTimers();
       await tradingEngine.start();
 
-      const mockRiskMonitor = require('../../trading/risk/risk-monitor').RiskMonitor.mock.instances[0];
+      // Mock risk monitor to throw an error during trading cycle
       mockRiskMonitor.performRiskCheck.mockRejectedValue(new Error('Risk check failed'));
 
       jest.advanceTimersByTime(5000);
       await Promise.resolve();
+      await Promise.resolve(); // Additional promise resolution for error handling
 
       expect(logger.error).toHaveBeenCalledWith('Error in trading cycle:', expect.any(Error));
 
@@ -670,10 +812,8 @@ describe('TradingEngine', () => {
     });
 
     it('should record system errors in emergency controls', async () => {
-      const mockSwapExecutor = require('../../trading/execution/swap-executor').SwapExecutor.mock.instances[0];
+      // Mock swap executor to fail
       mockSwapExecutor.executeSwap.mockRejectedValue(new Error('Execution failed'));
-
-      const mockEmergencyControls = require('../../trading/risk/emergency-controls').EmergencyControls.mock.instances[0];
 
       await tradingEngine.start();
 

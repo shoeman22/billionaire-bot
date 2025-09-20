@@ -19,6 +19,7 @@ export function sqrtPriceX96ToPrice(sqrtPriceX96: string): number {
 
     return actualPrice;
   } catch (error) {
+    // eslint-disable-next-line no-console
     console.warn('Error converting sqrtPriceX96 to price:', error);
     return 0;
   }
@@ -37,6 +38,7 @@ export function priceToSqrtPriceX96(price: number): string {
 
     return sqrtPriceX96.toString();
   } catch (error) {
+    // eslint-disable-next-line no-console
     console.warn('Error converting price to sqrtPriceX96:', error);
     return '0';
   }
@@ -52,6 +54,7 @@ export function tickToPrice(tick: number): number {
     // price = 1.0001^tick
     return Math.pow(1.0001, tick);
   } catch (error) {
+    // eslint-disable-next-line no-console
     console.warn('Error converting tick to price:', error);
     return 0;
   }
@@ -68,6 +71,7 @@ export function priceToTick(price: number): number {
     // tick = log(price) / log(1.0001)
     return Math.floor(Math.log(price) / Math.log(1.0001));
   } catch (error) {
+    // eslint-disable-next-line no-console
     console.warn('Error converting price to tick:', error);
     return 0;
   }
@@ -78,17 +82,20 @@ export function priceToTick(price: number): number {
  * @param poolData Pool data containing sqrtPrice
  * @returns Human-readable price
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function getPriceFromPoolData(poolData: any): number {
   try {
     const sqrtPriceX96 = poolData?.Data?.sqrtPrice || poolData?.sqrtPrice;
 
     if (!sqrtPriceX96) {
+      // eslint-disable-next-line no-console
       console.warn('No sqrtPrice found in pool data');
       return 0;
     }
 
     return sqrtPriceX96ToPrice(sqrtPriceX96);
   } catch (error) {
+    // eslint-disable-next-line no-console
     console.warn('Error getting price from pool data:', error);
     return 0;
   }
@@ -105,6 +112,7 @@ export function calculatePriceImpact(currentPrice: number, newPrice: number): nu
     if (currentPrice === 0) return 0;
     return Math.abs((newPrice - currentPrice) / currentPrice) * 100;
   } catch (error) {
+    // eslint-disable-next-line no-console
     console.warn('Error calculating price impact:', error);
     return 0;
   }
@@ -121,6 +129,7 @@ export function getNearestValidTick(price: number, tickSpacing: number): number 
     const tick = priceToTick(price);
     return Math.round(tick / tickSpacing) * tickSpacing;
   } catch (error) {
+    // eslint-disable-next-line no-console
     console.warn('Error getting nearest valid tick:', error);
     return 0;
   }

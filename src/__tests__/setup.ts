@@ -3,11 +3,14 @@
  * Global test configuration and utilities
  */
 
-import { logger } from '../utils/logger';
+// import { logger } from '../utils/logger'; // Unused - commenting out to fix linting
 
 // Mock console for tests to reduce noise
+// eslint-disable-next-line no-console
 const originalConsoleLog = console.log;
+// eslint-disable-next-line no-console
 const originalConsoleWarn = console.warn;
+// eslint-disable-next-line no-console
 const originalConsoleError = console.error;
 
 beforeAll(() => {
@@ -27,8 +30,11 @@ beforeAll(() => {
 
 afterAll(() => {
   // Restore console methods
+  // eslint-disable-next-line no-console
   console.log = originalConsoleLog;
+  // eslint-disable-next-line no-console
   console.warn = originalConsoleWarn;
+  // eslint-disable-next-line no-console
   console.error = originalConsoleError;
 });
 
@@ -105,6 +111,7 @@ global.testUtils = {
 
 // Extend Jest matchers
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace jest {
     interface Matchers<R> {
       toBeValidWalletAddress(): R;
@@ -113,14 +120,20 @@ declare global {
     }
   }
 
+  // eslint-disable-next-line no-var
   var testUtils: {
     createMockWallet: () => { address: string; privateKey: string };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     createMockApiResponse: <T>(data: T, success?: boolean) => any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     createMockQuoteResponse: () => any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     createMockPoolResponse: () => any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     createMockPortfolio: () => any;
     waitFor: (ms: number) => Promise<void>;
     expectValidTransactionId: (txId: string) => void;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     createMockErrorResponse: (message: string, status?: number) => any;
   };
 }

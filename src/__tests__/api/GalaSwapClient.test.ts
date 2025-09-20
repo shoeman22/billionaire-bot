@@ -78,7 +78,7 @@ describe('GalaSwapClient', () => {
     const mockSigner = {
       signPayload: jest.fn().mockResolvedValue('mock-signature')
     };
-    (client as any).payloadSigner = mockSigner;
+    (client as any).signer = mockSigner;
   });
 
   describe('constructor', () => {
@@ -336,6 +336,8 @@ describe('GalaSwapClient', () => {
     });
 
     it('should wait for transaction confirmation', async () => {
+      jest.useFakeTimers();
+
       const pendingResponse = TestHelpers.createMockTransactionStatus('PENDING');
       const confirmedResponse = TestHelpers.createMockTransactionStatus('CONFIRMED');
 
@@ -343,10 +345,18 @@ describe('GalaSwapClient', () => {
         .mockResolvedValueOnce({ data: pendingResponse })
         .mockResolvedValueOnce({ data: confirmedResponse });
 
-      const result = await client.waitForTransaction('tx-123', 5000, 100);
+      const waitPromise = client.waitForTransaction('tx-123', 5000, 100);
+
+      // Advance timer to trigger the polling interval
+      jest.advanceTimersByTime(100);
+      await jest.runOnlyPendingTimersAsync();
+
+      const result = await waitPromise;
 
       expect(result).toEqual(confirmedResponse);
       expect(mockAxiosInstance.request).toHaveBeenCalledTimes(2);
+
+      jest.useRealTimers();
     });
 
     it('should timeout waiting for transaction', async () => {
@@ -428,17 +438,17 @@ describe('GalaSwapClient', () => {
 
   describe('rate limiting', () => {
     it('should respect rate limits', async () => {
-      // Mock first few requests as success, then rate limit error
-      const successResponse = TestHelpers.createMockApiResponse({ price: '1.0' });
-      const rateLimitError = new Error('Rate limit exceeded');
+      // Reset the rate limit mock to actually simulate rate limiting
+      (client as any).checkRateLimit.mockRestore();
+      jest.spyOn(client as any, 'checkRateLimit')
+        .mockResolvedValueOnce(undefined) // First request succeeds
+        .mockResolvedValueOnce(undefined) // Second request succeeds
+        .mockRejectedValue(new Error('Rate limit exceeded')); // Subsequent requests fail
 
-      // Ensure responses are properly structured
-      mockAxiosInstance.request
-        .mockResolvedValueOnce({ data: successResponse })
-        .mockResolvedValueOnce({ data: successResponse })
-        .mockRejectedValueOnce(rateLimitError)
-        .mockRejectedValueOnce(rateLimitError)
-        .mockRejectedValueOnce(rateLimitError);
+      const successResponse = TestHelpers.createMockApiResponse({ price: '1.0' });
+
+      // Mock axios to always return success (rate limiting will prevent the calls)
+      mockAxiosInstance.request.mockResolvedValue({ data: successResponse });
 
       // Mock multiple rapid requests
       const promises = [];

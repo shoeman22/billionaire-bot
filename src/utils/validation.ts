@@ -3,7 +3,7 @@
  * Comprehensive validation for trading parameters and user inputs
  */
 
-import { TokenFormatter } from './formatting';
+// import { TokenFormatter } from './formatting'; // Unused - commenting out to fix linting
 import { TRADING_CONSTANTS } from '../config/constants';
 
 export interface ValidationResult {
@@ -263,6 +263,7 @@ export class InputValidator {
     // Additional validation for API safety
     if (errors.length === 0) {
       // Check that token doesn't contain control characters that could break API calls
+      // eslint-disable-next-line no-control-regex
       if (/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(token)) {
         errors.push('Token contains control characters that could cause API failures');
       }
@@ -283,6 +284,7 @@ export class InputValidator {
   /**
    * Validate individual token component
    */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private static validateTokenComponent(component: string, componentName: string): boolean {
     if (!component || component.length === 0) {
       return false;
@@ -748,9 +750,11 @@ export class InputValidator {
       .replace(/\b(system32|windows|config|sam)\b/gi, '')  // Remove Windows system paths
 
       // Remove potentially dangerous characters for injection attacks
+      // eslint-disable-next-line no-control-regex, no-useless-escape
       .replace(/[<>"'&\\\/#%\|;`\x00-\x1F\x7F-\x9F]/g, '')
 
       // Remove Unicode control characters and full-width characters
+      // eslint-disable-next-line no-control-regex
       .replace(/[\u0000-\u001F\u007F-\u009F\u2000-\u200F\u2028-\u202F\u205F-\u206F\uFEFF]/g, '')
       .replace(/[\uFF00-\uFFEF]/g, '')  // Remove full-width characters (used in Unicode attacks)
 
@@ -771,12 +775,12 @@ export class InputValidator {
       .replace(/privatekey[^:]*:[^,}]*/gi, 'privatekey:[REDACTED]')
 
       // Remove file paths that could leak system information - more aggressive
-      .replace(/\/home\/[^\s,}\)"]*/g, '/[REDACTED]')
-      .replace(/C:\\Users\\[^\s,}\)"]*/g, 'C:\\[REDACTED]')
-      .replace(/\/usr\/[^\s,}\)"]*/g, '/[REDACTED]')
-      .replace(/\/var\/[^\s,}\)"]*/g, '/[REDACTED]')
-      .replace(/\/opt\/[^\s,}\)"]*/g, '/[REDACTED]')
-      .replace(/\/tmp\/[^\s,}\)"]*/g, '/[REDACTED]');
+      .replace(/\/home\/[^\s,})")"]*/g, '/[REDACTED]')
+      .replace(/C:\\Users\\[^\s,})")"]*/g, 'C:\\[REDACTED]')
+      .replace(/\/usr\/[^\s,})")"]*/g, '/[REDACTED]')
+      .replace(/\/var\/[^\s,})")"]*/g, '/[REDACTED]')
+      .replace(/\/opt\/[^\s,})")"]*/g, '/[REDACTED]')
+      .replace(/\/tmp\/[^\s,})")"]*/g, '/[REDACTED]');
 
     // Additional sanitization for stack traces
     sanitized = InputValidator.sanitizeStackTrace(sanitized);
@@ -791,7 +795,7 @@ export class InputValidator {
   static sanitizeStackTrace(input: string): string {
     return input
       .replace(/at\s+[^\s]+\s+\([^:)]+:[^:)]+:\d+:\d+\)/g, 'at [FUNCTION] ([REDACTED]:line:col)')
-      .replace(/\s+at\s+[^\(]+\([^)]+\)/g, ' at [FUNCTION]([REDACTED])')
+      .replace(/\s+at\s+[^(]+\([^)]+\)/g, ' at [FUNCTION]([REDACTED])')
       .replace(/\/[^:\s)]+\.ts:\d+:\d+/g, '/[REDACTED].ts:line:col')
       .replace(/\/[^:\s)]+\.js:\d+:\d+/g, '/[REDACTED].js:line:col')
       .replace(/\([^)]*\/[^)]+\)/g, '([REDACTED])')  // Remove any remaining paths in parentheses
@@ -835,6 +839,7 @@ export class InputValidator {
   /**
    * Validate JSON structure
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   static validateJson(jsonString: string, expectedSchema?: any): ValidationResult {
     const errors: string[] = [];
     const warnings: string[] = [];
@@ -859,6 +864,7 @@ export class InputValidator {
   /**
    * Basic schema validation (can be extended with a proper JSON schema library)
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private static validateAgainstSchema(data: any, schema: any): ValidationResult {
     const errors: string[] = [];
     const warnings: string[] = [];

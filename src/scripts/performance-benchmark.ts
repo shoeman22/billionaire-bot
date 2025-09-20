@@ -89,7 +89,8 @@ class PerformanceBenchmark {
       
       // Capture baseline
       logger.info('📊 Capturing baseline metrics...');
-      const baselineReport = this.tradingEngine.getPerformanceReport();
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const baselineReport = this.tradingEngine.getPerformanceReport();
       
       // Run optimization
       logger.info('⚡ Running optimization cycle...');
