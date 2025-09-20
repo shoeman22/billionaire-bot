@@ -31,7 +31,7 @@ jest.mock('../../trading/execution/liquidity-manager');
 jest.mock('socket.io-client', () => ({
   io: jest.fn(() => ({
     on: jest.fn(),
-    once: jest.fn(), // Add missing once method
+    once: jest.fn(),
     off: jest.fn(),
     emit: jest.fn(),
     disconnect: jest.fn(),
@@ -54,7 +54,6 @@ describe('End-to-End Integration Tests', () => {
     // Mock axios for HTTP calls
     const axios = require('axios');
     const mockAxiosInstance = {
-      create: jest.fn().mockReturnThis(),
       request: jest.fn(),
       interceptors: {
         request: { use: jest.fn() },
@@ -62,7 +61,11 @@ describe('End-to-End Integration Tests', () => {
       }
     };
 
-    axios.create.mockReturnValue(mockAxiosInstance);
+    // Store the mock instance so it can be accessed via axios.create.mock.results[0].value
+    axios.create = jest.fn().mockReturnValue(mockAxiosInstance);
+
+    // Also store globally for individual test access
+    (global as any).mockAxiosInstance = mockAxiosInstance;
 
     // Setup mock API responses for complete workflow
     mockAxiosInstance.request
@@ -130,7 +133,43 @@ describe('End-to-End Integration Tests', () => {
       disconnectWebSocket: jest.fn().mockResolvedValue(undefined),
       waitForTransaction: jest.fn().mockResolvedValue('CONFIRMED'),
       getQuote: jest.fn().mockResolvedValue(TestHelpers.createMockQuoteResponse()),
-      executeSwap: jest.fn().mockResolvedValue({ transactionId: 'tx-123456' })
+      swap: jest.fn().mockResolvedValue({
+        success: true,
+        transactionId: 'tx-123456',
+        bundleResponse: { data: { data: 'tx-123456' } }
+      }),
+      executeSwap: jest.fn().mockResolvedValue({
+        success: true,
+        transactionId: 'tx-123456'
+      }),
+      addLiquidity: jest.fn().mockResolvedValue({
+        bundleResponse: { data: { data: 'tx-liquidity-123' } },
+        transactionId: 'tx-liquidity-123'
+      }),
+      getUserPositions: jest.fn().mockResolvedValue({
+        status: 1,
+        data: { positions: [] }
+      }),
+      subscribeToTokenPrices: jest.fn().mockImplementation((tokens, callback) => {
+        // Simulate WebSocket subscription
+        setTimeout(() => {
+          callback({
+            event: 'price_update',
+            data: { token: tokens[0], price: '1.5', change: 0.05 },
+            timestamp: Date.now()
+          });
+        }, 100);
+      }),
+      subscribeToTransactionUpdates: jest.fn().mockImplementation((callback) => {
+        // Simulate transaction update
+        setTimeout(() => {
+          callback({
+            event: 'transaction_update',
+            data: { transactionId: 'tx-123', status: 'CONFIRMED' },
+            timestamp: Date.now()
+          });
+        }, 100);
+      })
     }));
 
     const mockRiskMonitor = require('../../trading/risk/risk-monitor');
@@ -140,7 +179,15 @@ describe('End-to-End Integration Tests', () => {
         riskLevel: 'low'
       }),
       startMonitoring: jest.fn().mockResolvedValue(undefined),
-      stopMonitoring: jest.fn().mockResolvedValue(undefined)
+      stopMonitoring: jest.fn().mockResolvedValue(undefined),
+      getRiskStatus: jest.fn().mockReturnValue({
+        currentExposure: 1000,
+        riskLevel: 'low',
+        positionCount: 2,
+        maxDrawdown: 0.05,
+        isWithinLimits: true
+      }),
+      updateRiskConfig: jest.fn().mockImplementation(() => {})
     }));
 
     const mockEmergencyControls = require('../../trading/risk/emergency-controls');
@@ -150,7 +197,9 @@ describe('End-to-End Integration Tests', () => {
       recordApiFailure: jest.fn(),
       recordSuccess: jest.fn(),
       recordSystemError: jest.fn(),
-      checkEmergencyConditions: jest.fn().mockResolvedValue({ shouldTrigger: false })
+      checkEmergencyConditions: jest.fn().mockResolvedValue({ shouldTrigger: false }),
+      updateTriggers: jest.fn().mockImplementation(() => {}),
+      getEmergencyStatus: jest.fn().mockReturnValue({ active: false })
     }));
 
     const mockPositionLimits = require('../../trading/risk/position-limits');
@@ -158,13 +207,34 @@ describe('End-to-End Integration Tests', () => {
       checkLimits: jest.fn().mockResolvedValue({
         canOpenPosition: true,
         availableCapital: 1000
+      }),
+      updateLimits: jest.fn().mockImplementation(() => {}),
+      getCurrentLimits: jest.fn().mockReturnValue({
+        maxPositionSize: 1000,
+        maxDailyLoss: 500
       })
     }));
 
     const mockPriceTracker = require('../../monitoring/price-tracker');
     mockPriceTracker.PriceTracker.mockImplementation(() => ({
       start: jest.fn().mockResolvedValue(undefined),
-      stop: jest.fn().mockResolvedValue(undefined)
+      stop: jest.fn().mockResolvedValue(undefined),
+      getAllPrices: jest.fn().mockReturnValue({}),
+      getTriggeredAlerts: jest.fn().mockReturnValue([])
+    }));
+
+    const mockMarketAnalysis = require('../../monitoring/market-analysis');
+    mockMarketAnalysis.MarketAnalysis.mockImplementation(() => ({
+      analyzeMarket: jest.fn().mockResolvedValue(TestHelpers.createMockMarketConditions('sideways')),
+      isFavorableForTrading: jest.fn().mockReturnValue(true),
+      getMarketCondition: jest.fn().mockReturnValue(TestHelpers.createMockMarketConditions('sideways'))
+    }));
+
+    const mockAlertSystem = require('../../monitoring/alerts');
+    mockAlertSystem.AlertSystem.mockImplementation(() => ({
+      createAlert: jest.fn().mockResolvedValue(undefined),
+      riskAlert: jest.fn().mockResolvedValue(undefined),
+      systemAlert: jest.fn().mockResolvedValue(undefined)
     }));
 
     const mockArbitrageStrategy = require('../../trading/strategies/arbitrage');
@@ -172,7 +242,13 @@ describe('End-to-End Integration Tests', () => {
       initialize: jest.fn().mockResolvedValue(undefined),
       shutdown: jest.fn().mockResolvedValue(undefined),
       stop: jest.fn().mockResolvedValue(undefined),
-      execute: jest.fn().mockResolvedValue(undefined)
+      execute: jest.fn().mockResolvedValue(undefined),
+      getStatus: jest.fn().mockReturnValue({
+        isActive: true,
+        totalTrades: 0,
+        successfulTrades: 0,
+        profitability: 0
+      })
     }));
 
     const mockMarketMakingStrategy = require('../../trading/strategies/market-making');
@@ -180,17 +256,32 @@ describe('End-to-End Integration Tests', () => {
       initialize: jest.fn().mockResolvedValue(undefined),
       shutdown: jest.fn().mockResolvedValue(undefined),
       stop: jest.fn().mockResolvedValue(undefined),
-      execute: jest.fn().mockResolvedValue(undefined)
+      execute: jest.fn().mockResolvedValue(undefined),
+      getStatus: jest.fn().mockReturnValue({
+        isActive: true,
+        totalTrades: 0,
+        successfulTrades: 0,
+        profitability: 0
+      })
     }));
 
     const mockSwapExecutor = require('../../trading/execution/swap-executor');
     mockSwapExecutor.SwapExecutor.mockImplementation(() => ({
-      executeSwap: jest.fn().mockResolvedValue({ transactionId: 'tx-123456' })
+      executeSwap: jest.fn().mockResolvedValue({
+        success: true,
+        transactionId: 'tx-123456',
+        bundleResponse: { data: { data: 'tx-123456' } }
+      })
     }));
 
     const mockLiquidityManager = require('../../trading/execution/liquidity-manager');
     mockLiquidityManager.LiquidityManager.mockImplementation(() => ({
-      getPositions: jest.fn().mockResolvedValue([])
+      getPositions: jest.fn().mockResolvedValue([]),
+      getStatistics: jest.fn().mockReturnValue({
+        totalPositions: 0,
+        totalValue: 0,
+        activePositions: 0
+      })
     }));
 
     // Create instances
@@ -449,10 +540,15 @@ describe('End-to-End Integration Tests', () => {
     });
 
     it('should pause trading during extreme volatility', async () => {
+      // Stop engine if running from previous test
+      if (tradingEngine.getStatus().isRunning) {
+        await tradingEngine.stop();
+      }
+
       // Mock extreme volatility conditions
       const volatileConditions = TestHelpers.createMockMarketConditions('volatile');
 
-      // Mock market analysis
+      // Mock market analysis BEFORE starting engine
       const mockMarketAnalysis = jest.requireMock('../../monitoring/market-analysis');
       mockMarketAnalysis.MarketAnalysis.mockImplementation(() => ({
         analyzeMarket: jest.fn().mockResolvedValue(volatileConditions),
@@ -460,10 +556,25 @@ describe('End-to-End Integration Tests', () => {
         getMarketCondition: jest.fn().mockReturnValue(volatileConditions)
       }));
 
+      // Start trading engine with volatile conditions
+      await tradingEngine.start();
 
-      // Trigger trading cycle during volatile conditions
-      jest.advanceTimersByTime(6000);
-      await jest.runOnlyPendingTimersAsync();
+      // Directly trigger trading cycle to test volatility detection
+      // Access private method for testing - wrap in timeout to prevent hanging
+      await Promise.race([
+        (tradingEngine as any).executeTradingCycle(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Trading cycle timeout')), 5000))
+      ]);
+
+      // Debug: Log all logger calls to understand what's happening
+      console.log('All logger.warn calls:', (logger.warn as jest.Mock).mock.calls);
+      console.log('All logger.info calls:', (logger.info as jest.Mock).mock.calls);
+      console.log('All logger.error calls:', (logger.error as jest.Mock).mock.calls);
+
+      // Check if market analysis was called with extreme volatility
+      const mockMarketAnalysisInstance = jest.requireMock('../../monitoring/market-analysis');
+      const analyzeMarketCalls = mockMarketAnalysisInstance.MarketAnalysis.mock.instances[0]?.analyzeMarket?.mock?.calls || [];
+      console.log('analyzeMarket calls:', analyzeMarketCalls);
 
       // Verify trading was paused
       expect(logger.warn).toHaveBeenCalledWith(
