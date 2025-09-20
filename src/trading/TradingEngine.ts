@@ -15,7 +15,6 @@ import { SlippageProtection } from './risk/slippage';
 import { RiskMonitor } from './risk/risk-monitor';
 import { EmergencyControls } from './risk/emergency-controls';
 import { SwapExecutor } from './execution/swap-executor';
-import { LiquidityManager } from './execution/liquidity-manager';
 import { MarketAnalysis } from '../monitoring/market-analysis';
 import { AlertSystem } from '../monitoring/alerts';
 import { safeParseFloat } from '../utils/safe-parse';
@@ -31,7 +30,6 @@ export class TradingEngine {
   private riskMonitor: RiskMonitor;
   private emergencyControls: EmergencyControls;
   private swapExecutor: SwapExecutor;
-  private liquidityManager: LiquidityManager;
   private marketAnalysis: MarketAnalysis;
   private alertSystem: AlertSystem;
   private isRunning: boolean = false;
@@ -73,14 +71,12 @@ export class TradingEngine {
 
     // Initialize execution systems
     this.swapExecutor = new SwapExecutor(this.gswap, this.slippageProtection);
-    this.liquidityManager = new LiquidityManager(this.gswap);
 
     // Initialize emergency controls (must be after execution systems)
     this.emergencyControls = new EmergencyControls(
       config.trading,
       this.gswap,
-      this.swapExecutor,
-      this.liquidityManager
+      this.swapExecutor
     );
 
     // Initialize monitoring systems
@@ -507,8 +503,8 @@ export class TradingEngine {
     pnl: number;
   }> {
     try {
-      // Get liquidity positions
-      const positions = await this.liquidityManager.getPositions(this.config.wallet.address);
+      // No liquidity positions available - SDK v0.0.7 doesn't support liquidity operations
+      const positions: never[] = [];
 
       // Get token balances from wallet
       const balances = await this.getTokenBalances();
@@ -550,7 +546,7 @@ export class TradingEngine {
 
       if (positionsResponse?.positions) {
         for (const position of positionsResponse.positions) {
-          // Extract token balances from liquidity positions
+          // Note: SDK positions API exists but liquidity operations are not supported
           if (position.token0Symbol && position.liquidity) {
             const token0 = position.token0Symbol;
             const amount0 = safeParseFloat(position.liquidity.toString(), 0) / 2; // Simplified allocation
@@ -776,7 +772,7 @@ export class TradingEngine {
         alerts: this.priceTracker.getTriggeredAlerts()
       },
       positions: {
-        liquidity: this.liquidityManager.getStatistics(),
+        // No liquidity statistics - SDK v0.0.7 doesn't support liquidity operations
         limits: this.positionLimits.getCurrentLimits()
       },
       risk: {
@@ -901,10 +897,4 @@ export class TradingEngine {
     throw new Error('Market making strategy not available - SDK v0.0.7 does not support liquidity operations');
   }
 
-  /**
-   * Get liquidity manager for external access
-   */
-  getLiquidityManager(): LiquidityManager {
-    return this.liquidityManager;
-  }
 }

@@ -8,7 +8,6 @@ import { TradingConfig } from '../../config/environment';
 import { logger } from '../../utils/logger';
 import { AlertSystem } from '../../monitoring/alerts';
 import { SwapExecutor } from '../execution/swap-executor';
-import { LiquidityManager } from '../execution/liquidity-manager';
 import { safeParseFloat } from '../../utils/safe-parse';
 import { calculatePriceFromSqrtPriceX96 } from '../../utils/price-math';
 import { createTokenClassKey, FEE_TIERS } from '../../types/galaswap';
@@ -65,7 +64,6 @@ export class EmergencyControls {
   private config: TradingConfig;
   private gswap: GSwap;
   private swapExecutor: SwapExecutor;
-  private liquidityManager: LiquidityManager;
   private alertSystem: AlertSystem;
   private emergencyState: EmergencyState;
   private triggers: EmergencyTriggers;
@@ -80,12 +78,10 @@ export class EmergencyControls {
     config: TradingConfig,
     gswap: GSwap,
     swapExecutor: SwapExecutor,
-    liquidityManager: LiquidityManager
   ) {
     this.config = config;
     this.gswap = gswap;
     this.swapExecutor = swapExecutor;
-    this.liquidityManager = liquidityManager;
     this.alertSystem = new AlertSystem(false); // Disable cleanup timer for tests
 
     // Initialize emergency state
@@ -500,30 +496,14 @@ export class EmergencyControls {
     value: number;
     error?: string;
   }> {
-    try {
-      logger.error(`🚨 EMERGENCY LIQUIDATION: Removing liquidity for ${plan.token} - ${plan.amount}`);
+    // Liquidity operations not supported in SDK v0.0.7
+    logger.warn(`🚨 Cannot remove liquidity for ${plan.token} - SDK v0.0.7 doesn't support liquidity operations`);
 
-      // Call the liquidityManager to remove liquidity
-      // Use token name as position ID since LiquidationPlan doesn't have positionId
-      const positionId = `${plan.token}_position`;
-      const result = await this.liquidityManager.removeLiquidity({
-        positionId,
-        liquidity: plan.amount.toString(),
-        userAddress: 'configured'
-      });
-
-      return {
-        success: result.success,
-        value: safeParseFloat(result.amount0, 0) + safeParseFloat(result.amount1, 0), // Use amount0/amount1 from result
-        error: result.error
-      };
-    } catch (error) {
-      return {
-        success: false,
-        value: 0,
-        error: error instanceof Error ? error.message : 'Remove liquidity failed'
-      };
-    }
+    return {
+      success: false,
+      value: 0,
+      error: 'Liquidity removal not supported - SDK v0.0.7 limitation'
+    };
   }
 
   /**

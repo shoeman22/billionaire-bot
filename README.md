@@ -5,17 +5,16 @@
 [![Jest](https://img.shields.io/badge/Jest-C21325?style=for-the-badge&logo=jest&logoColor=white)](https://jestjs.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 
-A sophisticated automated trading bot for GalaSwap V3 with arbitrage detection, market making, and advanced risk management.
+A sophisticated automated trading bot for GalaSwap V3 with arbitrage detection and advanced risk management.
 
 > ⚠️ **Disclaimer**: This software is for educational purposes. Use at your own risk. Trading cryptocurrencies involves substantial risk of loss.
 
 ## 🌟 Features
 
 - **🔍 Arbitrage Detection**: Automatically finds and executes profitable arbitrage opportunities across different fee tiers
-- **💧 Market Making**: Provides liquidity to earn fees from trading volume
 - **⚡ High-Performance Trading**: Optimized execution with intelligent caching and parallel processing
 - **🛡️ Advanced Risk Management**: Portfolio limits, drawdown protection, and emergency stops
-- **📊 Real-time Monitoring**: Live price tracking with WebSocket connections
+- **📊 Real-time Monitoring**: Price tracking via API polling (WebSocket infrastructure ready)
 - **🔒 Security First**: Comprehensive input validation and error handling
 - **🧪 Comprehensive Testing**: Full test suite with 95%+ coverage
 
@@ -77,6 +76,52 @@ npm run build
 npm start
 ```
 
+## 🐳 Docker Deployment
+
+### Quick Start with Docker
+
+1. **Build the image:**
+```bash
+npm run docker:build
+```
+
+2. **Run with Docker Compose:**
+```bash
+npm run docker:compose
+```
+
+3. **View logs:**
+```bash
+npm run docker:logs
+```
+
+4. **Stop the bot:**
+```bash
+npm run docker:down
+```
+
+### Docker Configuration
+
+The Docker setup includes:
+- Multi-stage build for minimal image size (Node.js 20 Alpine)
+- Non-root user for security
+- Health checks for container monitoring
+- Resource limits to prevent runaway processes
+- Named volumes for logs and data persistence
+- Dumb-init for proper signal handling
+
+### Docker Commands
+
+```bash
+npm run docker:build       # Build Docker image
+npm run docker:run         # Run container with .env file
+npm run docker:compose     # Start with docker-compose
+npm run docker:down        # Stop all containers
+npm run docker:logs        # View bot logs
+npm run docker:shell       # Access container shell
+npm run docker:clean       # Clean up Docker resources
+```
+
 ## 📋 Available Commands
 
 ### Core Bot Operations
@@ -92,6 +137,15 @@ npm run test-connection     # Test API and wallet configuration
 npm run portfolio          # View current portfolio
 npm run manual-trade       # Execute manual trades
 # Example: npm run manual-trade -- -i GALA -o USDC -a 100 -s 1
+```
+
+### Advanced CLI Commands
+```bash
+tsx src/cli/trading-cli.ts auto-trade          # Start automated trading
+tsx src/cli/trading-cli.ts auto-trade -- -d 120  # Auto-trade for 120 minutes
+tsx src/cli/trading-cli.ts monitor             # Real-time monitoring dashboard
+tsx src/cli/trading-cli.ts stats               # Display trading statistics
+tsx src/cli/trading-cli.ts export              # Export trading history to CSV
 ```
 
 ### Performance Monitoring
@@ -110,6 +164,7 @@ npm run test:security       # Security tests
 npm run test:coverage       # Generate coverage report
 npm run lint               # Check code style
 npm run typecheck          # TypeScript validation
+tsx src/scripts/test-risk-management.ts  # Test risk management system
 ```
 
 ## 🎯 Trading Strategies
@@ -120,11 +175,7 @@ npm run typecheck          # TypeScript validation
 - Executes trades with minimal slippage impact
 - Monitors gas costs and net profitability
 
-### Market Making Strategy
-- Provides liquidity in concentrated ranges
-- Automatically rebalances positions
-- Collects trading fees from volume
-- Manages impermanent loss risk
+> **Note**: Market making strategy is planned for future SDK versions that support liquidity operations
 
 ## 🛡️ Risk Management
 
@@ -145,7 +196,7 @@ npm run typecheck          # TypeScript validation
 The bot provides real-time monitoring of:
 - 💱 **Trade Execution**: All trades with transaction IDs and outcomes
 - 📈 **Arbitrage Opportunities**: Detected opportunities and profitability
-- 💧 **Liquidity Positions**: Active positions and fee earnings
+- 💹 **Portfolio Tracking**: Portfolio value and P&L monitoring
 - ⚠️ **Risk Alerts**: Portfolio limits and emergency triggers
 - 🔧 **Performance Metrics**: Latency, success rates, and optimization stats
 
@@ -154,24 +205,30 @@ The bot provides real-time monitoring of:
 ```
 src/
 ├── api/                    # GalaSwap API client and types
+├── cli/                    # Command-line interface tools
 ├── config/                 # Environment and configuration
 ├── monitoring/             # Price tracking and market analysis
 ├── performance/            # Optimization and caching systems
+├── scripts/                # Utility scripts for testing and benchmarks
+├── security/               # Signing and security services
 ├── trading/
-│   ├── execution/          # Trade execution and liquidity management
+│   ├── execution/          # Trade execution (swap operations only)
 │   ├── risk/              # Risk monitoring and emergency controls
-│   └── strategies/         # Arbitrage and market making strategies
+│   └── strategies/         # Arbitrage strategies
 ├── types/                  # TypeScript type definitions
 └── utils/                  # Utilities and helpers
 ```
 
 ## 🔒 Security
 
+- **SignerService** for secure transaction signing with private key isolation
 - **Input validation** on all user inputs and API responses
-- **Rate limiting** to prevent API abuse
-- **Secure credential handling** with environment variables
-- **Error boundary protection** to prevent crashes
-- **Audit logging** for all trading activities
+- **Path traversal protection** against directory access attacks
+- **Rate limiting** with adaptive throttling to prevent API abuse
+- **Secure credential handling** with environment variables and key rotation support
+- **Secure random generation** for transaction IDs and security tokens
+- **Error boundary protection** to prevent crashes and information leakage
+- **Audit logging** for all trading activities with tamper-resistant records
 
 ## 🧪 Testing
 
@@ -205,6 +262,10 @@ npm run test:coverage      # With coverage report
 | `MIN_PROFIT_THRESHOLD` | Minimum profit threshold | 0.001 (0.1%) |
 | `NODE_ENV` | Environment mode | development |
 | `LOG_LEVEL` | Logging level | debug |
+| `ENABLE_PERFORMANCE_MODE` | Enable optimized trading engine | false |
+| `CACHE_TTL_MS` | Price cache time-to-live | 5000 |
+| `MAX_PARALLEL_REQUESTS` | Maximum concurrent API requests | 5 |
+| `EMERGENCY_STOP_ENABLED` | Enable emergency stop controls | true |
 
 ### Risk Management Limits
 
@@ -237,28 +298,32 @@ The bot automatically:
 - Alerts on risk limit breaches
 - Executes emergency stops when needed
 
+## ⚠️ Current Limitations
+
+- **No Liquidity Operations**: SDK v0.0.7 does not support adding/removing liquidity or market making
+- **No WebSocket Implementation**: Currently uses API polling for price updates (WebSocket infrastructure ready)
+- **Limited to Swap Operations**: Only token swapping is supported, no position management
+- **No Historical Data**: Cannot analyze past performance trends or backtest strategies
+- **Single Wallet Only**: Multi-wallet management not implemented
+- **No Cross-Chain Support**: Limited to GalaChain ecosystem only
+
 ## 📈 Performance
 
 ### Optimization Features
+- **OptimizedTradingEngine** with fast-path execution and batch processing
+- **OptimizedRiskMonitor** with cached portfolio tracking and parallel monitoring
+- **PerformanceOptimizer** with automatic optimization cycles and memory management
+- **PriceCache** with volatility-aware TTL and intelligent invalidation
 - **Intelligent caching** for price data and API responses
-- **Parallel processing** for multi-token operations
+- **Parallel processing** for multi-token operations with request pooling
 - **Connection pooling** for API requests
-- **WebSocket streaming** for real-time data
-- **Memory management** with cleanup routines
+- **Memory management** with automatic cleanup and garbage collection
 
 ### Benchmarking
 ```bash
 npm run performance:benchmark    # Measure current performance
 npm run performance:optimize     # Apply optimizations
 ```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass: `npm test`
-5. Submit a pull request
 
 ## 🤝 Contributing
 
@@ -296,6 +361,36 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## ⚠️ Disclaimer
 
 This trading bot is for educational purposes only. Cryptocurrency trading involves substantial risk of loss. Past performance does not guarantee future results. Always do your own research and never invest more than you can afford to lose.
+
+## 🔧 Troubleshooting
+
+### Common Issues
+
+**"Cannot find GSwap SDK"**
+- Ensure @gala-chain/gswap-sdk is installed: `npm install @gala-chain/gswap-sdk@0.0.7`
+- Verify Node.js version is 18+ and npm dependencies are installed
+
+**"Invalid signature" errors**
+- Verify your private key is base64 encoded (not hex)
+- Check wallet address format: `eth|0x...`
+- Ensure private key matches the wallet address
+
+**"Insufficient liquidity" warnings**
+- Reduce trade size or adjust slippage tolerance
+- Check pool liquidity before large trades: `npm run test-connection`
+- Consider using different fee tiers (500, 3000, 10000)
+
+**Performance issues**
+- Enable performance mode: `ENABLE_PERFORMANCE_MODE=true`
+- Increase cache TTL for stable tokens: `CACHE_TTL_MS=15000`
+- Run optimization: `npm run performance:optimize`
+- Monitor memory usage: `npm run performance:memory`
+
+**API connection failures**
+- Check API endpoint configuration in `.env`
+- Verify network connectivity to GalaSwap servers
+- Run connection test: `npm run test-connection`
+- Check rate limiting: reduce `MAX_PARALLEL_REQUESTS`
 
 ## 🆘 Support
 

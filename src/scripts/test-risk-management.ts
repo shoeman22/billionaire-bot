@@ -17,7 +17,6 @@ import { SlippageProtection } from '../trading/risk/slippage';
 import { RiskMonitor } from '../trading/risk/risk-monitor';
 import { EmergencyControls } from '../trading/risk/emergency-controls';
 import { SwapExecutor } from '../trading/execution/swap-executor';
-import { LiquidityManager } from '../trading/execution/liquidity-manager';
 
 async function testRiskManagementSystem(): Promise<void> {
   logger.info('🔒 Starting Risk Management System Tests...');
@@ -132,12 +131,10 @@ async function testRiskManagementSystem(): Promise<void> {
 
     // Initialize required dependencies for emergency controls
     const swapExecutor = new SwapExecutor(gswap, slippageProtection);
-    const liquidityManager = new LiquidityManager(gswap);
     const emergencyControls = new EmergencyControls(
       config.trading,
       gswap,
-      swapExecutor,
-      liquidityManager
+      swapExecutor
     );
 
     // Test emergency condition checking

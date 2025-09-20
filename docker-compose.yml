@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  billionaire-bot:
+    build: .
+    container_name: billionaire-bot
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - bot-logs:/app/logs
+      - bot-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "dist/main.js", "test"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  bot-logs:
+  bot-data:

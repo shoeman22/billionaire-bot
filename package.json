@@ -2,7 +2,6 @@
   "name": "billionaire-bot",
   "version": "1.0.0",
   "description": "Sophisticated GalaSwap V3 trading bot",
-  "type": "module",
   "main": "dist/main.js",
   "bin": {
     "billionaire-bot": "dist/main.js"
@@ -37,7 +36,15 @@
     "performance:optimize": "tsx src/scripts/performance-benchmark.ts optimize",
     "performance:fastpath": "tsx src/scripts/performance-benchmark.ts fastpath",
     "performance:memory": "tsx src/scripts/performance-benchmark.ts memory",
-    "performance:all": "npm run performance:benchmark && npm run performance:optimize && npm run performance:fastpath"
+    "performance:all": "npm run performance:benchmark && npm run performance:optimize && npm run performance:fastpath",
+    "docker:build": "docker build -t billionaire-bot:latest .",
+    "docker:run": "docker run --env-file .env billionaire-bot:latest",
+    "docker:start": "docker build -t billionaire-bot:latest . && docker run --env-file .env billionaire-bot:latest",
+    "docker:compose": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f billionaire-bot",
+    "docker:shell": "docker exec -it billionaire-bot sh",
+    "docker:clean": "docker system prune -f && docker volume prune -f"
   },
   "dependencies": {
     "@gala-chain/api": "^2.4.3",

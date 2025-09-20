@@ -5,7 +5,7 @@
 
 import { createHash } from 'crypto';
 import { logger } from '../utils/logger';
-import { PayloadSigner } from '../utils/signing';
+import { PayloadSigner, SignablePayload, SignedPayload } from '../utils/signing';
 
 export interface SignerConfig {
   walletAddress: string;
@@ -55,7 +55,7 @@ export class SignerService {
   /**
    * Sign a payload using the secure signer
    */
-  async signPayload(payload: any): Promise<string> {
+  async signPayload(payload: SignablePayload): Promise<string> {
     if (!this.isInitialized) {
       throw new Error('SignerService not initialized');
     }
@@ -71,7 +71,7 @@ export class SignerService {
   /**
    * Create a signed transaction
    */
-  async createSignedTransaction(payload: any): Promise<any> {
+  async createSignedTransaction(payload: SignablePayload): Promise<SignedPayload> {
     if (!this.isInitialized) {
       throw new Error('SignerService not initialized');
     }
@@ -87,7 +87,7 @@ export class SignerService {
   /**
    * Sign a bundle request for GalaSwap
    */
-  async signBundleRequest(bundlePayload: any, operationType: string): Promise<any> {
+  async signBundleRequest(bundlePayload: SignablePayload, operationType: string): Promise<{ payload: SignablePayload; signature: string }> {
     if (!this.isInitialized) {
       throw new Error('SignerService not initialized');
     }
@@ -137,7 +137,7 @@ export class SignerService {
   /**
    * Verify a signature
    */
-  async verifySignature(payload: any, signature: string): Promise<boolean> {
+  async verifySignature(payload: SignablePayload, signature: string): Promise<boolean> {
     if (!this.isInitialized) {
       throw new Error('SignerService not initialized');
     }

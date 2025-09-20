@@ -234,38 +234,7 @@ export interface SwapPayloadResponse extends BaseResponse {
   data: SwapPayload;
 }
 
-export interface AddLiquidityPayloadRequest {
-  token0: TokenClassKey;
-  token1: TokenClassKey;
-  fee: number;
-  tickLower: number;
-  tickUpper: number;
-  amount0Desired: string;
-  amount1Desired: string;
-  amount0Min: string;
-  amount1Min: string;
-}
-
-export interface RemoveLiquidityPayloadRequest {
-  token0: TokenClassKey;
-  token1: TokenClassKey;
-  fee: number;
-  tickLower: number;
-  tickUpper: number;
-  amount: string;
-  amount0Min: string;
-  amount1Min: string;
-}
-
-export interface CollectFeesPayloadRequest {
-  token0: TokenClassKey;
-  token1: TokenClassKey;
-  amount0Requested: string;
-  amount1Requested: string;
-  fee: number;
-  tickLower: number;
-  tickUpper: number;
-}
+// Liquidity payload interfaces removed - SDK v0.0.7 doesn't support liquidity operations
 
 export interface CreatePoolPayloadRequest {
   token0: TokenClassKey;
@@ -274,13 +243,7 @@ export interface CreatePoolPayloadRequest {
   fee: number;
 }
 
-export interface LiquidityPayloadResponse extends BaseResponse {
-  error: false;
-  data: {
-    [key: string]: any; // eslint-disable-line @typescript-eslint/no-explicit-any
-    uniqueKey: string;
-  };
-}
+// LiquidityPayloadResponse removed - SDK v0.0.7 doesn't support liquidity operations
 
 // ===========================================
 // BUNDLE & EXECUTION API TYPES
@@ -295,10 +258,8 @@ export interface BundleRequest {
 
 export type BundleType =
   | 'swap'
-  | 'addLiquidity'
-  | 'removeLiquidity'
-  | 'collectFees'
   | 'createPool';
+  // addLiquidity, removeLiquidity, collectFees removed - SDK v0.0.7 doesn't support these operations
 
 export interface BundleResponse extends BaseResponse {
   error: false;
