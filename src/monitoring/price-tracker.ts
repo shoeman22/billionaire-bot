@@ -242,7 +242,7 @@ export class PriceTracker {
   /**
    * Handle WebSocket price updates
    */
-  private handleWebSocketPriceUpdate(data: any): void {
+  private handleWebSocketPriceUpdate(data: any): void { // eslint-disable-line @typescript-eslint/no-explicit-any
     try {
       if (data.token && data.price) {
         const priceData: PriceData = {

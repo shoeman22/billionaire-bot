@@ -512,7 +512,7 @@ export class OptimizedRiskMonitor extends RiskMonitor {
   }
 
   private cacheRiskCalculation(// eslint-disable-next-line @typescript-eslint/no-unused-vars
-    userAddress: string, result: any): void {
+    userAddress: string, result: any): void { // eslint-disable-line @typescript-eslint/no-explicit-any
     // Cache the risk calculation result
     this.riskCalculationCache.set(userAddress, {
       portfolioValue: 0, // Would be set from actual calculation

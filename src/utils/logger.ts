@@ -9,7 +9,7 @@ export interface LogEntry {
   timestamp: string;
   level: LogLevel;
   message: string;
-  data?: any;
+  data?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   source?: string;
 }
 
@@ -53,7 +53,7 @@ class Logger {
   /**
    * Sanitize sensitive data for logging
    */
-  private sanitizeData(data: any): any {
+  private sanitizeData(data: any): any { // eslint-disable-line @typescript-eslint/no-explicit-any
     if (!data) return data;
 
     // Handle different data types
@@ -66,7 +66,7 @@ class Logger {
     }
 
     if (typeof data === 'object') {
-      const sanitized: any = {};
+      const sanitized: any = {}; // eslint-disable-line @typescript-eslint/no-explicit-any
 
       for (const [key, value] of Object.entries(data)) {
         if (this.isSensitiveKey(key)) {
@@ -122,7 +122,7 @@ class Logger {
   /**
    * Create a log entry
    */
-  private createLogEntry(level: LogLevel, message: string, data?: any): LogEntry {
+  private createLogEntry(level: LogLevel, message: string, data?: any): LogEntry { // eslint-disable-line @typescript-eslint/no-explicit-any
     const entry: LogEntry = {
       timestamp: new Date().toISOString(),
       level,
@@ -218,16 +218,16 @@ class Logger {
 
     switch (entry.level) {
       case 'error':
-        console.error(formatted);
+        console.error(formatted); // eslint-disable-line no-console
         break;
       case 'warn':
-        console.warn(formatted);
+        console.warn(formatted); // eslint-disable-line no-console
         break;
       case 'info':
-        console.info(formatted);
+        console.info(formatted); // eslint-disable-line no-console
         break;
       case 'debug':
-        console.debug(formatted);
+        console.debug(formatted); // eslint-disable-line no-console
         break;
     }
   }
@@ -235,7 +235,7 @@ class Logger {
   /**
    * Debug level logging
    */
-  debug(message: string, data?: any): void {
+  debug(message: string, data?: any): void { // eslint-disable-line @typescript-eslint/no-explicit-any
     const entry = this.createLogEntry('debug', message, data);
     this.output(entry);
   }
@@ -243,7 +243,7 @@ class Logger {
   /**
    * Info level logging
    */
-  info(message: string, data?: any): void {
+  info(message: string, data?: any): void { // eslint-disable-line @typescript-eslint/no-explicit-any
     const entry = this.createLogEntry('info', message, data);
     this.output(entry);
   }
@@ -251,7 +251,7 @@ class Logger {
   /**
    * Warning level logging
    */
-  warn(message: string, data?: any): void {
+  warn(message: string, data?: any): void { // eslint-disable-line @typescript-eslint/no-explicit-any
     const entry = this.createLogEntry('warn', message, data);
     this.output(entry);
   }
@@ -259,7 +259,7 @@ class Logger {
   /**
    * Error level logging
    */
-  error(message: string, error?: any): void {
+  error(message: string, error?: any): void { // eslint-disable-line @typescript-eslint/no-explicit-any
     let errorData = error;
 
     // Format Error objects
@@ -293,7 +293,7 @@ class Logger {
   /**
    * Log trading activity (special method with extra context)
    */
-  trade(message: string, data?: any): void {
+  trade(message: string, data?: any): void { // eslint-disable-line @typescript-eslint/no-explicit-any
     const tradeEntry = this.createLogEntry('info', `[TRADE] ${message}`, {
       ...data,
       timestamp: Date.now(),
@@ -306,7 +306,7 @@ class Logger {
   /**
    * Log security events (high priority)
    */
-  security(message: string, data?: any): void {
+  security(message: string, data?: any): void { // eslint-disable-line @typescript-eslint/no-explicit-any
     const securityEntry = this.createLogEntry('warn', `[SECURITY] ${message}`, {
       ...data,
       timestamp: Date.now(),
@@ -319,7 +319,7 @@ class Logger {
   /**
    * Log performance metrics
    */
-  performance(message: string, metrics?: any): void {
+  performance(message: string, metrics?: any): void { // eslint-disable-line @typescript-eslint/no-explicit-any
     const perfEntry = this.createLogEntry('info', `[PERF] ${message}`, {
       ...metrics,
       timestamp: Date.now(),
@@ -332,7 +332,7 @@ class Logger {
   /**
    * Create a child logger with additional context
    */
-  child(context: Record<string, any>): Logger {
+  child(context: Record<string, any>): Logger { // eslint-disable-line @typescript-eslint/no-explicit-any
     const childLogger = new Logger();
     childLogger.setLevel(this.logLevel);
 

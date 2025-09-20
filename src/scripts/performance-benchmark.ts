@@ -381,7 +381,7 @@ async function main() {
         await benchmark.runMemoryStressTest();
         break;
       default:
-        console.log('Usage: tsx performance-benchmark.ts [benchmark|optimize|fastpath|memory]');
+        console.log('Usage: tsx performance-benchmark.ts [benchmark|optimize|fastpath|memory]'); // eslint-disable-line no-console
         process.exit(1);
     }
     

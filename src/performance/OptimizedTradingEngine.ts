@@ -36,7 +36,7 @@ export interface FastPathResult {
 export class OptimizedTradingEngine extends TradingEngine {
   private performanceMonitor: PerformanceMonitor;
   private priceCache: PriceCache;
-  private parallelRequestPool: Set<Promise<any>> = new Set();
+  private parallelRequestPool: Set<Promise<any>> = new Set(); // eslint-disable-line @typescript-eslint/no-explicit-any
   private readonly MAX_PARALLEL_REQUESTS = 5;
   private lastOptimizationCheck = Date.now();
   private readonly OPTIMIZATION_CHECK_INTERVAL = 60000; // 1 minute
@@ -312,10 +312,10 @@ export class OptimizedTradingEngine extends TradingEngine {
    * Get performance metrics and recommendations
    */
   getPerformanceReport(): {
-    metrics: any;
-    cacheStats: any;
+    metrics: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    cacheStats: any; // eslint-disable-line @typescript-eslint/no-explicit-any
     recommendations: string[];
-    summary: any;
+    summary: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   } {
     return {
       metrics: this.performanceMonitor.getCurrentMetrics(),

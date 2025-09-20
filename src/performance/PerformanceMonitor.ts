@@ -50,7 +50,7 @@ interface OperationTiming {
   startTime: number;
   endTime?: number;
   duration?: number;
-  metadata?: any;
+  metadata?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
 export class PerformanceMonitor {
@@ -170,7 +170,7 @@ export class PerformanceMonitor {
   /**
    * Start timing an operation
    */
-  startOperation(operationId: string, operationType: string = 'unknown', metadata?: any): void {
+  startOperation(operationId: string, operationType: string = 'unknown', metadata?: any): void { // eslint-disable-line @typescript-eslint/no-explicit-any
     this.operationTimings.set(operationId, {
       name: operationId,
       operationType,

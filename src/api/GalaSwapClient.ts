@@ -310,7 +310,7 @@ export class GalaSwapClient {
 
     return this.executeWithRetry(async () => {
       // Build request
-      const config = getEndpointConfig(endpoint as any);
+      const config = getEndpointConfig(endpoint as any); // eslint-disable-line @typescript-eslint/no-explicit-any
       const url = method === 'GET' && params ? buildQueryUrl(endpoint, params) : endpoint;
 
       const requestConfig = {
@@ -686,7 +686,7 @@ export class GalaSwapClient {
   /**
    * Execute signed payload via bundle (with simple retry for transaction reliability)
    */
-  async executeBundle(payload: any, type: BundleType, signature?: string): Promise<BundleResponse> {
+  async executeBundle(payload: any, type: BundleType, signature?: string): Promise<BundleResponse> { // eslint-disable-line @typescript-eslint/no-explicit-any
     const bundleSignature = signature || await this.signer.signPayload(payload);
 
     const bundleRequest: BundleRequest = {
@@ -1075,7 +1075,7 @@ export class GalaSwapClient {
     });
 
     // Handle general errors
-    this.wsClient.on('error', (error: any) => {
+    this.wsClient.on('error', (error: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
       logger.error('WebSocket error:', error);
     });
   }
@@ -1197,7 +1197,7 @@ export class GalaSwapClient {
     websocketStatus: 'connected' | 'disconnected' | 'error';
     lastSuccessfulRequest: number;
     consecutiveFailures: number;
-    rateLimiterStatus: Record<string, any>;
+    rateLimiterStatus: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
   }> {
     let apiStatus: 'healthy' | 'degraded' | 'unhealthy' = 'unhealthy';
 

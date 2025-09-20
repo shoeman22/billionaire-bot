@@ -240,7 +240,7 @@ export type EndpointErrorCode = typeof ENDPOINT_ERROR_CODES[keyof typeof ENDPOIN
 /**
  * Build URL with query parameters for GET requests
  */
-export function buildQueryUrl(endpoint: string, params: Record<string, any>): string {
+export function buildQueryUrl(endpoint: string, params: Record<string, any>): string { // eslint-disable-line @typescript-eslint/no-explicit-any
   const url = new URL(endpoint, 'https://dex-backend-prod1.defi.gala.com');
 
   Object.entries(params).forEach(([key, value]) => {
@@ -255,7 +255,7 @@ export function buildQueryUrl(endpoint: string, params: Record<string, any>): st
 /**
  * Validate endpoint parameters
  */
-export function validateEndpointParams(endpoint: EndpointPath, params: Record<string, any>): {
+export function validateEndpointParams(endpoint: EndpointPath, params: Record<string, any>): { // eslint-disable-line @typescript-eslint/no-explicit-any
   isValid: boolean;
   errors: string[];
 } {

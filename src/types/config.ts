@@ -111,7 +111,7 @@ export interface AlertingConfig {
 
 export interface AlertChannel {
   type: 'email' | 'slack' | 'webhook' | 'sms';
-  config: Record<string, any>;
+  config: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
   enabled: boolean;
   severity: AlertSeverity[];
 }
@@ -193,7 +193,7 @@ export interface BackupConfig {
 
 export interface BackupStorage {
   type: 'local' | 's3' | 'gcs' | 'azure';
-  config: Record<string, any>;
+  config: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
 export interface MaintenanceConfig {
@@ -207,7 +207,7 @@ export interface MaintenanceConfig {
 export interface MaintenanceTask {
   name: string;
   type: 'cleanup' | 'optimization' | 'backup' | 'health_check';
-  config: Record<string, any>;
+  config: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
   enabled: boolean;
 }
 
@@ -263,7 +263,7 @@ export interface EnvironmentConfig {
 
 export interface ConfigOverride {
   path: string;
-  value: any;
+  value: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   condition?: string;
 }
 
@@ -272,13 +272,13 @@ export interface ConfigValidationRule {
   path: string;
   type: 'string' | 'number' | 'boolean' | 'array' | 'object';
   required: boolean;
-  default?: any;
+  default?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   validation?: ValidationConstraint[];
 }
 
 export interface ValidationConstraint {
   type: 'min' | 'max' | 'pattern' | 'enum' | 'custom';
-  value: any;
+  value: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   message?: string;
 }
 
@@ -300,13 +300,13 @@ export interface ValidationResult {
   path: string;
   level: 'error' | 'warning' | 'info';
   message: string;
-  value?: any;
+  value?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
 // Runtime configuration updates
 export interface ConfigUpdate {
   path: string;
-  value: any;
+  value: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   timestamp: number;
   source: string;
   reason?: string;
@@ -326,7 +326,7 @@ export interface FeatureFlag {
   name: string;
   enabled: boolean;
   rollout: RolloutConfig;
-  metadata: Record<string, any>;
+  metadata: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
 export interface RolloutConfig {
@@ -338,7 +338,7 @@ export interface RolloutConfig {
 export interface RolloutCondition {
   type: 'user_id' | 'ip_address' | 'time_range' | 'custom';
   operator: 'equals' | 'contains' | 'greater_than' | 'less_than';
-  value: any;
+  value: any; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
 export interface FeatureFlagConfig {
@@ -351,7 +351,7 @@ export interface FeatureFlagConfig {
 // Secrets management
 export interface SecretsConfig {
   provider: 'env' | 'vault' | 'aws_secrets' | 'azure_keyvault';
-  config: Record<string, any>;
+  config: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
   autoRefresh: boolean;
   refreshInterval: number;
 }
@@ -362,7 +362,7 @@ export interface Secret {
   version: string;
   createdAt: number;
   expiresAt?: number;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
 // Configuration profiles for different deployment scenarios

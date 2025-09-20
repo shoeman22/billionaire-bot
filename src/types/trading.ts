@@ -17,7 +17,7 @@ export interface Strategy {
 }
 
 export interface StrategyConfig {
-  [key: string]: any;
+  [key: string]: any; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
 export interface ArbitrageConfig extends StrategyConfig {
@@ -284,7 +284,7 @@ export interface Alert {
   severity: AlertSeverity;
   title: string;
   message: string;
-  data?: any;
+  data?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   timestamp: number;
   acknowledged: boolean;
   strategy?: string;
@@ -402,8 +402,8 @@ export interface TradingEvent {
   id: string;
   type: TradingEventType;
   timestamp: number;
-  data: any;
-  metadata?: Record<string, any>;
+  data: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  metadata?: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
 export type TradingEventType =

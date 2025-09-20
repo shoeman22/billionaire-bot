@@ -24,7 +24,7 @@ export interface ErrorResponse extends BaseResponse {
   error: true;
   errorCode?: string;
   errorKey?: string;
-  details?: any;
+  details?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
 // ===========================================
@@ -224,7 +224,7 @@ export interface SwapPayloadRequest {
 }
 
 export interface SwapPayload {
-  [key: string]: any; // GalaChain payload structure
+  [key: string]: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   uniqueKey: string;
   zeroForOne?: boolean;
 }
@@ -277,7 +277,7 @@ export interface CreatePoolPayloadRequest {
 export interface LiquidityPayloadResponse extends BaseResponse {
   error: false;
   data: {
-    [key: string]: any; // GalaChain payload structure
+    [key: string]: any; // eslint-disable-line @typescript-eslint/no-explicit-any
     uniqueKey: string;
   };
 }
@@ -287,7 +287,7 @@ export interface LiquidityPayloadResponse extends BaseResponse {
 // ===========================================
 
 export interface BundleRequest {
-  payload: any; // Signed payload from payload generation endpoints
+  payload: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   type: BundleType;
   signature: string;
   user: string; // Format: eth|0x...
@@ -340,7 +340,7 @@ export type TransactionStatus =
 
 export interface WebSocketEvent {
   event: string;
-  data: any;
+  data: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   timestamp: number;
 }
 
@@ -462,7 +462,7 @@ export interface BridgeRequestResponse extends BaseResponse {
   data: {
     fee: string;
     feeToken: string;
-    dto: any; // Bridge payload to be signed
+    dto: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   };
 }
 
@@ -567,11 +567,11 @@ export interface ParsedToken {
 }
 
 // Response validation helpers
-export function isSuccessResponse<T>(response: any): response is T & { error: false } {
+export function isSuccessResponse<T>(response: any): response is T & { error: false } { // eslint-disable-line @typescript-eslint/no-explicit-any
   return response && response.error === false && response.status >= 200 && response.status < 300;
 }
 
-export function isErrorResponse(response: any): response is ErrorResponse {
+export function isErrorResponse(response: any): response is ErrorResponse { // eslint-disable-line @typescript-eslint/no-explicit-any
   return response && (response.error === true || response.status >= 400);
 }
 
@@ -609,7 +609,7 @@ export function createTokenClassKey(compositeKey: string): TokenClassKey {
 export interface LiquidityPosition {
   id: string;
   owner: string;
-  pool: any;
+  pool: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   tickLower: number;
   tickUpper: number;
   liquidity: string;

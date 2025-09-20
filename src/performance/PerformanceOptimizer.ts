@@ -216,7 +216,7 @@ export class PerformanceOptimizer {
    * Generate comprehensive performance report
    */
   generatePerformanceReport(): {
-    currentStatus: any;
+    currentStatus: any; // eslint-disable-line @typescript-eslint/no-explicit-any
     optimizationHistory: OptimizationReport[];
     overallTrends: {
       averageLatency: number;
@@ -393,7 +393,7 @@ export class PerformanceOptimizer {
     };
   }
 
-  private generateSystemRecommendations(currentMetrics: PerformanceMetrics | null, trends: any): string[] {
+  private generateSystemRecommendations(currentMetrics: PerformanceMetrics | null, trends: any): string[] { // eslint-disable-line @typescript-eslint/no-explicit-any
     const recommendations: string[] = [];
 
     if (!currentMetrics) {

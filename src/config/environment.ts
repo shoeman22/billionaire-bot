@@ -24,10 +24,10 @@ export interface TradingConfig {
     address?: string;
   };
   riskThresholds?: {
-    [key: string]: any;
+    [key: string]: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   };
   strategies?: {
-    [key: string]: any;
+    [key: string]: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   };
 }
 

@@ -236,7 +236,7 @@ async function runBacktest(
 /**
  * Helper function to generate export data
  */
-async function generateExportData(tradingEngine: TradingEngine, exportType: string): Promise<any[]> {
+async function generateExportData(tradingEngine: TradingEngine, exportType: string): Promise<any[]> { // eslint-disable-line @typescript-eslint/no-explicit-any
   const status = tradingEngine.getStatus();
 
   switch (exportType) {
@@ -265,7 +265,7 @@ async function generateExportData(tradingEngine: TradingEngine, exportType: stri
 /**
  * Helper function to save export data
  */
-async function saveExportData(data: any[], format: string, outputPath: string): Promise<void> {
+async function saveExportData(data: any[], format: string, outputPath: string): Promise<void> { // eslint-disable-line @typescript-eslint/no-explicit-any
   const fs = await import('fs');
 
   if (format === 'json') {

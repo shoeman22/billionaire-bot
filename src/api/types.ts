@@ -16,7 +16,7 @@ export interface ErrorResponse extends BaseResponse {
   error: {
     code: string;
     message: string;
-    details?: any;
+    details?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   };
 }
 

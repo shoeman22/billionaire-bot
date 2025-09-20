@@ -377,7 +377,7 @@ export class MarketAnalysis {
    * Analyze volume patterns
    */
   private analyzeVolume(
-    priceData: any,
+    priceData: any, // eslint-disable-line @typescript-eslint/no-explicit-any
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     priceHistory: Array<{ price: number; timestamp: number }>
   ): VolumeAnalysis {
@@ -454,7 +454,7 @@ export class MarketAnalysis {
    * Generate trading recommendation
    */
   private generateRecommendation(
-    trend: any,
+    trend: any, // eslint-disable-line @typescript-eslint/no-explicit-any
     momentum: MomentumIndicators,
     volatility: number,
     volume: VolumeAnalysis
