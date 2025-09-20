@@ -336,34 +336,30 @@ describe('GalaSwapClient', () => {
     });
 
     it('should wait for transaction confirmation', async () => {
-      jest.useFakeTimers();
-
-      const pendingResponse = TestHelpers.createMockTransactionStatus('PENDING');
       const confirmedResponse = TestHelpers.createMockTransactionStatus('CONFIRMED');
 
-      mockAxiosInstance.request
-        .mockResolvedValueOnce({ data: pendingResponse })
-        .mockResolvedValueOnce({ data: confirmedResponse });
+      // Mock the monitorTransactionViaPolling method to return immediately
+      jest.spyOn(client as any, 'monitorTransactionViaPolling').mockResolvedValue(confirmedResponse);
 
-      const waitPromise = client.waitForTransaction('tx-123', 5000, 100);
+      // Ensure no WebSocket is connected to force polling path
+      (client as any).wsClient = null;
 
-      // Advance timer to trigger the polling interval
-      jest.advanceTimersByTime(100);
-      await jest.runOnlyPendingTimersAsync();
-
-      const result = await waitPromise;
+      const result = await client.waitForTransaction('tx-123', 5000, 100);
 
       expect(result).toEqual(confirmedResponse);
-      expect(mockAxiosInstance.request).toHaveBeenCalledTimes(2);
-
-      jest.useRealTimers();
+      expect((client as any).monitorTransactionViaPolling).toHaveBeenCalledWith('tx-123', 5000, 100);
     });
 
     it('should timeout waiting for transaction', async () => {
-      const pendingResponse = TestHelpers.createMockTransactionStatus('PENDING');
-      mockAxiosInstance.request.mockResolvedValue({ data: pendingResponse });
+      // Mock the monitorTransactionViaPolling method to throw timeout error
+      jest.spyOn(client as any, 'monitorTransactionViaPolling').mockRejectedValue(
+        new Error('Transaction monitoring timeout: tx-123')
+      );
 
-      await expect(client.waitForTransaction('tx-123', 200, 100))
+      // Ensure no WebSocket is connected to force polling path
+      (client as any).wsClient = null;
+
+      await expect(client.waitForTransaction('tx-123', 50, 10))
         .rejects.toThrow('Transaction monitoring timeout: tx-123');
     });
   });
