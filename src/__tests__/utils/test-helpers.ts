@@ -52,7 +52,6 @@ export class TestHelpers {
             minProfitBps: 50,
             maxGasPrice: 100
           }
-          // Market making strategy removed - SDK v0.0.7 does not support liquidity operations
         }
       },
       development: {

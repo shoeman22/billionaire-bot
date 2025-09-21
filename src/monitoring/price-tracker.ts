@@ -249,7 +249,7 @@ export class PriceTracker {
           price: safeParseFloat(data.price, 0),
           priceUsd: safeParseFloat(data.priceUsd || data.price, 0),
           change24h: safeParseFloat(data.change24h || 0, 0),
-          volume24h: safeParseFloat(data.volume24h || 0, 0),
+          volume24h: 0, // Volume tracking disabled
           timestamp: Date.now(),
         };
 
@@ -301,7 +301,7 @@ export class PriceTracker {
                 price: calculatedPrice,
                 priceUsd: calculatedPrice,
                 change24h: 0, // Would need historical data
-                volume24h: 0, // Volume not available in pool data
+                volume24h: 0, // Volume tracking disabled - not reliably available
                 timestamp: Date.now(),
               };
 
@@ -389,8 +389,8 @@ export class PriceTracker {
           break;
 
         case 'volume_spike':
-          currentValue = currentData.volume24h;
-          shouldTrigger = currentData.volume24h >= alert.threshold;
+          currentValue = 0; // Volume tracking disabled
+          shouldTrigger = false; // Volume alerts disabled
           break;
 
         case 'price_threshold':

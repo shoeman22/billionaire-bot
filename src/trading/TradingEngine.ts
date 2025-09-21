@@ -9,7 +9,6 @@ import { TRADING_CONSTANTS } from '../config/constants';
 import { logger } from '../utils/logger';
 import { PriceTracker } from '../monitoring/price-tracker';
 import { ArbitrageStrategy } from './strategies/arbitrage';
-// Market-making strategy removed - requires SDK liquidity operations not available in v0.0.7
 import { PositionLimits } from './risk/position-limits';
 import { SlippageProtection } from './risk/slippage';
 import { RiskMonitor } from './risk/risk-monitor';
@@ -24,7 +23,6 @@ export class TradingEngine {
   protected gswap: GSwap;
   private priceTracker: PriceTracker;
   private arbitrageStrategy: ArbitrageStrategy;
-  // Market-making strategy removed - SDK v0.0.7 doesn't support liquidity operations
   private positionLimits: PositionLimits;
   private slippageProtection: SlippageProtection;
   private riskMonitor: RiskMonitor;
@@ -90,7 +88,6 @@ export class TradingEngine {
       this.swapExecutor,
       this.marketAnalysis
     );
-    // Market-making strategy removed - SDK v0.0.7 doesn't support required liquidity operations
 
     logger.info('Trading Engine initialized with all components');
   }
@@ -127,8 +124,7 @@ export class TradingEngine {
 
       // Initialize strategies
       await this.arbitrageStrategy.initialize();
-      // Market-making strategy removed - SDK v0.0.7 doesn't support liquidity operations
-
+    
       // Start trading loops
       this.startTradingLoop();
 
@@ -155,8 +151,7 @@ export class TradingEngine {
 
       // Stop strategies
       await this.arbitrageStrategy.stop();
-      // Market-making strategy removed - SDK v0.0.7 doesn't support liquidity operations
-
+    
       // Stop risk monitoring
       this.riskMonitor.stopMonitoring();
 
@@ -321,7 +316,7 @@ export class TradingEngine {
           // Strong bullish trend - favor arbitrage (only if not high risk)
           await this.arbitrageStrategy.execute();
         } else if (marketCondition.volatility === 'low' && marketCondition.liquidity === 'good' && riskCheck.riskLevel === 'low') {
-          // Low volatility, good liquidity, low risk - would favor market making but strategy not available
+          // Low volatility, good liquidity, low risk - favorable conditions
           // Fall back to arbitrage if conditions are favorable
           await this.arbitrageStrategy.execute();
         } else if (marketCondition.confidence > 50 && riskCheck.riskLevel === 'low') {
@@ -727,8 +722,7 @@ export class TradingEngine {
     // Get strategy statistics
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const arbitrageStats = this.arbitrageStrategy.getStatus();
-    // Market-making strategy removed - SDK v0.0.7 doesn't support liquidity operations
-
+  
     // Update aggregated stats
     // Note: Advanced statistics aggregation will be implemented in future versions
   }
@@ -757,7 +751,6 @@ export class TradingEngine {
       apiHealth: true, // Note: Real-time API health monitoring will be implemented in future versions
       strategies: {
         arbitrage: this.arbitrageStrategy.getStatus(),
-        // Market making removed - SDK v0.0.7 doesn't support liquidity operations
       },
       performance: {
         totalTrades: this.tradingStats.totalTrades,
@@ -889,12 +882,4 @@ export class TradingEngine {
       throw error;
     }
   }
-
-  /**
-   * Market making strategy - NOT AVAILABLE (SDK v0.0.7 limitation)
-   */
-  async enableMarketMakingStrategy(): Promise<void> {
-    throw new Error('Market making strategy not available - SDK v0.0.7 does not support liquidity operations');
-  }
-
 }

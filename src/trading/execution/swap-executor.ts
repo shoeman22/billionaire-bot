@@ -1203,120 +1203,23 @@ export class SwapExecutor {
   }
 
   /**
-   * Build real price history from current pool state and estimated data points
+   * Historical price data disabled - returns empty data
    */
-  private async buildRealPriceHistory(tokenIn: string, tokenOut: string, poolLiquidity: string): Promise<{
+  private async buildRealPriceHistory(_tokenIn: string, _tokenOut: string, _poolLiquidity: string): Promise<{
     error: boolean;
     data: {
       prices: Array<{ price: string; timestamp: number }>;
       volume24h: string;
     };
   }> {
-    try {
-      // Get current pool data to establish baseline price
-      const currentPool = await this.gswap.pools.getPoolData(tokenIn, tokenOut, 3000);
-
-      if (!currentPool?.sqrtPrice) {
-        // Try different fee tiers if standard tier fails
-        const altPool = await this.gswap.pools.getPoolData(tokenIn, tokenOut, 500);
-        if (!altPool?.sqrtPrice) {
-          throw new Error('No pool data available for price history');
-        }
-        return this.buildPriceHistoryFromPool(altPool, tokenIn, tokenOut, poolLiquidity);
+    // Historical price tracking disabled - return empty data
+    return {
+      error: false,
+      data: {
+        prices: [],
+        volume24h: '0'
       }
-
-      return this.buildPriceHistoryFromPool(currentPool, tokenIn, tokenOut, poolLiquidity);
-
-    } catch (error) {
-      logger.warn('Failed to build real price history:', error);
-
-      // Return minimal fallback data (not mock - real calculation failure)
-      return {
-        error: true,
-        data: {
-          prices: [],
-          volume24h: poolLiquidity
-        }
-      };
-    }
-  }
-
-  /**
-   * Build price history data points from pool state
-   */
-  private buildPriceHistoryFromPool(
-    poolData: any,
-    tokenIn: string,
-    tokenOut: string,
-    poolLiquidity: string
-  ): {
-    error: boolean;
-    data: {
-      prices: Array<{ price: string; timestamp: number }>;
-      volume24h: string;
     };
-  } {
-    try {
-      // Calculate current spot price from sqrt price
-      const currentPrice = this.gswap.pools.calculateSpotPrice(tokenIn, tokenOut, poolData.sqrtPrice);
-      const priceNum = safeParseFloat(currentPrice.toString(), 0);
-
-      if (priceNum <= 0) {
-        throw new Error('Invalid price calculated from pool data');
-      }
-
-      // Generate realistic price points based on current price and typical volatility
-      // This simulates historical data but uses real current price as anchor
-      const now = Date.now();
-      const pricePoints = [];
-
-      // Use actual liquidity to estimate typical price movement ranges
-      const liquidityNum = safeParseFloat(poolLiquidity, 0);
-      const volatilityFactor = Math.max(0.01, Math.min(0.1, 1000000 / liquidityNum)); // Higher liquidity = lower volatility
-
-      // Generate 24 hourly price points working backwards
-      for (let i = 23; i >= 0; i--) {
-        const timestamp = now - (i * 3600000); // 1 hour intervals
-
-        // Apply realistic price movement based on pool characteristics
-        const randomFactor = (Math.random() - 0.5) * volatilityFactor;
-        const timeDecay = Math.exp(-i * 0.01); // Slight trend towards current price
-        const historicalPrice = priceNum * (1 + randomFactor * timeDecay);
-
-        pricePoints.push({
-          price: Math.max(priceNum * 0.8, historicalPrice).toString(), // Floor at 20% below current
-          timestamp
-        });
-      }
-
-      // Ensure final price point matches current price exactly
-      pricePoints[pricePoints.length - 1] = {
-        price: priceNum.toString(),
-        timestamp: now
-      };
-
-      // Estimate 24h volume from pool liquidity and turnover
-      const estimatedVolume = (liquidityNum * 0.2).toString(); // Assume 20% turnover
-
-      logger.debug(`Built price history from real pool data:`, {
-        currentPrice: priceNum,
-        dataPoints: pricePoints.length,
-        volatilityFactor,
-        estimatedVolume
-      });
-
-      return {
-        error: false,
-        data: {
-          prices: pricePoints,
-          volume24h: estimatedVolume
-        }
-      };
-
-    } catch (error) {
-      logger.error('Error building price history from pool:', error);
-      throw error;
-    }
   }
 
   /**

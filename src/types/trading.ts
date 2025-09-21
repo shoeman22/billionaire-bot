@@ -4,7 +4,7 @@
  */
 
 // Strategy types
-export type StrategyType = 'arbitrage' | 'trend_following' | 'mean_reversion'; // 'market_making' removed - SDK v0.0.7 limitation
+export type StrategyType = 'arbitrage' | 'trend_following' | 'mean_reversion';
 
 export interface Strategy {
   id: string;
@@ -28,8 +28,6 @@ export interface ArbitrageConfig extends StrategyConfig {
   excludedPools?: string[];
   maxPriceImpact: number;
 }
-
-// MarketMakingConfig removed - strategy not available with SDK v0.0.7
 
 export interface StrategyPerformance {
   totalTrades: number;

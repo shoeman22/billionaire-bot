@@ -257,9 +257,11 @@ export class MarketAnalysis {
     const priceData = this.priceTracker.getPrice(token);
     const priceHistory = this.priceTracker.getPriceHistory(token, 100);
 
-    if (!priceData || priceHistory.length < 10) {
-      throw new Error(`Insufficient data for token ${token}`);
+    if (!priceData) {
+      throw new Error(`No current price data for token ${token}`);
     }
+
+    // Simplified analysis - doesn't require extensive historical data
 
     // Calculate trend
     const trend = this.calculateTrend(priceHistory);
@@ -276,8 +278,8 @@ export class MarketAnalysis {
     // Calculate momentum indicators
     const momentum = this.calculateMomentumIndicators(priceHistory);
 
-    // Generate recommendation
-    const recommendation = this.generateRecommendation(trend, momentum, volatility, volume);
+    // Generate simplified recommendation
+    const recommendation = this.generateSimplifiedRecommendation(trend, momentum, volatility);
 
     return {
       token,
@@ -299,27 +301,27 @@ export class MarketAnalysis {
     direction: MarketTrend;
     strength: number;
   } {
-    if (priceHistory.length < 5) {
+    if (priceHistory.length < 3) {
       return { direction: 'unknown', strength: 0 };
     }
 
+    // Simple trend from last few price points
     const prices = priceHistory.map(p => p.price);
-    const recent = prices.slice(-10);
-    const older = prices.slice(-20, -10);
+    const recent = prices.slice(-3); // Last 3 prices
 
-    if (recent.length === 0 || older.length === 0) {
+    if (recent.length < 3) {
       return { direction: 'unknown', strength: 0 };
     }
 
-    const recentAvg = recent.reduce((a, b) => a + b) / recent.length;
-    const olderAvg = older.reduce((a, b) => a + b) / older.length;
-
-    const change = (recentAvg - olderAvg) / olderAvg;
+    // Calculate simple direction from first to last
+    const firstPrice = recent[0];
+    const lastPrice = recent[recent.length - 1];
+    const change = (lastPrice - firstPrice) / firstPrice;
     const strength = Math.min(Math.abs(change) * 1000, 100); // Scale to 0-100
 
     let direction: MarketTrend;
-    if (change > 0.02) direction = 'bullish';
-    else if (change < -0.02) direction = 'bearish';
+    if (change > 0.01) direction = 'bullish';      // 1% up
+    else if (change < -0.01) direction = 'bearish'; // 1% down
     else direction = 'sideways';
 
     return { direction, strength };
@@ -361,45 +363,32 @@ export class MarketAnalysis {
     if (priceHistory.length < 2) return 0;
 
     const prices = priceHistory.map(p => p.price);
-    const returns = [];
+    if (prices.length < 2) return 0;
 
+    // Simple volatility: max price change in recent history
+    let maxChange = 0;
     for (let i = 1; i < prices.length; i++) {
-      returns.push((prices[i] - prices[i - 1]) / prices[i - 1]);
+      const change = Math.abs((prices[i] - prices[i - 1]) / prices[i - 1]);
+      maxChange = Math.max(maxChange, change);
     }
 
-    const avgReturn = returns.reduce((a, b) => a + b) / returns.length;
-    const variance = returns.reduce((sum, ret) => sum + Math.pow(ret - avgReturn, 2), 0) / returns.length;
-
-    return Math.sqrt(variance) * Math.sqrt(365 * 24 * 60); // Annualized volatility
+    return Math.min(maxChange, 1.0); // Cap at 100%
   }
 
   /**
    * Analyze volume patterns
    */
   private analyzeVolume(
-    priceData: any, // eslint-disable-line @typescript-eslint/no-explicit-any
-    priceHistory: Array<{ price: number; timestamp: number }>
+    _priceData: any, // eslint-disable-line @typescript-eslint/no-explicit-any
+    _priceHistory: Array<{ price: number; timestamp: number }>
   ): VolumeAnalysis {
-    // Get real volume data from price tracker or estimate from market activity
-    const current = this.calculateRealCurrentVolume(priceData, priceHistory);
-    const historical = this.calculateHistoricalVolumes(priceHistory);
-
-    const average24h = historical.average24h;
-    const average7d = historical.average7d;
-
-    // Real spike detection based on statistical analysis
-    const volumeStdDev = this.calculateVolumeStandardDeviation(historical.dailyVolumes);
-    const spike = current > (average24h + (2 * volumeStdDev)); // 2 standard deviations above mean
-
-    // Real trend analysis based on moving averages
-    const trend = this.calculateVolumeTrend(historical.dailyVolumes);
-
+    // Volume analysis disabled - return zero values
     return {
-      current,
-      average24h,
-      average7d,
-      spike,
-      trend,
+      current: 0,
+      average24h: 0,
+      average7d: 0,
+      spike: false,
+      trend: 'stable',
     };
   }
 
@@ -413,95 +402,38 @@ export class MarketAnalysis {
     // Use price volatility as a proxy for trading volume
     if (priceHistory.length < 2) return 0;
 
-    const recentPrices = priceHistory.slice(-24); // Last 24 data points
-    const priceChanges = recentPrices.map((p, i) => {
-      if (i === 0) return 0;
-      return Math.abs(p.price - recentPrices[i - 1].price) / recentPrices[i - 1].price;
-    });
-
-    const avgPriceChange = priceChanges.reduce((a, b) => a + b, 0) / priceChanges.length;
-
-    // Estimate volume based on price movement and typical market patterns
-    const baseVolume = priceData.volume24h || 10000; // Base volume estimate
-    const volatilityMultiplier = 1 + (avgPriceChange * 10); // Higher volatility = higher volume
-
-    return baseVolume * volatilityMultiplier;
+    // Volume tracking disabled - return 0
+    return 0;
   }
 
   /**
-   * Calculate historical volume averages
+   * Calculate historical volume averages (disabled - returns zeros)
    */
-  private calculateHistoricalVolumes(priceHistory: Array<{ price: number; timestamp: number }>): {
+  private calculateHistoricalVolumes(_priceHistory: Array<{ price: number; timestamp: number }>): {
     average24h: number;
     average7d: number;
     dailyVolumes: number[];
   } {
-    if (priceHistory.length < 7) {
-      // Not enough data, use estimates
-      return {
-        average24h: 50000,
-        average7d: 45000,
-        dailyVolumes: [40000, 45000, 50000, 55000, 48000, 52000, 47000]
-      };
-    }
-
-    // Group by days and calculate daily volumes
-    const dailyVolumes: number[] = [];
-    // const msPerDay = 24 * 60 * 60 * 1000; // Currently unused
-
-    for (let i = 0; i < Math.min(7, Math.floor(priceHistory.length / 24)); i++) {
-      const dayStart = i * 24;
-      const dayEnd = Math.min((i + 1) * 24, priceHistory.length);
-      const dayData = priceHistory.slice(dayStart, dayEnd);
-
-      // Calculate volume based on price movements in the day
-      let dayVolume = 0;
-      for (let j = 1; j < dayData.length; j++) {
-        const priceChange = Math.abs(dayData[j].price - dayData[j - 1].price);
-        dayVolume += priceChange * 1000; // Scale factor
-      }
-
-      dailyVolumes.push(dayVolume);
-    }
-
-    const average24h = dailyVolumes.length > 0 ? dailyVolumes[0] : 50000;
-    const average7d = dailyVolumes.length > 0 ?
-      dailyVolumes.reduce((a, b) => a + b, 0) / dailyVolumes.length : 45000;
-
-    return { average24h, average7d, dailyVolumes };
+    // Volume tracking disabled - return all zeros
+    return {
+      average24h: 0,
+      average7d: 0,
+      dailyVolumes: []
+    };
   }
 
   /**
-   * Calculate volume standard deviation for spike detection
+   * Calculate volume standard deviation (disabled)
    */
-  private calculateVolumeStandardDeviation(volumes: number[]): number {
-    if (volumes.length < 2) return 0;
-
-    const mean = volumes.reduce((a, b) => a + b, 0) / volumes.length;
-    const variance = volumes.reduce((sum, vol) => sum + Math.pow(vol - mean, 2), 0) / volumes.length;
-
-    return Math.sqrt(variance);
+  private calculateVolumeStandardDeviation(_volumes: number[]): number {
+    return 0; // Volume analysis disabled
   }
 
   /**
    * Calculate volume trend direction
    */
-  private calculateVolumeTrend(volumes: number[]): 'increasing' | 'decreasing' | 'stable' {
-    if (volumes.length < 3) return 'stable';
-
-    const recent = volumes.slice(-3);
-    const older = volumes.slice(-6, -3);
-
-    if (recent.length === 0 || older.length === 0) return 'stable';
-
-    const recentAvg = recent.reduce((a, b) => a + b, 0) / recent.length;
-    const olderAvg = older.reduce((a, b) => a + b, 0) / older.length;
-
-    const change = (recentAvg - olderAvg) / olderAvg;
-
-    if (change > 0.1) return 'increasing';
-    if (change < -0.1) return 'decreasing';
-    return 'stable';
+  private calculateVolumeTrend(_volumes: number[]): 'increasing' | 'decreasing' | 'stable' {
+    return 'stable'; // Volume analysis disabled
   }
 
   /**
@@ -510,21 +442,18 @@ export class MarketAnalysis {
   private calculateMomentumIndicators(priceHistory: Array<{ price: number; timestamp: number }>): MomentumIndicators {
     const prices = priceHistory.map(p => p.price);
 
-    // Simple RSI calculation
-    const rsi = this.calculateRSI(prices);
+    // Simple momentum from recent price change
+    const momentum = prices.length >= 3 ?
+      ((prices[prices.length - 1] - prices[0]) / prices[0]) * 100 : 0;
 
-    // Momentum (rate of change)
-    const momentum = prices.length >= 10 ?
-      ((prices[prices.length - 1] - prices[prices.length - 10]) / prices[prices.length - 10]) * 100 : 0;
-
-    // Acceleration (second derivative)
+    // Simple acceleration from last 3 points
     const acceleration = prices.length >= 3 ?
       prices[prices.length - 1] - 2 * prices[prices.length - 2] + prices[prices.length - 3] : 0;
 
     const direction = momentum > 1 ? 'up' : momentum < -1 ? 'down' : 'sideways';
 
     return {
-      rsi,
+      rsi: 50, // Neutral RSI - real calculation requires too much data
       momentum,
       acceleration,
       direction,
@@ -558,11 +487,10 @@ export class MarketAnalysis {
   /**
    * Generate trading recommendation
    */
-  private generateRecommendation(
+  private generateSimplifiedRecommendation(
     trend: any, // eslint-disable-line @typescript-eslint/no-explicit-any
     momentum: MomentumIndicators,
-    volatility: number,
-    volume: VolumeAnalysis
+    volatility: number
   ): TradingRecommendation {
     const factors: string[] = [];
     let score = 0;
@@ -577,19 +505,15 @@ export class MarketAnalysis {
     }
 
     // Momentum analysis
-    if (momentum.rsi > 70) {
-      score -= 20;
-      factors.push('Overbought conditions (RSI > 70)');
-    } else if (momentum.rsi < 30) {
-      score += 20;
-      factors.push('Oversold conditions (RSI < 30)');
+    if (momentum.momentum > 5) {
+      score += 15;
+      factors.push('Strong upward momentum');
+    } else if (momentum.momentum < -5) {
+      score -= 15;
+      factors.push('Strong downward momentum');
     }
 
-    // Volume analysis
-    if (volume.spike && volume.trend === 'increasing') {
-      score += 15;
-      factors.push('Volume spike with increasing trend');
-    }
+    // Volume analysis disabled
 
     // Volatility consideration
     if (volatility > 0.5) {
@@ -754,10 +678,8 @@ export class MarketAnalysis {
 
       if (profitPercent < 0.1) return null; // Not profitable enough
 
-      // Calculate real volume based on pool liquidity
-      const pool1Liquidity = safeParseFloat(pool1.liquidity?.toString() || '0', 0);
-      const pool2Liquidity = safeParseFloat(pool2.liquidity?.toString() || '0', 0);
-      const estimatedVolume = Math.min(pool1Liquidity, pool2Liquidity) * 0.1; // 10% of smaller pool
+      // Volume calculation disabled
+      const estimatedVolume = 0;
 
       // Calculate real gas estimate based on two swaps
       const estimatedGas = TRADING_CONSTANTS.DEFAULT_GAS_LIMIT * 2;

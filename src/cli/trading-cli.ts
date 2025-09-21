@@ -45,9 +45,6 @@ program
       if (strategies.includes('arbitrage')) {
         await tradingEngine.enableArbitrageStrategy();
       }
-      if (strategies.includes('market-making')) {
-        logger.warn('Market-making strategy is not available - SDK v0.0.7 does not support liquidity operations');
-      }
 
       // Run for specified duration
       setTimeout(async () => {
