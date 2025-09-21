@@ -19,6 +19,29 @@ interface GalaChainTokenClassKey {
   additionalKey: string;
 }
 
+// API response interfaces
+interface ApiErrorResponse {
+  message?: string;
+  error?: string;
+  [key: string]: unknown;
+}
+
+interface PoolApiResponse {
+  data: {
+    Data: {
+      fee: number;
+      liquidity: string;
+      sqrtPrice: string;
+      tick: number;
+      token0: string;
+      token1: string;
+      [key: string]: unknown;
+    };
+  };
+  status: number;
+  message?: string;
+}
+
 interface GetPoolDataResponse {
   bitmap: Record<string, string>;
   fee: number;
@@ -52,7 +75,7 @@ interface GSwapOptions {
 class FixedPoolsService {
   private gatewayBaseUrl: string;
   private dexContractBasePath: string;
-  private httpClient: any;
+  private httpClient: null;
   private baseUrl: string;
 
   constructor(baseUrl: string) {
@@ -151,11 +174,11 @@ class FixedPoolsService {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({})) as any;
+        const errorData = await response.json().catch(() => ({})) as ApiErrorResponse;
         throw new Error(`Pool API error ${response.status}: ${errorData.message || 'Unknown error'}`);
       }
 
-      const data = await response.json() as any;
+      const data = await response.json() as PoolApiResponse;
 
       // API response has nested structure: { data: { Data: { ... } } }
       if (!data.data || !data.data.Data) {
@@ -166,22 +189,22 @@ class FixedPoolsService {
 
       // Convert to SDK-compatible format
       const result: GetPoolDataResponse = {
-        bitmap: poolData.bitmap || {},
-        fee: poolData.fee,
-        feeGrowthGlobal0: new BigNumber(poolData.feeGrowthGlobal0 || '0'),
-        feeGrowthGlobal1: new BigNumber(poolData.feeGrowthGlobal1 || '0'),
-        grossPoolLiquidity: new BigNumber(poolData.grossPoolLiquidity || '0'),
-        liquidity: new BigNumber(poolData.liquidity || '0'),
-        maxLiquidityPerTick: new BigNumber(poolData.maxLiquidityPerTick || '0'),
-        protocolFees: poolData.protocolFees || 0,
-        protocolFeesToken0: new BigNumber(poolData.protocolFeesToken0 || '0'),
-        protocolFeesToken1: new BigNumber(poolData.protocolFeesToken1 || '0'),
-        sqrtPrice: new BigNumber(poolData.sqrtPrice || '0'),
-        tickSpacing: poolData.tickSpacing || 60,
-        token0: poolData.token0ClassKey,
-        token0ClassKey: this.parseTokenString(poolData.token0ClassKey),
-        token1: poolData.token1ClassKey,
-        token1ClassKey: this.parseTokenString(poolData.token1ClassKey)
+        bitmap: (poolData.bitmap as Record<string, string>) || ({} as Record<string, string>),
+        fee: poolData.fee || 0,
+        feeGrowthGlobal0: new BigNumber(String(poolData.feeGrowthGlobal0 || '0')),
+        feeGrowthGlobal1: new BigNumber(String(poolData.feeGrowthGlobal1 || '0')),
+        grossPoolLiquidity: new BigNumber(String(poolData.grossPoolLiquidity || '0')),
+        liquidity: new BigNumber(String(poolData.liquidity || '0')),
+        maxLiquidityPerTick: new BigNumber(String(poolData.maxLiquidityPerTick || '0')),
+        protocolFees: (poolData.protocolFees as number) || 0,
+        protocolFeesToken0: new BigNumber(String(poolData.protocolFeesToken0 || '0')),
+        protocolFeesToken1: new BigNumber(String(poolData.protocolFeesToken1 || '0')),
+        sqrtPrice: new BigNumber(String(poolData.sqrtPrice || '0')),
+        tickSpacing: (poolData.tickSpacing as number) || 60,
+        token0: String(poolData.token0ClassKey || ''),
+        token0ClassKey: this.parseTokenString(String(poolData.token0ClassKey || '')),
+        token1: String(poolData.token1ClassKey || ''),
+        token1ClassKey: this.parseTokenString(String(poolData.token1ClassKey || ''))
       };
 
       logger.debug(`Pool data retrieved successfully: sqrtPrice=${result.sqrtPrice.toString()}`);

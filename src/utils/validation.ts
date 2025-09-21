@@ -884,6 +884,44 @@ export class InputValidator {
 
 }
 
+/**
+ * Sanitize error messages to remove sensitive information
+ * Prevents private keys, mnemonics, and other sensitive data from appearing in logs
+ */
+export const sanitizeErrorMessage = (errorMessage: string): string => {
+  if (typeof errorMessage !== 'string') {
+    return '[INVALID_ERROR_MESSAGE]';
+  }
+
+  let sanitized = errorMessage;
+
+  // Remove private keys (64-character hex strings)
+  sanitized = sanitized.replace(/\b[0-9a-fA-F]{64}\b/g, '[PRIVATE_KEY_REDACTED]');
+
+  // Remove potential private keys with 0x prefix
+  sanitized = sanitized.replace(/\b0x[0-9a-fA-F]{64}\b/g, '[PRIVATE_KEY_REDACTED]');
+
+  // Remove mnemonic phrases (12 or 24 words)
+  sanitized = sanitized.replace(/\b(?:\w+\s+){11}\w+\b/g, '[MNEMONIC_REDACTED]');
+  sanitized = sanitized.replace(/\b(?:\w+\s+){23}\w+\b/g, '[MNEMONIC_REDACTED]');
+
+  // Remove potential API keys and secrets
+  sanitized = sanitized.replace(/(["`'](?:api[_-]?key|secret|token|password)["`']?\s*[:=]\s*["`'][^"`']+["`'])/gi, '$1[REDACTED]');
+  sanitized = sanitized.replace(/(\b(?:api[_-]?key|secret|token|password)\b[^:\s]*[:=]\s*)([^\s,}\])"']+)/gi, '$1[REDACTED]');
+
+  // Remove file paths that might contain usernames
+  sanitized = sanitized.replace(/\/home\/[^\s,}\])"']+/g, '/home/[REDACTED]');
+  sanitized = sanitized.replace(/C:\\Users\\[^\s,}\])"']+/g, 'C:\\Users\\[REDACTED]');
+
+  // Remove potential wallet addresses
+  sanitized = sanitized.replace(/\beth\|0x[0-9a-fA-F]{40}\b/g, 'eth|[WALLET_REDACTED]');
+
+  // Remove any Base64-encoded data that might be sensitive
+  sanitized = sanitized.replace(/[A-Za-z0-9+/]{40,}={0,2}/g, '[BASE64_DATA_REDACTED]');
+
+  return sanitized;
+};
+
 // Export static methods as standalone functions for test compatibility
 export const sanitizeInput = InputValidator.sanitizeInput;
 export const validateEnvironmentVariables = InputValidator.validateEnvironment;

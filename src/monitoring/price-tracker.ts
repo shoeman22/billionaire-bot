@@ -3,11 +3,21 @@
  * Real-time price monitoring and change detection system
  */
 
-import { GSwapWrapper as GSwap } from '../services/gswap-wrapper';
+// GSwapWrapper type imported via IGSwapLike interface
 import { logger } from '../utils/logger';
 import { TRADING_CONSTANTS } from '../config/constants';
 import { createTokenClassKey } from '../types/galaswap';
 import { safeParseFloat } from '../utils/safe-parse';
+
+// Interface for GSwap-like objects with pools service (generic to avoid SDK type conflicts)
+interface IGSwapLike {
+  pools: {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    getPoolData: (token0: string, token1: string, fee: number) => Promise<any>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    calculateSpotPrice: (...args: any[]) => any;
+  };
+}
 
 export interface PriceData {
   token: string;
@@ -37,7 +47,7 @@ export interface PriceHistory {
 }
 
 export class PriceTracker {
-  private gswap: GSwap | any;
+  private gswap: IGSwapLike;
   private isRunning: boolean = false;
   private priceData: Map<string, PriceData> = new Map();
   private priceHistory: Map<string, PriceHistory> = new Map();
@@ -49,7 +59,7 @@ export class PriceTracker {
   private readonly MAX_PRICE_HISTORY = 1000;
   private readonly TOKENS_TO_TRACK = Object.values(TRADING_CONSTANTS.TOKENS);
 
-  constructor(gswap: GSwap | any) {
+  constructor(gswap: IGSwapLike) {
     this.gswap = gswap;
     this.initializePriceHistory();
     logger.info('Price Tracker initialized');

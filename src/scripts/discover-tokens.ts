@@ -9,6 +9,14 @@ import { config } from 'dotenv';
 import { logger } from '../utils/logger';
 import { validateEnvironment } from '../config/environment';
 
+// API response interfaces
+interface ApiResponse {
+  data?: unknown;
+  message?: string;
+  status?: number;
+  [key: string]: unknown;
+}
+
 // Load environment variables
 config();
 
@@ -65,7 +73,7 @@ async function discoverTokens(): Promise<void> {
           signal: AbortSignal.timeout(5000)
         });
 
-        const data = await response.json() as any;
+        const data = await response.json() as ApiResponse;
 
         if (response.status === 200) {
           logger.info(`✅ SUCCESS: ${token} returned valid price data!`, data);
@@ -111,7 +119,7 @@ async function discoverTokens(): Promise<void> {
           signal: AbortSignal.timeout(5000)
         });
 
-        const data = await response.json() as any;
+        const data = await response.json() as ApiResponse;
 
         if (response.status === 200) {
           logger.info(`✅ SUCCESS: Pool found for ${test.token0}/${test.token1}!`, data);

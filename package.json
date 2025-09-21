@@ -2,6 +2,7 @@
   "name": "billionaire-bot",
   "version": "1.0.0",
   "description": "Sophisticated GalaSwap V3 trading bot",
+  "type": "module",
   "main": "dist/main.js",
   "bin": {
     "billionaire-bot": "dist/main.js"

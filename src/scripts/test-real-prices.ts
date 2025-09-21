@@ -9,6 +9,30 @@ import { config } from 'dotenv';
 import { logger } from '../utils/logger';
 import { validateEnvironment } from '../config/environment';
 
+// API response interfaces
+interface PriceApiResponse {
+  data?: number | string;
+  message?: string;
+  status?: number;
+  [key: string]: unknown;
+}
+
+interface PoolApiResponse {
+  data: {
+    Data: {
+      fee: number;
+      liquidity: string;
+      sqrtPrice: string;
+      tick: number;
+      token0: string;
+      token1: string;
+      [key: string]: unknown;
+    };
+  };
+  status: number;
+  message?: string;
+}
+
 // Load environment variables
 config();
 
@@ -44,10 +68,10 @@ async function testRealPrices(): Promise<void> {
           signal: AbortSignal.timeout(5000)
         });
 
-        const data = await response.json() as any;
+        const data = await response.json() as PriceApiResponse;
 
         if (response.status === 200) {
-          const price = parseFloat(data.data);
+          const price = parseFloat(String(data.data || '0'));
           priceResults.push({
             token: token.split('$')[0], // Extract token symbol
             price: price,
@@ -87,7 +111,7 @@ async function testRealPrices(): Promise<void> {
       const poolData = await response.json();
 
       if (response.status === 200) {
-        const pool = (poolData as any).data.Data;
+        const pool = (poolData as PoolApiResponse).data.Data;
         logger.info(`✅ Pool GALA/GUSDC:`, {
           fee: pool.fee,
           liquidity: pool.liquidity,
