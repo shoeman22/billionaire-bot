@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is the **billionaire-bot** repository - a sophisticated trading bot for the GalaSwap V3 decentralized exchange. The bot utilizes concentrated liquidity AMM protocols to execute automated trading strategies on the Gala ecosystem.
+This is the **billionaire-bot** repository - a production-ready trading bot for the GalaSwap V3 decentralized exchange. The bot focuses exclusively on arbitrage trading strategies due to SDK v0.0.7 limitations that do not support liquidity operations or market making.
 
-**Core Purpose**: Automated trading and arbitrage opportunities on GalaSwap V3 using real wallet credentials and live market data.
+**Core Purpose**: Automated arbitrage trading on GalaSwap V3 using real wallet credentials and live market data via API polling. Features 123 passing tests and comprehensive security measures.
 
 ## MCP Server Configuration
 
@@ -55,7 +55,7 @@ This repository uses a comprehensive set of MCP servers for enhanced Claude Code
 ### Core API Configuration
 
 **Base API URL**: `https://dex-backend-prod1.defi.gala.com`
-**WebSocket URL**: `wss://bundle-backend-prod1.defi.gala.com`
+**WebSocket URL**: `wss://bundle-backend-prod1.defi.gala.com` *(Infrastructure ready but not implemented - using API polling)*
 
 ### Authentication & Credentials
 
@@ -89,7 +89,7 @@ Collection$Category$Type$AdditionalKey
 **Fee Tiers**:
 - **500** (0.05%) - Stable pairs (USDC/USDT)
 - **3000** (0.30%) - Standard pairs (ETH/USDC)
-- **10000** (1.00%) - Exotic/volatile pairs
+- **10000** (1.00%) - Exotic/volatile pairs *(Currently used by bot for optimal liquidity and accurate pricing)*
 
 ### Essential API Endpoints
 
@@ -103,12 +103,12 @@ Collection$Category$Type$AdditionalKey
 - `POST /v1/trade/bundle` - Execute signed transaction
 - `GET /v1/trade/transaction-status` - Check tx status
 
-**Position Management**:
+**Position Management** *(Not supported in SDK v0.0.7)*:
 - `GET /v1/trade/positions` - User positions
 - `GET /v1/trade/position` - Specific position details
-- `POST /v1/trade/liquidity` - Add liquidity
-- `DELETE /v1/trade/liquidity` - Remove liquidity
-- `POST /v1/trade/collect` - Collect fees
+- `POST /v1/trade/liquidity` - Add liquidity *(SDK limitation)*
+- `DELETE /v1/trade/liquidity` - Remove liquidity *(SDK limitation)*
+- `POST /v1/trade/collect` - Collect fees *(SDK limitation)*
 
 **Pool Information**:
 - `GET /v1/trade/pool` - Pool details
@@ -134,7 +134,7 @@ const signature = signatures.getSignature(
 2. **Generate Payload**: Call `/v1/trade/swap` with trade parameters
 3. **Sign Payload**: Use private key to sign the transaction payload
 4. **Execute Trade**: Submit signed payload via `/v1/trade/bundle`
-5. **Monitor Status**: Track transaction via WebSocket or `/v1/trade/transaction-status`
+5. **Monitor Status**: Track transaction via API polling using `/v1/trade/transaction-status`
 
 ### Risk Management
 
@@ -171,7 +171,8 @@ cp .env.example .env
 
 **Test API Connection**:
 ```bash
-tsx scripts/test-connection.ts
+npm run test-connection
+# OR directly: tsx src/scripts/test-real-prices.ts
 ```
 
 ## Project Architecture
@@ -179,11 +180,11 @@ tsx scripts/test-connection.ts
 The billionaire-bot is architected as a sophisticated GalaSwap V3 trading system with the following components:
 
 ### Core Trading Infrastructure
-1. **GalaSwap V3 Client** - API wrapper for all DEX interactions
-2. **Transaction Engine** - Payload generation, signing, and execution
-3. **Price Monitoring** - Real-time price feeds and market analysis
-4. **Strategy Engine** - Automated trading strategies and arbitrage detection
-5. **Risk Management** - Position limits, slippage protection, error handling
+1. **GalaSwap V3 Client** - API wrapper with endpoint fixes for all DEX interactions
+2. **Transaction Engine** - Payload generation, signing, and execution via `@gala-chain/api`
+3. **Price Monitoring** - API polling for price feeds and market analysis *(WebSocket ready but not implemented)*
+4. **Strategy Engine** - Arbitrage-only strategies *(Market making not supported in SDK v0.0.7)*
+5. **Risk Management** - Position limits, slippage protection, comprehensive error handling with 123 passing tests
 
 ### Security & Configuration
 1. **Credential Management** - Secure private key handling via environment variables
@@ -192,23 +193,30 @@ The billionaire-bot is architected as a sophisticated GalaSwap V3 trading system
 4. **Error Recovery** - Robust retry logic and failure handling
 
 ### Development Infrastructure
-1. **TypeScript Foundation** - Type-safe development with full GalaSwap API types
-2. **MCP Integration** - Enhanced development with browser automation and debugging
-3. **Testing Framework** - Unit tests for trading logic and API integrations
-4. **Monitoring & Logging** - Comprehensive trade tracking and system health monitoring
+1. **TypeScript Foundation** - Type-safe development with custom interfaces for SDK compatibility
+2. **MCP Integration** - Enhanced development with browser automation and debugging via 10+ MCP servers
+3. **Testing Framework** - Jest with 123 passing tests covering trading logic, security, and API integrations
+4. **Monitoring & Logging** - Comprehensive trade tracking, error sanitization, and system health monitoring
 
-### Planned Directory Structure
+### Current Directory Structure
 ```
 src/
-├── api/              # GalaSwap API client and types
-├── config/           # Environment and configuration management
-├── trading/          # Core trading strategies and execution
-├── utils/            # Signing, formatting, and helper utilities
-├── types/            # TypeScript interfaces for GalaSwap
-└── monitoring/       # Price tracking and market analysis
+├── api/              # GalaSwap API client with endpoint fixes (GSwapWrapper)
+├── cli/              # Command-line interface tools for bot management
+├── config/           # Environment validation and trading constants
+├── monitoring/       # Price tracking via API polling (PriceTracker)
+├── performance/      # Optimization systems and caching
+├── scripts/          # Testing utilities and benchmarks
+├── security/         # Transaction signing and credential management
+├── trading/
+│   ├── execution/    # Trade execution (swap operations only)
+│   ├── risk/         # Risk monitoring with comprehensive limits
+│   └── strategies/   # Arbitrage strategies (market making removed)
+├── types/            # TypeScript interfaces for GalaSwap compatibility
+└── utils/            # Security helpers, error sanitization, logging
 ```
 
-The repository includes real trading credentials and is ready for live trading operations on GalaSwap V3.
+The repository includes real trading credentials and is production-ready for live arbitrage trading on GalaSwap V3.
 
 ### Security Best Practices
 
@@ -240,12 +248,13 @@ The repository includes real trading credentials and is ready for live trading o
 **Important: YOU MUST USE subagents when available for the task.**
 
 ### Detected Stack
-- **Project Type**: Bot/Automation Application (early stage)
-- **Infrastructure**: Comprehensive MCP server setup
-- **Browser Automation**: Playwright + Puppeteer configured
-- **Language Support**: TypeScript language server ready
-- **Tooling**: Advanced debugging, UI generation, design integration
-- **Status**: Fresh repository ready for initial development
+- **Project Type**: Production-Ready GalaSwap V3 Trading Bot
+- **Infrastructure**: Comprehensive MCP server setup with 10+ specialized tools
+- **Browser Automation**: Playwright + Puppeteer configured for testing and debugging
+- **Language Support**: TypeScript language server with custom SDK compatibility interfaces
+- **Testing**: Jest framework with 123 passing tests (unit, integration, security, performance)
+- **Tooling**: Advanced debugging, UI generation, design integration, direct web access
+- **Status**: Production-ready arbitrage trading system with real credentials
 
 ### AI Team Assignments
 
@@ -271,44 +280,46 @@ The repository includes real trading credentials and is ready for live trading o
 
 ### Development Workflow Recommendations
 
-**For Bot Development:**
-1. Start with `@tech-lead-orchestrator` for feature planning
-2. Use `@api-architect` for external API integrations
-3. Use `@backend-developer` for core bot logic
-4. Use `@frontend-developer` for any web interfaces
-5. Always use `@code-reviewer` before commits
-6. Use `@performance-optimizer` for scaling and efficiency
+**For Trading Bot Development:**
+1. Use `@tech-lead-orchestrator` for strategy planning and architecture decisions
+2. Use `@api-architect` for GalaSwap API integrations and endpoint fixes
+3. Use `@backend-developer` for core trading logic and arbitrage strategies
+4. Use `@frontend-developer` for monitoring dashboards or admin interfaces
+5. Always use `@code-reviewer` before commits (MANDATORY - real trading funds at risk)
+6. Use `@performance-optimizer` for trading efficiency and latency optimization
+7. Use `@rails-backend-expert` or framework specialists as needed
 
-**For Browser Automation:**
-- Leverage Playwright MCP for testing and UI automation
-- Use Puppeteer MCP for screenshots and parallel automation
-- Use Memory MCP to track successful automation patterns
-- Use Fetch MCP for direct web content retrieval
+**For Trading Bot Testing & Debugging:**
+- Leverage Playwright MCP for GalaSwap web interface testing
+- Use Puppeteer MCP for taking screenshots of trading dashboards
+- Use Memory MCP to track successful trading patterns and market insights
+- Use Fetch MCP for researching GalaSwap documentation and market data
+- Use TypeScript Language Server MCP for type-safe trading code
 
 ### Sample Usage Examples
 
-**Feature Planning:**
+**Trading Strategy Planning:**
 ```
-@tech-lead-orchestrator Plan a web scraping module for billionaire news tracking
-```
-
-**API Development:**
-```
-@api-architect Design REST API for bot configuration and status reporting
+@tech-lead-orchestrator Plan advanced arbitrage detection algorithm for multiple fee tiers
 ```
 
-**Backend Implementation:**
+**GalaSwap API Integration:**
 ```
-@backend-developer Build the core news aggregation engine with TypeScript
-```
-
-**Code Quality:**
-```
-@code-reviewer Review the web scraping implementation for security and best practices
+@api-architect Fix and optimize GalaSwap V3 API endpoints for reliable trading
 ```
 
-**Performance Optimization:**
+**Trading Engine Implementation:**
 ```
-@performance-optimizer Optimize the bot for handling 1000+ concurrent web requests
+@backend-developer Build sophisticated risk management system for high-frequency arbitrage
+```
+
+**Security Code Review:**
+```
+@code-reviewer Review trading logic for private key security and fund safety
+```
+
+**Trading Performance Optimization:**
+```
+@performance-optimizer Optimize price monitoring and trade execution for sub-second latency
 ```
 

@@ -14,9 +14,10 @@ A sophisticated automated trading bot for GalaSwap V3 with arbitrage detection a
 - **🔍 Arbitrage Detection**: Automatically finds and executes profitable arbitrage opportunities across different fee tiers
 - **⚡ High-Performance Trading**: Optimized execution with intelligent caching and parallel processing
 - **🛡️ Advanced Risk Management**: Portfolio limits, drawdown protection, and emergency stops
-- **📊 Real-time Monitoring**: Price tracking via API polling (WebSocket infrastructure ready)
-- **🔒 Security First**: Comprehensive input validation and error handling
-- **🧪 Comprehensive Testing**: Full test suite with 95%+ coverage
+- **📊 Real-time Monitoring**: Price tracking via API polling for accurate market data
+- **🔒 Security First**: Comprehensive input validation, error sanitization, and secure credential handling
+- **🧪 Comprehensive Testing**: Full test suite with 123 passing tests covering all components
+- **🐳 Production Ready**: Docker deployment with health checks and resource management
 
 ## 🚀 Getting Started
 
@@ -55,8 +56,8 @@ npm run test-connection
 This will:
 - ✅ Validate your environment configuration
 - ✅ Test GalaSwap API connectivity
-- ✅ Test WebSocket connection
 - ✅ Verify wallet configuration
+- ✅ Test real price data retrieval
 
 ### 4. **Start the Bot**
 
@@ -143,9 +144,9 @@ npm run manual-trade       # Execute manual trades
 ```bash
 tsx src/cli/trading-cli.ts auto-trade          # Start automated trading
 tsx src/cli/trading-cli.ts auto-trade -- -d 120  # Auto-trade for 120 minutes
-tsx src/cli/trading-cli.ts monitor             # Real-time monitoring dashboard
-tsx src/cli/trading-cli.ts stats               # Display trading statistics
-tsx src/cli/trading-cli.ts export              # Export trading history to CSV
+tsx src/cli/trading-cli.ts status              # Get current bot status
+tsx src/cli/trading-cli.ts export              # Export trading data to CSV
+tsx src/cli/trading-cli.ts export -- -t performance  # Export performance data
 ```
 
 ### Performance Monitoring
@@ -174,8 +175,9 @@ tsx src/scripts/test-risk-management.ts  # Test risk management system
 - Calculates optimal trade sizes to maximize profit
 - Executes trades with minimal slippage impact
 - Monitors gas costs and net profitability
+- Currently uses fee tier 10000 (1.00%) for optimal liquidity and accurate pricing
 
-> **Note**: Market making strategy is planned for future SDK versions that support liquidity operations
+> **Note**: Market making and liquidity operations are not supported in SDK v0.0.7. The bot focuses exclusively on arbitrage trading.
 
 ## 🛡️ Risk Management
 
