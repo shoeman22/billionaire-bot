@@ -3,7 +3,7 @@
  * Utilities for creating test data and scenarios
  */
 
-import { GSwap } from '../../services/gswap-wrapper';
+import { GSwap } from '../../services/gswap-simple';
 import { BotConfig } from '../../config/environment';
 import { safeParseFloat } from '../../utils/safe-parse';
 
@@ -56,7 +56,8 @@ export class TestHelpers {
       },
       development: {
         nodeEnv: 'test',
-        logLevel: 'debug'
+        logLevel: 'debug',
+        productionTestMode: false
       }
     };
   }

@@ -11,9 +11,9 @@
 
 import { config } from 'dotenv';
 import { validateEnvironment } from '../config/environment';
-import { GSwapWrapper } from '../services/gswap-wrapper';
+import { GSwapWrapper } from '../../services/gswap-simple';
 import { Logger } from '../utils/logger';
-import { PrivateKeySigner } from '@gala-chain/gswap-sdk';
+import { PrivateKeySigner } from '../../services/gswap-simple';
 import { RiskMonitor } from '../trading/risk/risk-monitor';
 import { EmergencyControls } from '../trading/risk/emergency-controls';
 import { PositionLimits } from '../trading/risk/position-limits';

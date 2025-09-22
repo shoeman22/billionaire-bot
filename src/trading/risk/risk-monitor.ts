@@ -3,7 +3,7 @@
  * Real-time portfolio monitoring and risk assessment
  */
 
-import { GSwap } from '../../services/gswap-wrapper';
+import { GSwap } from '../../services/gswap-simple';
 import { TradingConfig } from '../../config/environment';
 import { logger } from '../../utils/logger';
 import { AlertSystem } from '../../monitoring/alerts';

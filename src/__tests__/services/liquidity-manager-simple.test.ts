@@ -4,7 +4,7 @@
  */
 
 import { LiquidityManager } from '../../services/liquidity-manager';
-import { GSwapWrapper } from '../../services/gswap-wrapper';
+import { GSwapWrapper } from '../../services/gswap-simple';
 import { TRADING_CONSTANTS } from '../../config/constants';
 import { RetryHelper } from '../../utils/retry-helper';
 import { GasEstimator } from '../../utils/gas-estimator';

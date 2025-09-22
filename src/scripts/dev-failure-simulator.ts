@@ -11,9 +11,9 @@
 
 import { config } from 'dotenv';
 import { validateEnvironment } from '../config/environment';
-import { GSwapWrapper } from '../services/gswap-wrapper';
+import { GSwapWrapper } from '../../services/gswap-simple';
 import { Logger } from '../utils/logger';
-import { PrivateKeySigner } from '@gala-chain/gswap-sdk';
+import { PrivateKeySigner } from '../../services/gswap-simple';
 import { performance } from 'perf_hooks';
 
 config();

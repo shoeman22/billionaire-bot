@@ -11,15 +11,15 @@
 
 import { config } from 'dotenv';
 import { validateEnvironment } from '../config/environment';
-import { GSwapWrapper } from '../services/gswap-wrapper';
+import { GSwap } from '../services/gswap-simple';
 import { MarketAnalysis } from '../monitoring/market-analysis';
-import { Logger } from '../utils/logger';
+import { logger } from '../utils/logger';
 import { TRADING_CONSTANTS } from '../config/constants';
-import { PrivateKeySigner } from '@gala-chain/gswap-sdk';
+import { PrivateKeySigner } from '../services/gswap-simple';
 
 config();
 
-const logger = new Logger('TestMarketAnalysis');
+// Using default logger instance
 
 async function testMarketAnalysis() {
   try {
@@ -30,7 +30,7 @@ async function testMarketAnalysis() {
     logger.info('✅ Environment configuration validated');
 
     // Initialize components
-    const gswap = new GSwapWrapper({
+    const gswap = new GSwap({
       signer: new PrivateKeySigner(process.env.WALLET_PRIVATE_KEY || '0x'),
       walletAddress: env.wallet.address,
       gatewayBaseUrl: env.api.baseUrl,

@@ -3,9 +3,10 @@
  * Handles end-to-end swap execution with error handling and monitoring
  */
 
-import { GSwap } from '../../services/gswap-wrapper';
+import { GSwap } from '../../services/gswap-simple';
 import { SlippageProtection, SlippageAnalysis } from '../risk/slippage';
 import { TRADING_CONSTANTS } from '../../config/constants';
+import { getConfig } from '../../config/environment';
 import { logger } from '../../utils/logger';
 import { safeParseFloat } from '../../utils/safe-parse';
 import { ApiResponseParser, ResponseValidators } from '../../utils/api-response-parser';
@@ -18,12 +19,13 @@ import {
   ErrorResponse,
   isSuccessResponse,
   createTokenClassKey,
+  TokenClassKey,
   FEE_TIERS
 } from '../../types/galaswap';
 
 export interface SwapRequest {
-  tokenIn: string;
-  tokenOut: string;
+  tokenIn: string | TokenClassKey;
+  tokenOut: string | TokenClassKey;
   amountIn: string;
   slippageTolerance?: number;
   userAddress: string;
@@ -62,11 +64,18 @@ export interface TransactionMonitoringResult {
 export class SwapExecutor {
   private gswap: GSwap;
   private slippageProtection: SlippageProtection;
+  private static testTransactionCounter = 0;
 
   constructor(gswap: GSwap, slippageProtection: SlippageProtection) {
     this.gswap = gswap;
     this.slippageProtection = slippageProtection;
     logger.info('Swap Executor initialized');
+
+    // Log test mode status
+    const config = getConfig();
+    if (config.development.productionTestMode) {
+      logger.info('🧪 Swap Executor: Production Test Mode - No real trades will be executed');
+    }
   }
 
   /**
@@ -412,8 +421,8 @@ export class SwapExecutor {
 
       // Enhanced payload request with safety checks
       const swapPayloadRequest: SwapPayloadRequest = {
-        tokenIn: createTokenClassKey(request.tokenIn),
-        tokenOut: createTokenClassKey(request.tokenOut),
+        tokenIn: typeof request.tokenIn === 'string' ? createTokenClassKey(request.tokenIn) : request.tokenIn,
+        tokenOut: typeof request.tokenOut === 'string' ? createTokenClassKey(request.tokenOut) : request.tokenOut,
         amountIn: request.amountIn,
         fee: feeTier,
         sqrtPriceLimit: outputResult.data!.newSqrtPrice || '0',
@@ -671,9 +680,17 @@ export class SwapExecutor {
   }
 
   /**
-   * Execute bundle with retry logic
+   * Execute bundle with retry logic - intercepted in production test mode
    */
   private async executeBundleWithRetry(payload: any, bundleType: 'swap', maxRetries: number = 2): Promise<any> {
+    const config = getConfig();
+
+    // *** PRODUCTION TEST MODE INTERCEPTION ***
+    if (config.development.productionTestMode) {
+      return this.simulateTradeExecution(payload, bundleType);
+    }
+
+    // *** LIVE TRADING MODE - Real execution ***
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -723,6 +740,77 @@ export class SwapExecutor {
     }
 
     throw lastError || new Error('Failed to execute bundle after retries');
+  }
+
+  /**
+   * Simulate trade execution in production test mode
+   */
+  private async simulateTradeExecution(payload: any, bundleType: 'swap'): Promise<any> {
+    SwapExecutor.testTransactionCounter++;
+    const testTxId = `TEST-${bundleType.toUpperCase()}-${SwapExecutor.testTransactionCounter.toString().padStart(3, '0')}`;
+    const timestamp = new Date().toISOString();
+
+    // Extract trade details for logging
+    const tradeDetails = {
+      type: bundleType,
+      tokenIn: payload.payload?.tokenIn || 'Unknown',
+      tokenOut: payload.payload?.tokenOut || 'Unknown',
+      amountIn: payload.payload?.amountIn || '0',
+      amountOutMinimum: payload.payload?.amountOutMinimum || '0',
+      fee: payload.payload?.fee || 3000,
+      testTxId,
+      timestamp
+    };
+
+    // Log the simulated trade prominently
+    logger.warn('🧪 SIMULATED TRADE EXECUTION:');
+    logger.warn(`   📊 ${tradeDetails.type.toUpperCase()}: ${tradeDetails.amountIn} ${tradeDetails.tokenIn} → ${tradeDetails.tokenOut}`);
+    logger.warn(`   💰 Min Output: ${tradeDetails.amountOutMinimum}`);
+    logger.warn(`   💸 Fee Tier: ${tradeDetails.fee} (${(tradeDetails.fee / 10000).toFixed(2)}%)`);
+    logger.warn(`   🆔 Test TX: ${testTxId}`);
+    logger.warn(`   ⏰ Time: ${timestamp}`);
+
+    // Write to test trade log file
+    this.logTestTrade(tradeDetails);
+
+    // Simulate processing delay
+    await this.delay(100 + Math.random() * 200);
+
+    // Return simulated success response
+    const bundleResponse = {
+      error: false,
+      data: {
+        data: testTxId,
+        message: `test-hash-${SwapExecutor.testTransactionCounter}`,
+        error: undefined
+      },
+      message: 'Success (Simulated)'
+    };
+
+    logger.info(`✅ Test trade simulation completed: ${testTxId}`);
+    return bundleResponse;
+  }
+
+  /**
+   * Log test trade to audit file
+   */
+  private logTestTrade(tradeDetails: any): void {
+    try {
+      const logEntry = {
+        ...tradeDetails,
+        note: 'PRODUCTION_TEST_MODE - No real transaction executed'
+      };
+
+      // Log to console and potentially to file system
+      logger.info('📝 Test Trade Logged:', JSON.stringify(logEntry, null, 2));
+
+      // Could be enhanced to write to a dedicated test trades file
+      // const fs = require('fs');
+      // fs.appendFileSync('test-trades.log', JSON.stringify(logEntry) + '\n');
+
+    } catch (error) {
+      logger.warn('Failed to log test trade:', error);
+    }
   }
 
   /**

@@ -49,6 +49,7 @@ export interface WalletConfig {
 export interface DevelopmentConfig {
   nodeEnv: string;
   logLevel: string;
+  productionTestMode: boolean;
 }
 
 /**
@@ -78,12 +79,43 @@ export function validateEnvironment(): BotConfig {
     throw new Error('WALLET_ADDRESS must start with "eth|" for Ethereum address');
   }
 
+  // Check for production test mode
+  const productionTestMode = process.env.PRODUCTION_TEST_MODE === 'true';
+  const nodeEnv = process.env.NODE_ENV || 'development';
+
   // Validate private key is base64
   const privateKey = process.env.WALLET_PRIVATE_KEY!;
   try {
     Buffer.from(privateKey, 'base64');
   } catch (_error) {
     throw new Error('WALLET_PRIVATE_KEY must be a valid base64 encoded key');
+  }
+
+  // Production test mode safety validations
+  if (productionTestMode) {
+    logger.warn('⚠️  PRODUCTION TEST MODE ACTIVE ⚠️');
+    logger.warn('   • Connected to PRODUCTION APIs for real data');
+    logger.warn('   • Trade execution is DISABLED');
+    logger.warn('   • All transactions will be simulated only');
+
+    // Validate we're not using production wallet in test mode
+    if (process.env.GALASWAP_API_URL?.includes('prod') &&
+        !walletAddress.includes('test') &&
+        !walletAddress.includes('Test') &&
+        !walletAddress.includes('0x0000000000000000000000000000000000000000')) {
+      logger.error('🚨 SECURITY WARNING: Production API + Non-test wallet detected!');
+      logger.error('   Use test wallet credentials only in production test mode');
+      // Allow but warn strongly - user responsibility
+    }
+  }
+
+  // Production mode safety check
+  if (!productionTestMode &&
+      nodeEnv === 'production' &&
+      process.env.GALASWAP_API_URL?.includes('prod')) {
+    logger.warn('🔥 LIVE PRODUCTION MODE - Real trades will be executed!');
+    logger.warn('   • Using production APIs with real funds');
+    logger.warn('   • All transactions will affect your wallet');
   }
 
   const config: BotConfig = {
@@ -101,8 +133,9 @@ export function validateEnvironment(): BotConfig {
       // Private key no longer stored in config for security
     },
     development: {
-      nodeEnv: process.env.NODE_ENV || 'development',
+      nodeEnv,
       logLevel: process.env.LOG_LEVEL || 'info',
+      productionTestMode,
     }
   };
 
@@ -115,6 +148,15 @@ export function validateEnvironment(): BotConfig {
     wallet: { address: config.wallet.address.substring(0, 10) + '...' },
     development: config.development
   });
+
+  // Additional production test mode logging
+  if (productionTestMode) {
+    logger.info('📊 Production Test Mode Configuration:');
+    logger.info(`   • APIs: ${config.api.baseUrl}`);
+    logger.info(`   • Environment: ${config.development.nodeEnv}`);
+    logger.info(`   • Test Mode: ${productionTestMode ? 'ENABLED' : 'DISABLED'}`);
+    logger.info(`   • Max Position: $${config.trading.maxPositionSize}`);
+  }
 
   return config;
 }

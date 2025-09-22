@@ -58,6 +58,7 @@
     "dev-api-test": "tsx src/scripts/dev-test-suite.ts --api-only",
     "dev-component-test": "tsx src/scripts/dev-test-suite.ts --components-only",
     "dev-risk-check": "tsx src/scripts/dev-test-suite.ts --risk-only",
+    "production-test": "tsx src/scripts/production-test-suite.ts",
     "production-readiness-check": "npm run dev-test-suite && npm run dev-performance-benchmark && npm run test:all"
   },
   "dependencies": {

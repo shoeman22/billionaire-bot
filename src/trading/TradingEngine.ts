@@ -3,7 +3,7 @@
  * Core trading orchestrator for the billionaire bot
  */
 
-import { GSwap, PrivateKeySigner } from '../services/gswap-wrapper';
+import { GSwap, PrivateKeySigner } from '../services/gswap-simple';
 import { BotConfig } from '../config/environment';
 import { TRADING_CONSTANTS } from '../config/constants';
 import { logger } from '../utils/logger';
@@ -69,13 +69,10 @@ export class TradingEngine {
       throw new Error('WALLET_PRIVATE_KEY environment variable is required');
     }
 
-    // Initialize GSwap SDK - access private key directly from environment for security
+    // Initialize GSwap SDK - using simple wrapper with baseUrl override
     this.gswap = new GSwap({
       signer: new PrivateKeySigner(privateKey),
-      walletAddress: config.wallet.address,
-      gatewayBaseUrl: config.api.baseUrl,
-      dexBackendBaseUrl: config.api.baseUrl,
-      bundlerBaseUrl: config.api.baseUrl.replace('dex-backend', 'bundle-backend')
+      baseUrl: config.api.baseUrl
     });
 
     // Initialize core systems

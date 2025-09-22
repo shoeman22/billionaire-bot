@@ -11,7 +11,7 @@ import { validateEnvironment } from '../config/environment';
 
 // Load environment variables
 config();
-import { GSwap, PrivateKeySigner } from '../services/gswap-wrapper';
+import { GSwap, PrivateKeySigner } from '../../services/gswap-simple';
 import { PositionLimits } from '../trading/risk/position-limits';
 import { SlippageProtection } from '../trading/risk/slippage';
 import { RiskMonitor } from '../trading/risk/risk-monitor';

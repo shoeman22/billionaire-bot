@@ -11,9 +11,9 @@
 
 import { config } from 'dotenv';
 import { validateEnvironment } from '../config/environment';
-import { GSwapWrapper } from '../services/gswap-wrapper';
+import { GSwapWrapper } from '../../services/gswap-simple';
 import { Logger } from '../utils/logger';
-import { PrivateKeySigner } from '@gala-chain/gswap-sdk';
+import { PrivateKeySigner } from '../../services/gswap-simple';
 import { performance } from 'perf_hooks';
 import { checkDatabaseHealth, initializeDatabase } from '../config/database';
 
@@ -690,7 +690,7 @@ class DevPerformanceBenchmark {
     }
   }
 
-  exportResults(results: BenchmarkResult[]): void {
+  async exportResults(results: BenchmarkResult[]): Promise<void> {
     const report = {
       timestamp: new Date().toISOString(),
       environment: 'DEV',
@@ -706,7 +706,7 @@ class DevPerformanceBenchmark {
       systemMetrics: this.systemMetrics.slice(-10) // Last 10 metrics
     };
 
-    const fs = require('fs');
+    const fs = await import('fs');
     const filename = `performance-benchmark-${Date.now()}.json`;
 
     try {
@@ -724,7 +724,7 @@ async function runBenchmark() {
     const benchmark = new DevPerformanceBenchmark();
     const results = await benchmark.runBenchmarks();
     benchmark.generateReport(results);
-    benchmark.exportResults(results);
+    await benchmark.exportResults(results);
 
     const avgResponseTime = results.reduce((sum, r) => sum + r.averageTime, 0) / results.length;
     process.exit(avgResponseTime < 250 ? 0 : 1);

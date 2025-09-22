@@ -3,7 +3,7 @@
  * Real-time monitoring and analytics for liquidity positions
  */
 
-import { GSwapWrapper } from '../services/gswap-wrapper';
+import { GSwap } from '../services/gswap-simple';
 import { Position } from '../entities/Position';
 import { getPositionRepository } from '../config/database';
 import { logger } from '../utils/logger';
@@ -48,7 +48,7 @@ export interface PositionMetrics {
 }
 
 export class PositionTracker {
-  private gswap: GSwapWrapper;
+  private gswap: GSwap;
   private positionRepo: Repository<Position> | null = null;
   private isRunning: boolean = false;
   private updateInterval: NodeJS.Timeout | null = null;
@@ -59,7 +59,7 @@ export class PositionTracker {
   private readonly ALERT_COOLDOWN = 5 * 60 * 1000; // 5 minutes
   private readonly MAX_ALERTS_PER_POSITION = 10;
 
-  constructor(gswap: GSwapWrapper) {
+  constructor(gswap: GSwap) {
     this.gswap = gswap;
     logger.info('PositionTracker initialized');
   }
@@ -369,7 +369,7 @@ export class PositionTracker {
       position.updateInRangeStatus(currentPriceNum, deltaTime);
 
       // Get fresh position data from blockchain
-      const blockchainPosition = await this.gswap.liquidityPositions.getPositionById(
+      const blockchainPosition = await this.gswap.positions.getPositionById(
         position.walletAddress,
         position.id
       );

@@ -11,7 +11,7 @@ import { validateEnvironment } from '../config/environment';
 
 // Load environment variables
 config();
-import { GSwapWrapper as GSwap, PrivateKeySigner } from '../services/gswap-wrapper';
+import { GSwapWrapper as GSwap, PrivateKeySigner } from '../../services/gswap-simple';
 import { PriceTracker } from '../monitoring/price-tracker';
 import { safeParseFloat } from '../utils/safe-parse';
 

@@ -8,7 +8,7 @@
 import { config } from 'dotenv';
 import { logger } from '../utils/logger';
 import { validateEnvironment } from '../config/environment';
-import { GSwapWrapper, PrivateKeySigner } from '../services/gswap-wrapper';
+import { GSwapWrapper, PrivateKeySigner } from '../../services/gswap-simple';
 import { safeParseFloat } from '../utils/safe-parse';
 
 // Load environment variables

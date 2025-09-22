@@ -1,0 +1,216 @@
+{
+  "timestamp": "2025-09-22T17:59:11.495Z",
+  "environment": "DEV",
+  "nodeVersion": "v22.14.0",
+  "platform": "linux",
+  "results": [
+    {
+      "name": "Component Initialization",
+      "operations": 10,
+      "averageTime": 1.6015449999999987,
+      "operationsPerSecond": 624.3970665825817,
+      "peakMemoryMB": 52
+    },
+    {
+      "name": "Database Operations",
+      "operations": 100,
+      "averageTime": 0.04152016999999887,
+      "operationsPerSecond": 24084.679807429187,
+      "peakMemoryMB": 53
+    },
+    {
+      "name": "API Response Times",
+      "operations": 50,
+      "averageTime": 113.10167308000004,
+      "operationsPerSecond": 8.84160218649172,
+      "peakMemoryMB": 57
+    },
+    {
+      "name": "Price Data Processing",
+      "operations": 50,
+      "averageTime": 0.09136426000000938,
+      "operationsPerSecond": 10945.198921327632,
+      "peakMemoryMB": 46
+    },
+    {
+      "name": "Trading Logic Execution",
+      "operations": 100,
+      "averageTime": 0.0003564400000504975,
+      "operationsPerSecond": 2805521.265453732,
+      "peakMemoryMB": 46
+    },
+    {
+      "name": "Risk Calculations",
+      "operations": 200,
+      "averageTime": 0.006184959999945932,
+      "operationsPerSecond": 161682.5331139962,
+      "peakMemoryMB": 46
+    },
+    {
+      "name": "Memory Management",
+      "operations": 50,
+      "averageTime": 0.3092251199997918,
+      "operationsPerSecond": 3233.889924598213,
+      "peakMemoryMB": 54
+    },
+    {
+      "name": "Concurrent Operations",
+      "operations": 20,
+      "averageTime": 83.92553350000017,
+      "operationsPerSecond": 11.915324911220232,
+      "peakMemoryMB": 51
+    }
+  ],
+  "systemMetrics": [
+    {
+      "timestamp": 5505.008348,
+      "memoryUsage": {
+        "rss": 177205248,
+        "heapTotal": 84275200,
+        "heapUsed": 58418552,
+        "external": 4507235,
+        "arrayBuffers": 177724
+      },
+      "cpuUsage": {
+        "user": 816778,
+        "system": 84521
+      },
+      "eventLoopLag": 0.086996
+    },
+    {
+      "timestamp": 6504.389001,
+      "memoryUsage": {
+        "rss": 177205248,
+        "heapTotal": 84275200,
+        "heapUsed": 58875160,
+        "external": 4516115,
+        "arrayBuffers": 186604
+      },
+      "cpuUsage": {
+        "user": 822556,
+        "system": 85485
+      },
+      "eventLoopLag": 0.02271
+    },
+    {
+      "timestamp": 7504.568779,
+      "memoryUsage": {
+        "rss": 177205248,
+        "heapTotal": 84275200,
+        "heapUsed": 59320576,
+        "external": 4524995,
+        "arrayBuffers": 195484
+      },
+      "cpuUsage": {
+        "user": 829317,
+        "system": 85485
+      },
+      "eventLoopLag": 0.030792
+    },
+    {
+      "timestamp": 8504.810203,
+      "memoryUsage": {
+        "rss": 170881024,
+        "heapTotal": 84275200,
+        "heapUsed": 59788280,
+        "external": 4534985,
+        "arrayBuffers": 205474
+      },
+      "cpuUsage": {
+        "user": 845402,
+        "system": 86863
+      },
+      "eventLoopLag": 0.013545
+    },
+    {
+      "timestamp": 9504.172304,
+      "memoryUsage": {
+        "rss": 139014144,
+        "heapTotal": 51511296,
+        "heapUsed": 47521512,
+        "external": 4408031,
+        "arrayBuffers": 83314
+      },
+      "cpuUsage": {
+        "user": 911485,
+        "system": 94166
+      },
+      "eventLoopLag": 0.048198
+    },
+    {
+      "timestamp": 10504.635942,
+      "memoryUsage": {
+        "rss": 139014144,
+        "heapTotal": 51511296,
+        "heapUsed": 47553352,
+        "external": 4408031,
+        "arrayBuffers": 83314
+      },
+      "cpuUsage": {
+        "user": 913097,
+        "system": 95201
+      },
+      "eventLoopLag": 0.018554
+    },
+    {
+      "timestamp": 11504.955578,
+      "memoryUsage": {
+        "rss": 139014144,
+        "heapTotal": 51511296,
+        "heapUsed": 47593376,
+        "external": 4408031,
+        "arrayBuffers": 83314
+      },
+      "cpuUsage": {
+        "user": 915528,
+        "system": 95244
+      },
+      "eventLoopLag": 0.009845
+    },
+    {
+      "timestamp": 12505.122459,
+      "memoryUsage": {
+        "rss": 139276288,
+        "heapTotal": 51511296,
+        "heapUsed": 47621888,
+        "external": 4408031,
+        "arrayBuffers": 83314
+      },
+      "cpuUsage": {
+        "user": 917813,
+        "system": 95259
+      },
+      "eventLoopLag": 0.016361
+    },
+    {
+      "timestamp": 13505.643768,
+      "memoryUsage": {
+        "rss": 139800576,
+        "heapTotal": 51511296,
+        "heapUsed": 47794848,
+        "external": 4408031,
+        "arrayBuffers": 83314
+      },
+      "cpuUsage": {
+        "user": 921484,
+        "system": 95291
+      },
+      "eventLoopLag": 0.019698
+    },
+    {
+      "timestamp": 14506.046496,
+      "memoryUsage": {
+        "rss": 156839936,
+        "heapTotal": 68026368,
+        "heapUsed": 48053528,
+        "external": 4408031,
+        "arrayBuffers": 83314
+      },
+      "cpuUsage": {
+        "user": 964559,
+        "system": 102501
+      },
+      "eventLoopLag": 0.036403
+    }
+  ]
+}

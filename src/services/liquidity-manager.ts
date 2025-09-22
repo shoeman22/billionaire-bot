@@ -4,7 +4,7 @@
  * Handles position management, fee collection, and yield optimization
  */
 
-import { GSwapWrapper } from './gswap-wrapper';
+import { GSwap } from './gswap-simple';
 import { logger } from '../utils/logger';
 import { TRADING_CONSTANTS } from '../config/constants';
 // Unused import removed: safeParseFloat
@@ -83,13 +83,13 @@ interface SDKPositionSizeResult {
 }
 
 export class LiquidityManager {
-  private gswap: GSwapWrapper;
+  private gswap: GSwap;
   private positions: Map<string, LiquidityPosition> = new Map();
   private readonly walletAddress: string;
   private readonly defaultSlippage: number;
   private instanceCounter: number = 0;
 
-  constructor(gswap: GSwapWrapper, walletAddress: string) {
+  constructor(gswap: GSwap, walletAddress: string) {
     this.gswap = gswap;
     this.walletAddress = walletAddress;
     this.defaultSlippage = TRADING_CONSTANTS.DEFAULT_SLIPPAGE_TOLERANCE;

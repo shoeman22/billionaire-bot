@@ -4,7 +4,7 @@
  */
 
 import { logger } from '../../utils/logger';
-import { GSwapWrapper } from '../../services/gswap-wrapper';
+import { GSwap } from '../../services/gswap-simple';
 import { RetryHelper } from '../../utils/retry-helper';
 
 export interface ArbitrageAttempt {
@@ -41,14 +41,14 @@ export interface RecoveryConfig {
 }
 
 export class ArbitrageRecovery {
-  private gswap: GSwapWrapper;
+  private gswap: GSwap;
   private config: RecoveryConfig;
   private failedAttempts: Map<string, ArbitrageAttempt> = new Map();
   private consecutiveFailures: number = 0;
   private circuitBreakerActive: boolean = false;
   private lastFailureTime: number = 0;
 
-  constructor(gswap: GSwapWrapper, config?: Partial<RecoveryConfig>) {
+  constructor(gswap: GSwap, config?: Partial<RecoveryConfig>) {
     this.gswap = gswap;
     this.config = {
       maxRetryAttempts: 3,

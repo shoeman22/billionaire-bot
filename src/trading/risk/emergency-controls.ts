@@ -3,7 +3,7 @@
  * Emergency stop functionality and crisis management
  */
 
-import { GSwap } from '../../services/gswap-wrapper';
+import { GSwap } from '../../services/gswap-simple';
 import { TradingConfig } from '../../config/environment';
 import { logger } from '../../utils/logger';
 import { AlertSystem } from '../../monitoring/alerts';
