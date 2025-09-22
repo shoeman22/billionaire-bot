@@ -4,7 +4,7 @@
  */
 
 import { RangeOrderStrategy, RangeOrderConfig } from '../../strategies/range-order-strategy';
-import { LiquidityManager } from '../../services/liquidity-manager';
+import { LiquidityManager, LiquidityPosition } from '../../services/liquidity-manager';
 import { TRADING_CONSTANTS } from '../../config/constants';
 
 // Mock the LiquidityManager
@@ -26,9 +26,10 @@ describe('RangeOrderStrategy', () => {
       }
     };
 
-    mockLiquidityManager.addLiquidityByPrice = jest.fn();
-    mockLiquidityManager.removeLiquidity = jest.fn();
-    mockLiquidityManager.getPosition = jest.fn();
+    mockLiquidityManager.addLiquidityByPrice = jest.fn().mockResolvedValue('test-position-id');
+    mockLiquidityManager.removeLiquidity = jest.fn().mockResolvedValue({ amount0: '100', amount1: '5' });
+    mockLiquidityManager.getPosition = jest.fn().mockReturnValue(null);
+    mockLiquidityManager.collectFees = jest.fn().mockResolvedValue({ amount0: '1', amount1: '0.05' });
 
     rangeOrderStrategy = new RangeOrderStrategy(mockLiquidityManager);
   });
@@ -66,16 +67,30 @@ describe('RangeOrderStrategy', () => {
 
     it('should place buy order above current price', async () => {
       mockLiquidityManager.addLiquidityByPrice.mockResolvedValue('lp_test123');
-      mockLiquidityManager.getPosition.mockResolvedValue({
+      const mockPosition: LiquidityPosition = {
         id: 'lp_test123',
+        token0: 'GALA$Unit$none$none',
+        token1: 'GUSDC$Unit$none$none',
+        fee: 10000,
+        tickLower: 100,
+        tickUpper: 200,
         minPrice: 0.054,
-        maxPrice: 0.056
-      } as any);
+        maxPrice: 0.056,
+        liquidity: '1000000',
+        amount0: '1000',
+        amount1: '50',
+        uncollectedFees0: '0',
+        uncollectedFees1: '0',
+        inRange: true,
+        createdAt: Date.now(),
+        lastUpdate: Date.now()
+      };
+      mockLiquidityManager.getPosition.mockReturnValue(mockPosition);
 
       const result = await rangeOrderStrategy.placeRangeOrder(mockBuyOrder);
 
       expect(result.success).toBe(true);
-      expect(result.orderId).toMatch(/^ro_[a-zA-Z0-9]+$/);
+      expect(result.orderId).toMatch(/^ro_[a-zA-Z0-9_]+$/);
       expect(result.estimatedFillPrice).toBe(0.055);
       expect(result.priceRange).toBeDefined();
       expect(result.priceRange!.min).toBeGreaterThan(0.05); // Above current price
@@ -83,11 +98,25 @@ describe('RangeOrderStrategy', () => {
 
     it('should place sell order below current price', async () => {
       mockLiquidityManager.addLiquidityByPrice.mockResolvedValue('lp_test456');
-      mockLiquidityManager.getPosition.mockResolvedValue({
+      const mockPosition: LiquidityPosition = {
         id: 'lp_test456',
+        token0: 'GALA$Unit$none$none',
+        token1: 'GUSDC$Unit$none$none',
+        fee: 10000,
+        tickLower: 100,
+        tickUpper: 200,
         minPrice: 0.044,
-        maxPrice: 0.046
-      } as any);
+        maxPrice: 0.046,
+        liquidity: '1000000',
+        amount0: '1000',
+        amount1: '50',
+        uncollectedFees0: '0',
+        uncollectedFees1: '0',
+        inRange: true,
+        createdAt: Date.now(),
+        lastUpdate: Date.now()
+      };
+      mockLiquidityManager.getPosition.mockReturnValue(mockPosition);
 
       const result = await rangeOrderStrategy.placeRangeOrder(mockSellOrder);
 
@@ -159,12 +188,25 @@ describe('RangeOrderStrategy', () => {
       (mockLiquidityManager as any).gswap.pools.calculateSpotPrice.mockReturnValue('0.05');
 
       mockLiquidityManager.addLiquidityByPrice.mockResolvedValue('lp_test123');
-      mockLiquidityManager.getPosition.mockResolvedValue({
+      const mockPosition: LiquidityPosition = {
         id: 'lp_test123',
         minPrice: 0.054,
         maxPrice: 0.056,
-        liquidity: '1000000'
-      } as any);
+        liquidity: '1000000',
+        token0: 'GALA$Unit$none$none',
+        token1: 'GUSDC$Unit$none$none',
+        fee: 10000,
+        tickLower: 100,
+        tickUpper: 200,
+        amount0: '1000',
+        amount1: '50',
+        uncollectedFees0: '0',
+        uncollectedFees1: '0',
+        inRange: true,
+        createdAt: Date.now(),
+        lastUpdate: Date.now()
+      };
+      mockLiquidityManager.getPosition.mockReturnValue(mockPosition);
 
       const config: RangeOrderConfig = {
         token0: TRADING_CONSTANTS.TOKENS.GALA,
@@ -182,7 +224,6 @@ describe('RangeOrderStrategy', () => {
 
     it('should successfully cancel active order', async () => {
       mockLiquidityManager.removeLiquidity.mockResolvedValue({
-        success: true,
         amount0: '995',
         amount1: '49.5'
       });
@@ -235,12 +276,25 @@ describe('RangeOrderStrategy', () => {
       (mockLiquidityManager as any).gswap.pools.calculateSpotPrice.mockReturnValue('0.05');
 
       mockLiquidityManager.addLiquidityByPrice.mockResolvedValue('lp_test123');
-      mockLiquidityManager.getPosition.mockResolvedValue({
+      const mockPosition: LiquidityPosition = {
         id: 'lp_test123',
         minPrice: 0.054,
         maxPrice: 0.056,
-        liquidity: '1000000'
-      } as any);
+        liquidity: '1000000',
+        token0: 'GALA$Unit$none$none',
+        token1: 'GUSDC$Unit$none$none',
+        fee: 10000,
+        tickLower: 100,
+        tickUpper: 200,
+        amount0: '1000',
+        amount1: '50',
+        uncollectedFees0: '0',
+        uncollectedFees1: '0',
+        inRange: true,
+        createdAt: Date.now(),
+        lastUpdate: Date.now()
+      };
+      mockLiquidityManager.getPosition.mockReturnValue(mockPosition);
 
       const config: RangeOrderConfig = {
         token0: TRADING_CONSTANTS.TOKENS.GALA,
@@ -262,13 +316,11 @@ describe('RangeOrderStrategy', () => {
       (mockLiquidityManager as any).gswap.pools.calculateSpotPrice.mockReturnValue('0.055');
 
       mockLiquidityManager.collectFees.mockResolvedValue({
-        success: true,
         amount0: '5',
         amount1: '0.25'
       });
 
       mockLiquidityManager.removeLiquidity.mockResolvedValue({
-        success: true,
         amount0: '1000',
         amount1: '0'
       });
@@ -294,21 +346,37 @@ describe('RangeOrderStrategy', () => {
   });
 
   describe('Statistics and Analytics', () => {
-    beforeEach(async () => {
+    // Helper function to set up test orders
+    const setupTestOrders = async () => {
       // Place multiple orders for testing
       (mockLiquidityManager as any).gswap.pools.getPoolData.mockResolvedValue({
         sqrtPrice: '1000000000000000000'
       });
       (mockLiquidityManager as any).gswap.pools.calculateSpotPrice.mockReturnValue('0.05');
 
+      // Reset and setup fresh mocks for each call
+      mockLiquidityManager.addLiquidityByPrice.mockReset();
       mockLiquidityManager.addLiquidityByPrice.mockResolvedValueOnce('lp_1');
       mockLiquidityManager.addLiquidityByPrice.mockResolvedValueOnce('lp_2');
-      mockLiquidityManager.getPosition.mockResolvedValue({
+      const mockPosition: LiquidityPosition = {
         id: 'lp_test',
         minPrice: 0.054,
         maxPrice: 0.056,
-        liquidity: '1000000'
-      } as any);
+        liquidity: '1000000',
+        token0: 'GALA$Unit$none$none',
+        token1: 'GUSDC$Unit$none$none',
+        fee: 10000,
+        tickLower: 100,
+        tickUpper: 200,
+        amount0: '1000',
+        amount1: '50',
+        uncollectedFees0: '0',
+        uncollectedFees1: '0',
+        inRange: true,
+        createdAt: Date.now(),
+        lastUpdate: Date.now()
+      };
+      mockLiquidityManager.getPosition.mockReturnValue(mockPosition);
 
       const config1: RangeOrderConfig = {
         token0: TRADING_CONSTANTS.TOKENS.GALA,
@@ -329,9 +397,10 @@ describe('RangeOrderStrategy', () => {
 
       await rangeOrderStrategy.placeRangeOrder(config1);
       await rangeOrderStrategy.placeRangeOrder(config2);
-    });
+    };
 
-    it('should provide comprehensive statistics', () => {
+    it('should provide comprehensive statistics', async () => {
+      await setupTestOrders();
       const stats = rangeOrderStrategy.getStatistics();
 
       expect(stats.totalOrders).toBe(2);
@@ -342,7 +411,8 @@ describe('RangeOrderStrategy', () => {
       expect(stats.successRate).toBe(0);
     });
 
-    it('should filter orders by status', () => {
+    it('should filter orders by status', async () => {
+      await setupTestOrders();
       const activeOrders = rangeOrderStrategy.getOrdersByStatus('active');
       expect(activeOrders).toHaveLength(2);
 
@@ -350,12 +420,13 @@ describe('RangeOrderStrategy', () => {
       expect(filledOrders).toHaveLength(0);
     });
 
-    it('should get all orders', () => {
+    it('should get all orders', async () => {
+      await setupTestOrders();
       const allOrders = rangeOrderStrategy.getAllOrders();
       expect(allOrders).toHaveLength(2);
 
       allOrders.forEach(order => {
-        expect(order.orderId).toMatch(/^ro_[a-zA-Z0-9]+$/);
+        expect(order.orderId).toMatch(/^ro_[a-zA-Z0-9_]+$/);
         expect(order.status).toBe('active');
         expect(order.config).toBeDefined();
         expect(order.position).toBeDefined();
@@ -413,11 +484,25 @@ describe('RangeOrderStrategy', () => {
       (mockLiquidityManager as any).gswap.pools.calculateSpotPrice.mockReturnValue('0.05');
 
       mockLiquidityManager.addLiquidityByPrice.mockResolvedValue('lp_test');
-      mockLiquidityManager.getPosition.mockResolvedValue({
+      const mockPosition: LiquidityPosition = {
         id: 'lp_test',
+        token0: 'GALA$Unit$none$none',
+        token1: 'GUSDC$Unit$none$none',
+        fee: 10000,
+        tickLower: 100,
+        tickUpper: 200,
         minPrice: 0.054,
-        maxPrice: 0.056
-      } as any);
+        maxPrice: 0.056,
+        liquidity: '1000000',
+        amount0: '1000',
+        amount1: '50',
+        uncollectedFees0: '0',
+        uncollectedFees1: '0',
+        inRange: true,
+        createdAt: Date.now(),
+        lastUpdate: Date.now()
+      };
+      mockLiquidityManager.getPosition.mockReturnValue(mockPosition);
 
       const config: RangeOrderConfig = {
         token0: TRADING_CONSTANTS.TOKENS.GALA,

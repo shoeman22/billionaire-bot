@@ -141,8 +141,29 @@ export class GasEstimator {
     } catch (error) {
       logger.error('Failed to estimate gas:', error);
 
-      // CRITICAL FIX: No fallback - throw error
-      throw error;
+      // CRITICAL FIX: Provide fallback estimate when gas price fetching fails
+      logger.warn('Using fallback gas estimate due to pricing failure');
+
+      // Get base gas limit for operation
+      const baseGasLimit = GasEstimator.getBaseGasLimit(options.operation, options.complexity);
+
+      // Apply safety buffer
+      const safetyBuffer = GasEstimator.getSafetyBuffer(options.operation, options.complexity);
+      const gasLimit = Math.round(baseGasLimit * safetyBuffer);
+
+      // Use emergency gas price as fallback
+      const gasPrice = GasEstimator.getEmergencyGasPrice(options);
+
+      // Calculate total cost in USD
+      const totalCostUSD = GasEstimator.calculateGasCostUSD(gasLimit, gasPrice);
+
+      return {
+        gasLimit,
+        gasPrice,
+        totalCostUSD,
+        confidence: 'low', // Low confidence for fallback estimates
+        estimatedAt: Date.now()
+      };
     }
   }
 

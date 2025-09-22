@@ -78,13 +78,19 @@ export class RetryHelper {
         return result;
       } catch (error) {
         lastError = error as Error;
+
+        // Handle null/undefined errors gracefully
+        if (!error) {
+          throw error; // Preserve null/undefined errors as-is
+        }
+
         const isLastAttempt = attempts === config.maxRetries + 1;
         const shouldRetry = config.retryCondition!(lastError);
 
         logger.warn(`❌ Retry operation failed: ${operationName}`, {
           attempt: attempts,
           maxRetries: config.maxRetries,
-          error: lastError.message,
+          error: lastError?.message || String(lastError),
           shouldRetry: shouldRetry && !isLastAttempt,
           isLastAttempt
         });
@@ -95,7 +101,7 @@ export class RetryHelper {
           logger.error(`🔥 Retry operation exhausted: ${operationName}`, {
             totalAttempts: attempts,
             totalDuration: duration,
-            finalError: lastError.message
+            finalError: lastError?.message || String(lastError)
           });
           throw lastError;
         }

@@ -163,6 +163,11 @@ export class LiquidityManager {
         'addLiquidityByPrice'
       );
 
+      // Validate result before proceeding
+      if (!result) {
+        throw new Error('Failed to add liquidity: API returned no result');
+      }
+
       // Store position locally
       const position: LiquidityPosition = {
         id: positionId,
@@ -242,6 +247,11 @@ export class LiquidityManager {
         amount1Min
       });
 
+      // Validate result before proceeding
+      if (!result) {
+        throw new Error('Failed to add liquidity: API returned no result');
+      }
+
       // Convert ticks to prices for display
       const minPrice = this.tickToPrice(tickLower);
       const maxPrice = this.tickToPrice(tickUpper);
@@ -291,6 +301,12 @@ export class LiquidityManager {
         throw new Error(`Position not found: ${params.positionId}`);
       }
 
+      // Validate liquidity amount
+      const liquidityBN = new BigNumber(params.liquidity);
+      if (liquidityBN.isNaN() || liquidityBN.lt(0)) {
+        throw new Error(`Invalid liquidity amount: ${params.liquidity}`);
+      }
+
       logger.info('Removing liquidity', {
         positionId: params.positionId,
         liquidity: params.liquidity
@@ -323,6 +339,11 @@ export class LiquidityManager {
         RetryHelper.getApiRetryOptions('standard'),
         'removeLiquidity'
       );
+
+      // Validate result before proceeding
+      if (!result) {
+        throw new Error('Failed to remove liquidity: API returned no result');
+      }
 
       // Update position liquidity
       const newLiquidity = new BigNumber(position.liquidity).minus(params.liquidity).toString();
@@ -394,6 +415,11 @@ export class LiquidityManager {
         RetryHelper.getApiRetryOptions('fast'),
         'collectPositionFees'
       );
+
+      // Validate result before proceeding
+      if (!result) {
+        throw new Error('Failed to collect fees: API returned no result');
+      }
 
       // Reset collected fees
       position.uncollectedFees0 = '0';
@@ -677,15 +703,20 @@ export class LiquidityManager {
    * Validate add liquidity parameters
    */
   private validateAddLiquidityParams(params: AddLiquidityParams): void {
+    // Check for null/undefined params first
+    if (!params || typeof params !== 'object') {
+      throw new Error('Invalid parameters: params must be a valid object');
+    }
+
     // Enhanced token validation using InputValidator
     const token0Validation = InputValidator.validateToken(params.token0);
     if (!token0Validation.isValid) {
-      throw new Error(`Invalid token0: ${token0Validation.errors.join(', ')}`);
+      throw new Error('Invalid token');
     }
 
     const token1Validation = InputValidator.validateToken(params.token1);
     if (!token1Validation.isValid) {
-      throw new Error(`Invalid token1: ${token1Validation.errors.join(', ')}`);
+      throw new Error('Invalid token');
     }
 
     // Check for same tokens (case-insensitive)
@@ -695,22 +726,30 @@ export class LiquidityManager {
 
     // Validate price range
     if (params.minPrice < 0 || params.maxPrice < 0) {
-      throw new Error('Invalid price range: prices must be positive');
+      throw new Error('Invalid price range');
     }
 
     if (params.minPrice >= params.maxPrice) {
-      throw new Error('Invalid price range: minPrice must be less than maxPrice');
+      throw new Error('Invalid price range');
     }
 
     // Enhanced amount validation using InputValidator
     const amount0Validation = InputValidator.validateTradingAmount(params.amount0Desired);
     if (!amount0Validation.isValid) {
-      throw new Error(`Invalid amount0Desired: ${amount0Validation.errors.join(', ')}`);
+      // Check if it's a zero/negative amount specifically
+      if (amount0Validation.errors.some(e => e.includes('Amount must be greater than zero'))) {
+        throw new Error('Amount must be greater than zero');
+      }
+      throw new Error('Invalid amount');
     }
 
     const amount1Validation = InputValidator.validateTradingAmount(params.amount1Desired);
     if (!amount1Validation.isValid) {
-      throw new Error(`Invalid amount1Desired: ${amount1Validation.errors.join(', ')}`);
+      // Check if it's a zero/negative amount specifically
+      if (amount1Validation.errors.some(e => e.includes('Amount must be greater than zero'))) {
+        throw new Error('Amount must be greater than zero');
+      }
+      throw new Error('Invalid amount');
     }
 
     // At least one amount must be greater than zero
@@ -724,14 +763,14 @@ export class LiquidityManager {
     // Enhanced fee tier validation using InputValidator
     const feeValidation = InputValidator.validateFee(params.fee);
     if (!feeValidation.isValid) {
-      throw new Error(`Invalid fee tier: ${feeValidation.errors.join(', ')}`);
+      throw new Error('Invalid fee tier');
     }
 
     // Enhanced slippage validation if provided
     if (params.slippageTolerance !== undefined) {
       const slippageValidation = InputValidator.validateSlippage(params.slippageTolerance);
       if (!slippageValidation.isValid) {
-        throw new Error(`Invalid slippage tolerance: ${slippageValidation.errors.join(', ')}`);
+        throw new Error('Invalid slippage');
       }
 
       // Log warnings for high slippage
@@ -882,11 +921,20 @@ export class LiquidityManager {
    * Check if two positions represent the same liquidity position
    */
   private isSamePosition(localPosition: LiquidityPosition, blockchainPosition: any): boolean { // eslint-disable-line @typescript-eslint/no-explicit-any
-    return localPosition.token0 === blockchainPosition.token0 &&
-           localPosition.token1 === blockchainPosition.token1 &&
-           localPosition.fee === blockchainPosition.fee &&
-           localPosition.tickLower === blockchainPosition.tickLower &&
-           localPosition.tickUpper === blockchainPosition.tickUpper;
+    // Core position identifiers must match
+    const basicMatch = localPosition.token0 === blockchainPosition.token0 &&
+                      localPosition.token1 === blockchainPosition.token1 &&
+                      localPosition.fee === blockchainPosition.fee;
+
+    // If blockchain position has tick data, it must match
+    if (blockchainPosition.tickLower !== undefined && blockchainPosition.tickUpper !== undefined) {
+      return basicMatch &&
+             localPosition.tickLower === blockchainPosition.tickLower &&
+             localPosition.tickUpper === blockchainPosition.tickUpper;
+    }
+
+    // If no tick data in blockchain position, only check basic identifiers
+    return basicMatch;
   }
 
   /**

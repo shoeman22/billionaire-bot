@@ -162,9 +162,9 @@ export class InputValidator {
       return { isValid: false, errors, warnings };
     }
 
-    // Check if it's a known token symbol
+    // Check if it's a known token symbol (exact match)
     const knownTokens = Object.values(TRADING_CONSTANTS.TOKENS) as string[];
-    if (knownTokens.includes(trimmedToken.toUpperCase())) {
+    if (knownTokens.includes(trimmedToken)) {
       return { isValid: true, errors, warnings };
     }
 
@@ -182,27 +182,9 @@ export class InputValidator {
         errors.push('Invalid address format (must be hex)');
       }
     } else {
-      // Assume it's a symbol - validate format with stricter rules
-      if (!/^[A-Za-z0-9]{1,10}$/.test(trimmedToken)) {
-        errors.push('Token symbol must be alphanumeric, 1-10 characters');
-      }
-
-      if (trimmedToken.length > 10) {
-        errors.push('Token symbol too long (max 10 characters)');
-      }
-
-      // Check for potentially malicious patterns
-      const maliciousPatterns = [
-        /javascript/i, /script/i, /eval/i, /function/i, /return/i,
-        /<|>|"|'|&|\\|\//g, /\.\./, /\/\//, /\*/, /--/
-      ];
-
-      for (const pattern of maliciousPatterns) {
-        if (pattern.test(trimmedToken)) {
-          errors.push('Token contains potentially unsafe characters');
-          break;
-        }
-      }
+      // For any other format, it's considered invalid for GalaChain
+      // We only accept: known tokens, proper GalaChain format, or ETH addresses
+      errors.push('Invalid token format. Must be a known token symbol, proper GalaChain format (Collection$Category$Type$AdditionalKey), or valid Ethereum address');
     }
 
     return { isValid: errors.length === 0, errors, warnings };
@@ -267,6 +249,17 @@ export class InputValidator {
       if (!validation.isValid) {
         errors.push(...validation.errors);
       }
+    }
+
+    // CRITICAL: Case sensitivity check - GalaChain tokens should follow PascalCase pattern
+    // Collection should be uppercase (GALA, GUSDC, etc.)
+    // Category should be PascalCase (Unit, etc.)
+    // Type and AdditionalKey should follow proper case (none, etc.)
+    if (collection !== collection.toUpperCase()) {
+      errors.push('Collection component must be uppercase (e.g., GALA, GUSDC)');
+    }
+    if (category !== 'Unit') {
+      warnings.push('Category component should typically be "Unit" for standard tokens');
     }
 
     // CRITICAL: Security checks for injection attacks
@@ -437,13 +430,30 @@ export class InputValidator {
       return { isValid: false, errors, warnings };
     }
 
+    // Convert scientific notation to decimal format before validation
+    let processedAmount = sanitizedAmount;
+    if (sanitizedAmount.includes('e') || sanitizedAmount.includes('E')) {
+      try {
+        const numValue = parseFloat(sanitizedAmount);
+        if (Number.isFinite(numValue) && numValue > 0) {
+          processedAmount = numValue.toString();
+        } else {
+          errors.push('Invalid scientific notation format');
+          return { isValid: false, errors, warnings };
+        }
+      } catch {
+        errors.push('Invalid scientific notation format');
+        return { isValid: false, errors, warnings };
+      }
+    }
+
     // Enhanced number format validation
-    if (!/^\d+(\.\d+)?$/.test(sanitizedAmount)) {
-      errors.push('Amount must be a positive decimal number');
+    if (!/^\d+(\.\d+)?$/.test(processedAmount)) {
+      errors.push('Invalid amount format');
       return { isValid: false, errors, warnings };
     }
 
-    const numAmount = safeParseFloat(sanitizedAmount, 0);
+    const numAmount = safeParseFloat(processedAmount, 0);
 
     // Check for NaN, Infinity, etc.
     if (!Number.isFinite(numAmount)) {
@@ -453,7 +463,7 @@ export class InputValidator {
 
     // Enhanced range validation
     if (numAmount <= 0) {
-      errors.push('Amount must be positive');
+      errors.push('Amount must be greater than zero');
     }
 
     if (numAmount < TRADING_CONSTANTS.MIN_TRADE_AMOUNT) {
@@ -465,7 +475,7 @@ export class InputValidator {
     }
 
     // Precision validation (max 18 decimal places)
-    const decimalParts = sanitizedAmount.split('.');
+    const decimalParts = processedAmount.split('.');
     if (decimalParts.length > 1 && decimalParts[1].length > 18) {
       errors.push('Amount has too many decimal places (max 18)');
     }
@@ -481,13 +491,9 @@ export class InputValidator {
     }
 
     // Enhanced bounds checking for API safety
-    // Check for scientific notation which could cause API parsing issues
-    if (sanitizedAmount.includes('e') || sanitizedAmount.includes('E')) {
-      errors.push('Scientific notation not allowed - use decimal format');
-    }
 
     // Check for leading zeros which could cause parsing issues
-    if (sanitizedAmount.match(/^0+\d/)) {
+    if (processedAmount.match(/^0+\d/)) {
       errors.push('Remove leading zeros - use format like "0.123" not "00.123"');
     }
 

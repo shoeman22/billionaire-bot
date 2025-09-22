@@ -16,15 +16,34 @@ jest.mock('../../utils/logger', () => ({
 }));
 
 describe('GasEstimator', () => {
+  const originalMethods: any = {};
+
   beforeEach(() => {
     jest.clearAllMocks();
     // Reset cache between tests
     (GasEstimator as any).gasPriceCache = null;
+    // Reset circuit breaker state between tests
+    (GasEstimator as any).circuitBreaker.failures = 0;
+    (GasEstimator as any).circuitBreaker.isOpen = false;
+
+    // Store original methods
+    originalMethods.getCurrentGasPrice = (GasEstimator as any).getCurrentGasPrice;
+
+    // Mock the gas price fetching methods to prevent network calls
+    // Return a simple number to simulate successful gas price fetch
+    jest.spyOn(GasEstimator as any, 'fetchCurrentGasPrice').mockResolvedValue(20);
+
+    // Don't mock getCurrentGasPrice - let it run with real logic for adjustments
   });
 
   afterEach(() => {
     // Clean up any intervals
     jest.clearAllTimers();
+
+    // Restore original methods
+    if (originalMethods.getCurrentGasPrice) {
+      (GasEstimator as any).getCurrentGasPrice = originalMethods.getCurrentGasPrice;
+    }
   });
 
   describe('estimateGas', () => {
@@ -65,11 +84,17 @@ describe('GasEstimator', () => {
     });
 
     it('should apply urgency adjustments correctly', async () => {
+      // Clear cache to ensure fresh calculations for each urgency level
+      (GasEstimator as any).gasPriceCache = null;
+
       const lowUrgencyEstimate = await GasEstimator.estimateGas({
         operation: 'swap',
         complexity: 'simple',
         urgency: 'low'
       });
+
+      // Clear cache again for second calculation
+      (GasEstimator as any).gasPriceCache = null;
 
       const highUrgencyEstimate = await GasEstimator.estimateGas({
         operation: 'swap',
@@ -82,6 +107,9 @@ describe('GasEstimator', () => {
     });
 
     it('should apply network congestion adjustments', async () => {
+      // Clear cache to ensure fresh calculations for each congestion level
+      (GasEstimator as any).gasPriceCache = null;
+
       const lowCongestionEstimate = await GasEstimator.estimateGas({
         operation: 'swap',
         complexity: 'simple',
@@ -90,6 +118,9 @@ describe('GasEstimator', () => {
           congestion: 'low'
         }
       });
+
+      // Clear cache again for second calculation
+      (GasEstimator as any).gasPriceCache = null;
 
       const highCongestionEstimate = await GasEstimator.estimateGas({
         operation: 'swap',
@@ -123,20 +154,23 @@ describe('GasEstimator', () => {
     it('should return fallback estimate when estimation fails', async () => {
       // Mock a method to throw an error
       const originalMethod = (GasEstimator as any).getCurrentGasPrice;
-      (GasEstimator as any).getCurrentGasPrice = jest.fn().mockRejectedValue(new Error('Network error'));
 
-      const estimate = await GasEstimator.estimateGas({
-        operation: 'swap',
-        complexity: 'simple',
-        urgency: 'normal'
-      });
+      try {
+        (GasEstimator as any).getCurrentGasPrice = jest.fn().mockRejectedValue(new Error('Network error'));
 
-      expect(estimate.confidence).toBe('low');
-      expect(estimate.gasLimit).toBeGreaterThan(0);
-      expect(estimate.totalCostUSD).toBeGreaterThan(0);
+        const estimate = await GasEstimator.estimateGas({
+          operation: 'swap',
+          complexity: 'simple',
+          urgency: 'normal'
+        });
 
-      // Restore original method
-      (GasEstimator as any).getCurrentGasPrice = originalMethod;
+        expect(estimate.confidence).toBe('low');
+        expect(estimate.gasLimit).toBeGreaterThan(0);
+        expect(estimate.totalCostUSD).toBeGreaterThan(0);
+      } finally {
+        // Restore original method
+        (GasEstimator as any).getCurrentGasPrice = originalMethod;
+      }
     });
   });
 
@@ -312,16 +346,20 @@ describe('GasEstimator', () => {
       jest.useRealTimers();
     });
 
-    it('should start monitoring and update cache periodically', () => {
+    it('should start monitoring and update cache periodically', async () => {
       const intervalMs = 1000;
-      GasEstimator.startGasPriceMonitoring(intervalMs);
 
       // Initially no cache
       let status = GasEstimator.getGasPriceStatus();
       expect(status.price).toBeNull();
 
-      // After first tick, should have initial price
-      jest.advanceTimersByTime(0);
+      GasEstimator.startGasPriceMonitoring(intervalMs);
+
+      // Advance time to trigger the first monitoring cycle
+      jest.advanceTimersByTime(intervalMs);
+      // Allow async operations to complete
+      await jest.runAllTicks();
+
       status = GasEstimator.getGasPriceStatus();
       expect(status.price).toBeGreaterThan(0);
 

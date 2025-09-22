@@ -6,9 +6,13 @@
 import { LiquidityManager } from '../../services/liquidity-manager';
 import { GSwap } from '../../services/gswap-wrapper';
 import { TRADING_CONSTANTS } from '../../config/constants';
+import { RetryHelper } from '../../utils/retry-helper';
+import { GasEstimator } from '../../utils/gas-estimator';
 
-// Mock the GSwap service
+// Mock the GSwap service and utilities
 jest.mock('../../services/gswap-wrapper');
+jest.mock('../../utils/retry-helper');
+jest.mock('../../utils/gas-estimator');
 const MockGSwap = GSwap as jest.MockedClass<typeof GSwap>;
 
 describe('LiquidityManager', () => {
@@ -25,6 +29,22 @@ describe('LiquidityManager', () => {
         getPosition: jest.fn(),
       }
     };
+
+    // Mock RetryHelper to execute operations directly (no retry delay in tests)
+    (RetryHelper.withRetry as jest.Mock).mockImplementation(async (operation, options, name) => {
+      return await operation();
+    });
+
+    // Mock GasEstimator with reasonable defaults
+    (GasEstimator.estimateGas as jest.Mock).mockResolvedValue({
+      gasLimit: 300000,
+      gasPrice: 20,
+      totalCostUSD: 15,
+      confidence: 'high',
+      estimatedAt: Date.now()
+    });
+
+    (GasEstimator.isGasCostAcceptable as jest.Mock).mockReturnValue(true);
 
     liquidityManager = new LiquidityManager(mockGSwap, 'eth|test-wallet-address');
   });

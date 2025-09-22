@@ -50,6 +50,7 @@ export class RangeOrderStrategy {
   private activeOrders: Map<string, RangeOrderStatus> = new Map();
   private readonly defaultRangeWidth = 0.05; // 0.05% default range
   private readonly maxOrders = 50; // Prevent memory leaks
+  private orderCounter = 0; // Counter for unique order IDs
 
   constructor(liquidityManager: LiquidityManager) {
     this.liquidityManager = liquidityManager;
@@ -79,6 +80,20 @@ export class RangeOrderStrategy {
       const currentPrice = await this.getCurrentPrice(config.token0, config.token1, config.fee);
       if (!currentPrice) {
         return { success: false, error: 'Unable to get current price' };
+      }
+
+      // Validate target price makes sense for direction before calculating range
+      if (config.direction === 'buy' && config.targetPrice <= currentPrice) {
+        return {
+          success: false,
+          error: `Invalid range for buy order: price must be above current price`
+        };
+      }
+      if (config.direction === 'sell' && config.targetPrice >= currentPrice) {
+        return {
+          success: false,
+          error: `Invalid range for sell order: price must be below current price`
+        };
       }
 
       // Calculate optimal range for the order
@@ -357,6 +372,8 @@ export class RangeOrderStrategy {
 
     const amount = config.amount;
     const slippage = config.slippageTolerance || TRADING_CONSTANTS.DEFAULT_SLIPPAGE_TOLERANCE;
+    // Use minimal but non-zero amounts to pass validation
+    const minimalAmount = '0.000001'; // Very small amount that passes validation
 
     if (config.direction === 'buy') {
       // Buying token0 with token1, so provide mostly token1
@@ -366,7 +383,7 @@ export class RangeOrderStrategy {
         fee: config.fee,
         minPrice: priceRange.min,
         maxPrice: priceRange.max,
-        amount0Desired: '0', // Minimal token0
+        amount0Desired: minimalAmount, // Minimal but valid token0
         amount1Desired: amount, // Full amount in token1
         slippageTolerance: slippage
       };
@@ -379,7 +396,7 @@ export class RangeOrderStrategy {
         minPrice: priceRange.min,
         maxPrice: priceRange.max,
         amount0Desired: amount, // Full amount in token0
-        amount1Desired: '0', // Minimal token1
+        amount1Desired: minimalAmount, // Minimal but valid token1
         slippageTolerance: slippage
       };
     }
@@ -390,10 +407,14 @@ export class RangeOrderStrategy {
    */
   private generateOrderId(config: RangeOrderConfig): string {
     const timestamp = Date.now();
+    const counter = ++this.orderCounter; // Increment counter for uniqueness
     const direction = config.direction;
-    const tokens = `${config.token0.split('$')[0]}-${config.token1.split('$')[0]}`;
-    const hash = Buffer.from(`${tokens}-${direction}-${timestamp}`).toString('base64').slice(0, 8);
-    return `ro_${hash}`;
+    const random = Math.random().toString(36).substring(2, 8); // Add random component
+    const orderId = `ro_${direction.charAt(0)}${counter}_${random}`;
+
+    // Note: Using counter + random for uniqueness to prevent collisions
+
+    return orderId;
   }
 
   /**

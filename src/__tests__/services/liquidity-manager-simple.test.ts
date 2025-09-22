@@ -329,7 +329,7 @@ describe('LiquidityManager (Simplified)', () => {
       };
 
       await expect(liquidityManager.addLiquidityByPrice(zeroAmountParams))
-        .rejects.toThrow('Amount must be positive');
+        .rejects.toThrow('Amount must be greater than zero');
     });
   });
 

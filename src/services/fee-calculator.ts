@@ -69,11 +69,13 @@ export interface FeeOptimization {
 
 export interface GlobalFeeMetrics {
   totalPositions: number;
+  activePositions: number;
   totalFeesEarnedUSD: number;
   totalFeesUncollectedUSD: number;
   avgDailyYield: number;
   avgMonthlyYield: number;
   avgAnnualizedAPR: number;
+  averageAPR: number;
   topPerformingPairs: Array<{
     token0: string;
     token1: string;
@@ -81,6 +83,16 @@ export interface GlobalFeeMetrics {
     totalFeesUSD: number;
     avgAPR: number;
   }>;
+  topPerformingPosition: {
+    id: string;
+    apr: number;
+    feesUSD: number;
+  } | null;
+  poorestPerformingPosition: {
+    id: string;
+    apr: number;
+    feesUSD: number;
+  } | null;
   feeCollectionEfficiency: number;
   compoundingOpportunities: number;
 }
@@ -406,14 +418,45 @@ export class FeeCalculator {
         return uncollectedUSD > this.defaultGasCostUSD * 2; // Worth collecting
       }).length;
 
+      // Calculate active positions
+      const activePositions = positions.filter(pos => pos.inRange).length;
+
+      // Find top and poorest performing positions
+      let topPerformingPosition = null;
+      let poorestPerformingPosition = null;
+
+      if (positions.length > 0) {
+        const sortedByAPR = positions.sort((a, b) => b.totalAPR - a.totalAPR);
+        const topPos = sortedByAPR[0];
+        const poorPos = sortedByAPR[sortedByAPR.length - 1];
+
+        topPerformingPosition = {
+          id: topPos.id,
+          apr: topPos.totalAPR,
+          feesUSD: parseFloat(topPos.totalFeesCollected0) + parseFloat(topPos.totalFeesCollected1)
+        };
+
+        if (sortedByAPR.length > 1) {
+          poorestPerformingPosition = {
+            id: poorPos.id,
+            apr: poorPos.totalAPR,
+            feesUSD: parseFloat(poorPos.totalFeesCollected0) + parseFloat(poorPos.totalFeesCollected1)
+          };
+        }
+      }
+
       return {
         totalPositions: positions.length,
+        activePositions,
         totalFeesEarnedUSD,
         totalFeesUncollectedUSD,
         avgDailyYield,
         avgMonthlyYield,
         avgAnnualizedAPR,
+        averageAPR: avgAnnualizedAPR, // Alias for compatibility
         topPerformingPairs,
+        topPerformingPosition,
+        poorestPerformingPosition,
         feeCollectionEfficiency,
         compoundingOpportunities
       };
@@ -422,12 +465,16 @@ export class FeeCalculator {
       logger.error('Failed to calculate global fee metrics:', error);
       return {
         totalPositions: 0,
+        activePositions: 0,
         totalFeesEarnedUSD: 0,
         totalFeesUncollectedUSD: 0,
         avgDailyYield: 0,
         avgMonthlyYield: 0,
         avgAnnualizedAPR: 0,
+        averageAPR: 0,
         topPerformingPairs: [],
+        topPerformingPosition: null,
+        poorestPerformingPosition: null,
         feeCollectionEfficiency: 0,
         compoundingOpportunities: 0
       };
