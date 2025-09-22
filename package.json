@@ -49,7 +49,16 @@
     "docker:down": "docker-compose down",
     "docker:logs": "docker-compose logs -f billionaire-bot",
     "docker:shell": "docker exec -it billionaire-bot sh",
-    "docker:clean": "docker system prune -f && docker volume prune -f"
+    "docker:clean": "docker system prune -f && docker volume prune -f",
+    "dev-test-suite": "tsx src/scripts/dev-test-suite.ts",
+    "dev-stress-test": "tsx src/scripts/dev-stress-test.ts",
+    "dev-performance-benchmark": "tsx src/scripts/dev-performance-benchmark.ts",
+    "dev-failure-simulator": "tsx src/scripts/dev-failure-simulator.ts",
+    "dev-health-check": "tsx src/scripts/dev-test-suite.ts --quick",
+    "dev-api-test": "tsx src/scripts/dev-test-suite.ts --api-only",
+    "dev-component-test": "tsx src/scripts/dev-test-suite.ts --components-only",
+    "dev-risk-check": "tsx src/scripts/dev-test-suite.ts --risk-only",
+    "production-readiness-check": "npm run dev-test-suite && npm run dev-performance-benchmark && npm run test:all"
   },
   "dependencies": {
     "@gala-chain/api": "^2.4.3",
