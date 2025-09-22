@@ -68,6 +68,7 @@ export class EmergencyControls {
   private emergencyState: EmergencyState;
   private triggers: EmergencyTriggers;
   private isEmergencyStopActive: boolean = false;
+  private walletAddress: string; // CRITICAL FIX: Store actual wallet address
 
   // Circuit breaker counters
   private systemErrorCount: number = 0;
@@ -78,10 +79,12 @@ export class EmergencyControls {
     config: TradingConfig,
     gswap: GSwap,
     swapExecutor: SwapExecutor,
+    walletAddress: string // CRITICAL FIX: Accept wallet address
   ) {
     this.config = config;
     this.gswap = gswap;
     this.swapExecutor = swapExecutor;
+    this.walletAddress = walletAddress; // CRITICAL FIX: Store wallet address
     this.alertSystem = new AlertSystem(false); // Disable cleanup timer for tests
 
     // Initialize emergency state
@@ -468,7 +471,7 @@ export class EmergencyControls {
         tokenIn: plan.token,
         tokenOut: 'USDC',
         amountIn: plan.amount.toString(),
-        userAddress: 'configured', // Use actual wallet address
+        userAddress: this.walletAddress, // CRITICAL FIX: Use actual wallet address
         slippageTolerance: plan.maxSlippage,
         urgency: 'high'
       });
@@ -530,7 +533,7 @@ export class EmergencyControls {
         tokenOut: createTokenClassKey(outputToken),
         amountIn: plan.amount.toString(),
         amountOutMinimum: amountOutMinimum.toString(),
-        userAddress: 'configured', // Will be resolved by swap executor
+        userAddress: this.walletAddress, // CRITICAL FIX: Use actual wallet address
         fee: FEE_TIERS.STANDARD, // Use standard fee tier for emergency
         slippageTolerance: plan.maxSlippage,
         deadline: Math.floor(Date.now() / 1000) + 1800 // 30 minute deadline for emergency
@@ -541,7 +544,7 @@ export class EmergencyControls {
         tokenIn: plan.token,
         tokenOut: outputToken,
         amountIn: plan.amount.toString(),
-        userAddress: 'configured',
+        userAddress: this.walletAddress, // CRITICAL FIX: Use actual wallet address
         slippageTolerance: plan.maxSlippage,
         urgency: 'high'
       });
@@ -583,7 +586,7 @@ export class EmergencyControls {
     try {
       logger.debug('Fetching current positions for emergency liquidation');
 
-      const userAddress = 'configured';
+      const userAddress = this.walletAddress; // CRITICAL FIX: Use actual wallet address
       const positionsResponse = await this.gswap.positions.getUserPositions(userAddress);
 
       if (!positionsResponse?.positions) {

@@ -11,6 +11,7 @@
 import { GSwap, PrivateKeySigner } from '@gala-chain/gswap-sdk';
 import BigNumber from 'bignumber.js';
 import { logger } from '../utils/logger';
+import { isTokenClassKey, isTokenString } from '../types/galaswap';
 
 interface GalaChainTokenClassKey {
   collection: string;
@@ -89,22 +90,53 @@ class FixedPoolsService {
    * Convert token to the format the API expects
    */
   private formatTokenForAPI(token: GalaChainTokenClassKey | string): string {
+    // Handle null/undefined
+    if (!token) {
+      throw new Error('Token cannot be null or undefined');
+    }
+
     if (typeof token === 'string') {
       // If it's already a string, convert pipe separators to dollar separators
-      return token.replace(/\|/g, '$');
-    } else {
-      // If it's an object, format it with dollar separators
-      return `${token.collection}$${token.category}$${token.type}$${token.additionalKey}`;
+      const formatted = token.replace(/\|/g, '$');
+
+      // Basic validation - should have 4 parts separated by $
+      const parts = formatted.split('$');
+      if (parts.length !== 4) {
+        throw new Error(`Invalid token string format: expected 4 parts, got ${parts.length} in "${token}"`);
+      }
+
+      return formatted;
     }
+
+    // If it's an object, validate and convert to string
+    if (typeof token === 'object' && token !== null) {
+      if (isTokenClassKey(token)) {
+        return `${token.collection}$${token.category}$${token.type}$${token.additionalKey}`;
+      }
+
+      throw new Error(`Invalid TokenClassKey object for API formatting: ${JSON.stringify(token)}`);
+    }
+
+    throw new Error(`Cannot format token for API: expected string or TokenClassKey, got ${typeof token}: ${JSON.stringify(token)}`);
   }
 
   /**
    * Convert string token to TokenClassKey object or pass through if already an object
    */
   private parseTokenString(tokenStr: string | GalaChainTokenClassKey): GalaChainTokenClassKey {
-    // If it's already an object, return it
+    // Handle null/undefined cases
+    if (!tokenStr) {
+      throw new Error('Token cannot be null or undefined');
+    }
+
+    // If it's already a proper TokenClassKey object, validate and return it
     if (typeof tokenStr === 'object' && tokenStr !== null) {
-      return tokenStr;
+      if (isTokenClassKey(tokenStr)) {
+        return tokenStr;
+      }
+
+      // Object exists but doesn't have the right structure
+      throw new Error(`Invalid TokenClassKey object: expected {collection, category, type, additionalKey} but got: ${JSON.stringify(tokenStr)}`);
     }
 
     // If it's a string, parse it
@@ -113,7 +145,7 @@ class FixedPoolsService {
       const parts = tokenStr.includes('$') ? tokenStr.split('$') : tokenStr.split('|');
 
       if (parts.length !== 4) {
-        throw new Error(`Invalid token format: ${tokenStr}`);
+        throw new Error(`Invalid token format: expected 4 parts separated by $ or |, got ${parts.length} parts in "${tokenStr}"`);
       }
 
       return {
@@ -124,7 +156,8 @@ class FixedPoolsService {
       };
     }
 
-    throw new Error(`Invalid token type: ${typeof tokenStr}`);
+    // More descriptive error for unexpected types
+    throw new Error(`Invalid token format: expected string or TokenClassKey object, got ${typeof tokenStr}: ${JSON.stringify(tokenStr)}`);
   }
 
   /**
@@ -201,10 +234,10 @@ class FixedPoolsService {
         protocolFeesToken1: new BigNumber(String(poolData.protocolFeesToken1 || '0')),
         sqrtPrice: new BigNumber(String(poolData.sqrtPrice || '0')),
         tickSpacing: (poolData.tickSpacing as number) || 60,
-        token0: String(poolData.token0ClassKey || ''),
-        token0ClassKey: this.parseTokenString(String(poolData.token0ClassKey || '')),
-        token1: String(poolData.token1ClassKey || ''),
-        token1ClassKey: this.parseTokenString(String(poolData.token1ClassKey || ''))
+        token0: this.formatTokenForAPI(poolData.token0ClassKey || ''),
+        token0ClassKey: this.parseTokenString(poolData.token0ClassKey || ''),
+        token1: this.formatTokenForAPI(poolData.token1ClassKey || ''),
+        token1ClassKey: this.parseTokenString(poolData.token1ClassKey || '')
       };
 
       logger.debug(`Pool data retrieved successfully: sqrtPrice=${result.sqrtPrice.toString()}`);
@@ -278,11 +311,162 @@ class FixedPoolsService {
 }
 
 /**
+ * Enhanced Positions Service that exposes SDK liquidity operations
+ */
+export class EnhancedPositionsService {
+  private readonly originalPositions: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+  constructor(originalPositions: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+    this.originalPositions = originalPositions;
+  }
+
+  /**
+   * Add liquidity using price range (easier than ticks)
+   */
+  async addLiquidityByPrice(args: {
+    walletAddress?: string;
+    positionId: string;
+    token0: string;
+    token1: string;
+    fee: number;
+    tickSpacing: number;
+    minPrice: string | number;
+    maxPrice: string | number;
+    amount0Desired: string | number;
+    amount1Desired: string | number;
+    amount0Min: string | number;
+    amount1Min: string | number;
+  }): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+    logger.debug('Adding liquidity by price range', {
+      positionId: args.positionId,
+      token0: args.token0,
+      token1: args.token1,
+      minPrice: args.minPrice,
+      maxPrice: args.maxPrice
+    });
+
+    return this.originalPositions.addLiquidityByPrice(args);
+  }
+
+  /**
+   * Add liquidity using tick range (for advanced users)
+   */
+  async addLiquidityByTicks(args: {
+    walletAddress?: string;
+    positionId: string;
+    token0: string;
+    token1: string;
+    fee: number;
+    tickLower: number;
+    tickUpper: number;
+    amount0Desired: string | number;
+    amount1Desired: string | number;
+    amount0Min: string | number;
+    amount1Min: string | number;
+  }): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+    logger.debug('Adding liquidity by tick range', {
+      positionId: args.positionId,
+      token0: args.token0,
+      token1: args.token1,
+      tickLower: args.tickLower,
+      tickUpper: args.tickUpper
+    });
+
+    return this.originalPositions.addLiquidityByTicks(args);
+  }
+
+  /**
+   * Remove liquidity from a position
+   */
+  async removeLiquidity(args: {
+    walletAddress?: string;
+    positionId: string;
+    token0: string;
+    token1: string;
+    fee: number;
+    tickLower: number;
+    tickUpper: number;
+    amount: string | number;
+    amount0Min?: string | number;
+    amount1Min?: string | number;
+  }): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+    logger.debug('Removing liquidity from position', {
+      positionId: args.positionId,
+      amount: args.amount
+    });
+
+    return this.originalPositions.removeLiquidity(args);
+  }
+
+  /**
+   * Collect accumulated fees from a position
+   */
+  async collectPositionFees(args: {
+    walletAddress?: string;
+    positionId: string;
+    token0: string;
+    token1: string;
+    fee: number;
+    tickLower: number;
+    tickUpper: number;
+    amount0Requested: string | number;
+    amount1Requested: string | number;
+  }): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+    logger.debug('Collecting fees from position', {
+      positionId: args.positionId,
+      amount0Requested: args.amount0Requested,
+      amount1Requested: args.amount1Requested
+    });
+
+    return this.originalPositions.collectPositionFees(args);
+  }
+
+  /**
+   * Get all positions for a user
+   */
+  async getUserPositions(ownerAddress: string, page: number = 1, limit: number = 10): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+    logger.debug('Getting user positions', { ownerAddress, page, limit });
+    return this.originalPositions.getUserPositions(ownerAddress, page, limit);
+  }
+
+  /**
+   * Get specific position by ID
+   */
+  async getPositionById(ownerAddress: string, positionId: string): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+    logger.debug('Getting position by ID', { ownerAddress, positionId });
+    return this.originalPositions.getPositionById(ownerAddress, positionId);
+  }
+
+  /**
+   * Calculate optimal position size for capital efficiency
+   */
+  calculateOptimalPositionSize(
+    tokenAmount: string | number,
+    spotPrice: string | number,
+    lowerPrice: string | number,
+    upperPrice: string | number,
+    tokenDecimals: number,
+    otherTokenDecimals: number
+  ): any { // eslint-disable-line @typescript-eslint/no-explicit-any
+    return this.originalPositions.calculateOptimalPositionSize(
+      tokenAmount,
+      spotPrice,
+      lowerPrice,
+      upperPrice,
+      tokenDecimals,
+      otherTokenDecimals
+    );
+  }
+}
+
+/**
  * GSwap SDK Wrapper that fixes endpoint and token format issues
  */
 export class GSwapWrapper extends GSwap {
   // @ts-ignore TS2416: Enhanced pools service replaces base implementation
   public pools: FixedPoolsService;
+  // Enhanced positions service with liquidity operations
+  public liquidityPositions: EnhancedPositionsService;
 
   constructor(options: GSwapOptions) {
     super(options);
@@ -290,7 +474,10 @@ export class GSwapWrapper extends GSwap {
     // Replace the pools service with our fixed version
     this.pools = new FixedPoolsService(options.dexBackendBaseUrl);
 
-    logger.info('GSwapWrapper initialized with fixed pools service');
+    // Enhance positions service with better logging and error handling
+    this.liquidityPositions = new EnhancedPositionsService(this.positions);
+
+    logger.info('GSwapWrapper initialized with fixed pools service and enhanced positions');
   }
 }
 

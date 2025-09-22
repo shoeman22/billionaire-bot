@@ -8,7 +8,13 @@ import { BotConfig } from '../config/environment';
 import { TRADING_CONSTANTS } from '../config/constants';
 import { logger } from '../utils/logger';
 import { PriceTracker } from '../monitoring/price-tracker';
+import { PositionTracker } from '../monitoring/position-tracker';
 import { ArbitrageStrategy } from './strategies/arbitrage';
+import { RangeOrderStrategy } from '../strategies/range-order-strategy';
+import { MarketMakingStrategy } from '../strategies/market-making-strategy';
+import { LiquidityManager } from '../services/liquidity-manager';
+import { FeeCalculator } from '../services/fee-calculator';
+import { RebalanceEngine } from '../services/rebalance-engine';
 import { PositionLimits } from './risk/position-limits';
 import { SlippageProtection } from './risk/slippage';
 import { RiskMonitor } from './risk/risk-monitor';
@@ -16,6 +22,7 @@ import { EmergencyControls } from './risk/emergency-controls';
 import { SwapExecutor } from './execution/swap-executor';
 import { MarketAnalysis } from '../monitoring/market-analysis';
 import { AlertSystem } from '../monitoring/alerts';
+import { initializeDatabase } from '../config/database';
 import { safeParseFloat } from '../utils/safe-parse';
 
 export class TradingEngine {
@@ -30,6 +37,14 @@ export class TradingEngine {
   private swapExecutor: SwapExecutor;
   private marketAnalysis: MarketAnalysis;
   private alertSystem: AlertSystem;
+
+  // Liquidity Infrastructure
+  private liquidityManager: LiquidityManager;
+  private positionTracker: PositionTracker;
+  private feeCalculator: FeeCalculator;
+  private rebalanceEngine: RebalanceEngine;
+  private rangeOrderStrategy: RangeOrderStrategy;
+  private marketMakingStrategy: MarketMakingStrategy;
   private isRunning: boolean = false;
   private tradingStats = {
     totalTrades: 0,
@@ -74,7 +89,8 @@ export class TradingEngine {
     this.emergencyControls = new EmergencyControls(
       config.trading,
       this.gswap,
-      this.swapExecutor
+      this.swapExecutor,
+      this.config.wallet.address // CRITICAL FIX: Pass actual wallet address
     );
 
     // Initialize monitoring systems
@@ -89,7 +105,15 @@ export class TradingEngine {
       this.marketAnalysis
     );
 
-    logger.info('Trading Engine initialized with all components');
+    // Initialize liquidity infrastructure
+    this.liquidityManager = new LiquidityManager(this.gswap, this.config.wallet.address);
+    this.positionTracker = new PositionTracker(this.liquidityManager);
+    this.feeCalculator = new FeeCalculator(this.liquidityManager);
+    this.rebalanceEngine = new RebalanceEngine(this.liquidityManager, this.feeCalculator);
+    this.rangeOrderStrategy = new RangeOrderStrategy(this.liquidityManager);
+    this.marketMakingStrategy = new MarketMakingStrategy(this.liquidityManager, this.rebalanceEngine);
+
+    logger.info('Trading Engine initialized with all components including liquidity infrastructure');
   }
 
   /**
@@ -113,6 +137,9 @@ export class TradingEngine {
         throw new Error('GSwap SDK connection failed: ' + (error instanceof Error ? error.message : 'Unknown error'));
       }
 
+      // Initialize database for position tracking
+      await initializeDatabase();
+
       // Connect WebSocket for real-time data
       await GSwap.events.connectEventSocket();
 
@@ -122,8 +149,13 @@ export class TradingEngine {
       // Start risk monitoring
       await this.riskMonitor.startMonitoring(this.config.wallet.address);
 
+      // Start position tracking
+      await this.positionTracker.start();
+
       // Initialize strategies
       await this.arbitrageStrategy.initialize();
+      await this.marketMakingStrategy.initialize();
+      await this.rebalanceEngine.initialize();
     
       // Start trading loops
       this.startTradingLoop();
@@ -151,9 +183,14 @@ export class TradingEngine {
 
       // Stop strategies
       await this.arbitrageStrategy.stop();
+      await this.marketMakingStrategy.stop();
+      await this.rebalanceEngine.stop();
     
       // Stop risk monitoring
       this.riskMonitor.stopMonitoring();
+
+      // Stop position tracking
+      await this.positionTracker.stop();
 
       // Stop price tracking
       await this.priceTracker.stop();
@@ -308,19 +345,30 @@ export class TradingEngine {
         return;
       }
 
-      // 9. Execute strategies based on market conditions and risk level
+      // 9. Check and execute liquidity position management
+      await this.executeLiquidityManagement(marketCondition, riskCheck.riskLevel);
+
+      // 10. Execute strategies based on market conditions and risk level
       const riskAdjustedExecution = this.shouldExecuteStrategies(marketCondition, riskCheck.riskLevel);
 
       if (riskAdjustedExecution.shouldExecute) {
         if (marketCondition.overall === 'bullish' && marketCondition.confidence > 70 && riskCheck.riskLevel !== 'high') {
           // Strong bullish trend - favor arbitrage (only if not high risk)
           await this.arbitrageStrategy.execute();
+
+          // Also consider market making in stable conditions
+          if (marketCondition.volatility === 'low' || marketCondition.volatility === 'medium') {
+            await this.marketMakingStrategy.execute();
+          }
         } else if (marketCondition.volatility === 'low' && marketCondition.liquidity === 'good' && riskCheck.riskLevel === 'low') {
-          // Low volatility, good liquidity, low risk - favorable conditions
-          // Fall back to arbitrage if conditions are favorable
+          // Low volatility, good liquidity, low risk - ideal for concentrated liquidity strategies
+          await this.marketMakingStrategy.execute();
           await this.arbitrageStrategy.execute();
         } else if (marketCondition.confidence > 50 && riskCheck.riskLevel === 'low') {
-          // Balanced conditions, low risk - only arbitrage available
+          // Balanced conditions, low risk - execute based on volatility
+          if (marketCondition.volatility === 'low') {
+            await this.marketMakingStrategy.execute();
+          }
           await this.arbitrageStrategy.execute();
         } else {
           logger.debug('Conditions not suitable for strategy execution', {
@@ -333,7 +381,7 @@ export class TradingEngine {
         logger.debug('Strategy execution skipped:', riskAdjustedExecution.reason);
       }
 
-      // 10. Update statistics
+      // 11. Update statistics
       this.updateTradingStats();
 
       logger.debug('Trading cycle completed successfully');
@@ -342,6 +390,68 @@ export class TradingEngine {
       logger.error('Error in trading cycle:', error);
       this.emergencyControls.recordSystemError(error);
       await this.alertSystem.systemAlert('trading_engine', error);
+    }
+  }
+
+  /**
+   * Execute liquidity position management
+   */
+  private async executeLiquidityManagement(
+    marketCondition: any, // eslint-disable-line @typescript-eslint/no-explicit-any
+    riskLevel: 'low' | 'medium' | 'high' | 'critical'
+  ): Promise<void> {
+    try {
+      // Update range order statuses
+      await this.rangeOrderStrategy.updateOrderStatuses();
+
+      // Check for rebalancing signals
+      if (riskLevel === 'low' || riskLevel === 'medium') {
+        const rebalanceSignals = await this.rebalanceEngine.checkRebalanceSignals();
+
+        if (rebalanceSignals.length > 0) {
+          logger.info(`Processing ${rebalanceSignals.length} rebalance signals`);
+
+          for (const signal of rebalanceSignals) {
+            if (signal.urgency === 'high' || (signal.urgency === 'medium' && riskLevel === 'low')) {
+              await this.rebalanceEngine.executeRebalance(signal.positionId, signal.strategy);
+            }
+          }
+        }
+      }
+
+      // Clean up old range orders
+      this.rangeOrderStrategy.cleanup();
+
+      // Collect fees if conditions are favorable
+      if (marketCondition.volatility !== 'extreme' && riskLevel !== 'high') {
+        await this.collectOptimalFees();
+      }
+
+    } catch (error) {
+      logger.error('Error in liquidity management:', error);
+    }
+  }
+
+  /**
+   * Collect fees when conditions are optimal
+   */
+  private async collectOptimalFees(): Promise<void> {
+    try {
+      const positions = await this.liquidityManager.getAllPositions();
+
+      for (const position of positions) {
+        const optimization = await this.feeCalculator.generateCollectionOptimization(position.id);
+
+        if (optimization.recommendation === 'collect_now') {
+          logger.info(`Collecting fees for position ${position.id} - Cost/Benefit: ${optimization.costBenefitRatio}`);
+
+          await this.liquidityManager.collectFees({
+            positionId: position.id
+          });
+        }
+      }
+    } catch (error) {
+      logger.error('Error collecting optimal fees:', error);
     }
   }
 
@@ -496,22 +606,30 @@ export class TradingEngine {
     balances: any[]; // eslint-disable-line @typescript-eslint/no-explicit-any
     totalValue: number;
     pnl: number;
+    liquidityPositions: any[]; // eslint-disable-line @typescript-eslint/no-explicit-any
+    rangeOrders: any[]; // eslint-disable-line @typescript-eslint/no-explicit-any
+    marketMakingPositions: any[]; // eslint-disable-line @typescript-eslint/no-explicit-any
   }> {
     try {
-      // No liquidity positions available - SDK v0.0.7 doesn't support liquidity operations
-      const positions: never[] = [];
+      // Get liquidity positions from our infrastructure
+      const liquidityPositions = await this.liquidityManager.getAllPositions();
+      const rangeOrders = this.rangeOrderStrategy.getAllOrders();
+      const marketMakingPositions = await this.marketMakingStrategy.getActivePositions();
 
       // Get token balances from wallet
       const balances = await this.getTokenBalances();
 
-      // Calculate total portfolio value
-      const totalValue = await this.calculatePortfolioValue(positions, balances);
+      // Calculate total portfolio value including liquidity positions
+      const totalValue = await this.calculatePortfolioValue(liquidityPositions, balances);
 
       return {
-        positions,
+        positions: liquidityPositions,
         balances,
         totalValue,
-        pnl: this.tradingStats.totalProfit
+        pnl: this.tradingStats.totalProfit,
+        liquidityPositions,
+        rangeOrders,
+        marketMakingPositions
       };
 
     } catch (error) {
@@ -520,7 +638,10 @@ export class TradingEngine {
         positions: [],
         balances: [],
         totalValue: 0,
-        pnl: 0
+        pnl: 0,
+        liquidityPositions: [],
+        rangeOrders: [],
+        marketMakingPositions: []
       };
     }
   }
@@ -544,14 +665,20 @@ export class TradingEngine {
           // Note: SDK positions API exists but liquidity operations are not supported
           if (position.token0Symbol && position.liquidity) {
             const token0 = position.token0Symbol;
-            const amount0 = safeParseFloat(position.liquidity.toString(), 0) / 2; // Simplified allocation
-            balances.set(token0, (balances.get(token0) || 0) + amount0);
+            // CRITICAL FIX: Calculate actual V3 position amounts based on price range
+            const amount0 = this.calculateV3PositionAmount0(position);
+            if (amount0 > 0) {
+              balances.set(token0, (balances.get(token0) || 0) + amount0);
+            }
           }
 
           if (position.token1Symbol && position.liquidity) {
             const token1 = position.token1Symbol;
-            const amount1 = safeParseFloat(position.liquidity.toString(), 0) / 2; // Simplified allocation
-            balances.set(token1, (balances.get(token1) || 0) + amount1);
+            // CRITICAL FIX: Calculate actual V3 position amounts based on price range
+            const amount1 = this.calculateV3PositionAmount1(position);
+            if (amount1 > 0) {
+              balances.set(token1, (balances.get(token1) || 0) + amount1);
+            }
           }
         }
       }
@@ -648,6 +775,116 @@ export class TradingEngine {
     } catch (error) {
       logger.error('Error calculating portfolio value:', error);
       return 0;
+    }
+  }
+
+  /**
+   * Calculate actual token0 amount in V3 position based on current price and range
+   * CRITICAL FIX: V3 positions are NOT 50/50 - amounts depend on current price vs range
+   */
+  private calculateV3PositionAmount0(position: any): number {
+    try {
+      const liquidity = safeParseFloat(position.liquidity?.toString(), 0);
+      if (liquidity <= 0) return 0;
+
+      // Get current price from pool data
+      const currentPrice = this.getCurrentPriceForPosition(position);
+      const tickLower = position.tickLower || 0;
+      const tickUpper = position.tickUpper || 0;
+
+      // Convert ticks to prices
+      const priceLower = Math.pow(1.0001, tickLower);
+      const priceUpper = Math.pow(1.0001, tickUpper);
+
+      // If current price is below range, position is 100% token0
+      if (currentPrice <= priceLower) {
+        // All liquidity is in token0
+        return liquidity * (1 / Math.sqrt(priceUpper) - 1 / Math.sqrt(priceLower));
+      }
+
+      // If current price is above range, position is 0% token0
+      if (currentPrice >= priceUpper) {
+        return 0;
+      }
+
+      // If current price is in range, calculate proportional amount
+      const sqrtPrice = Math.sqrt(currentPrice);
+      const sqrtPriceLower = Math.sqrt(priceLower);
+      const sqrtPriceUpper = Math.sqrt(priceUpper);
+
+      return liquidity * (1 / sqrtPrice - 1 / sqrtPriceUpper);
+
+    } catch (error) {
+      logger.error('Error calculating V3 position amount0:', error);
+      // Fallback to conservative estimate if calculation fails
+      return safeParseFloat(position.liquidity?.toString(), 0) * 0.3;
+    }
+  }
+
+  /**
+   * Calculate actual token1 amount in V3 position based on current price and range
+   * CRITICAL FIX: V3 positions are NOT 50/50 - amounts depend on current price vs range
+   */
+  private calculateV3PositionAmount1(position: any): number {
+    try {
+      const liquidity = safeParseFloat(position.liquidity?.toString(), 0);
+      if (liquidity <= 0) return 0;
+
+      // Get current price from pool data
+      const currentPrice = this.getCurrentPriceForPosition(position);
+      const tickLower = position.tickLower || 0;
+      const tickUpper = position.tickUpper || 0;
+
+      // Convert ticks to prices
+      const priceLower = Math.pow(1.0001, tickLower);
+      const priceUpper = Math.pow(1.0001, tickUpper);
+
+      // If current price is below range, position is 0% token1
+      if (currentPrice <= priceLower) {
+        return 0;
+      }
+
+      // If current price is above range, position is 100% token1
+      if (currentPrice >= priceUpper) {
+        // All liquidity is in token1
+        return liquidity * (Math.sqrt(priceUpper) - Math.sqrt(priceLower));
+      }
+
+      // If current price is in range, calculate proportional amount
+      const sqrtPrice = Math.sqrt(currentPrice);
+      const sqrtPriceLower = Math.sqrt(priceLower);
+
+      return liquidity * (sqrtPrice - sqrtPriceLower);
+
+    } catch (error) {
+      logger.error('Error calculating V3 position amount1:', error);
+      // Fallback to conservative estimate if calculation fails
+      return safeParseFloat(position.liquidity?.toString(), 0) * 0.3;
+    }
+  }
+
+  /**
+   * Get current price for a position's token pair
+   */
+  private getCurrentPriceForPosition(position: any): number {
+    try {
+      // Try to get current pool price
+      // This is a simplified approach - in production would cache pool prices
+      const token0 = position.token0 || position.token0Symbol;
+      const token1 = position.token1 || position.token1Symbol;
+      const fee = position.fee || 3000;
+
+      // For now, return a reasonable default based on tick range center
+      // In production, this should fetch actual pool.slot0 current price
+      const tickLower = position.tickLower || 0;
+      const tickUpper = position.tickUpper || 0;
+      const midTick = (tickLower + tickUpper) / 2;
+
+      return Math.pow(1.0001, midTick);
+
+    } catch (error) {
+      logger.error('Error getting current price for position:', error);
+      return 1.0; // Safe fallback
     }
   }
 
@@ -751,6 +988,8 @@ export class TradingEngine {
       apiHealth: true, // Note: Real-time API health monitoring will be implemented in future versions
       strategies: {
         arbitrage: this.arbitrageStrategy.getStatus(),
+        marketMaking: this.marketMakingStrategy.getStatus(),
+        rangeOrders: this.rangeOrderStrategy.getStatistics()
       },
       performance: {
         totalTrades: this.tradingStats.totalTrades,
@@ -765,8 +1004,10 @@ export class TradingEngine {
         alerts: this.priceTracker.getTriggeredAlerts()
       },
       positions: {
-        // No liquidity statistics - SDK v0.0.7 doesn't support liquidity operations
-        limits: this.positionLimits.getCurrentLimits()
+        liquidity: this.liquidityManager.getStatus(),
+        limits: this.positionLimits.getCurrentLimits(),
+        tracker: this.positionTracker.getStatus(),
+        rebalancing: this.rebalanceEngine.getStatus()
       },
       risk: {
         emergencyStop: this.emergencyControls.isEmergencyStopEnabled(),
@@ -880,6 +1121,209 @@ export class TradingEngine {
     } catch (error) {
       logger.error('❌ Failed to enable arbitrage strategy:', error);
       throw error;
+    }
+  }
+
+  // ============================================
+  // LIQUIDITY STRATEGY MANAGEMENT METHODS
+  // ============================================
+
+  /**
+   * Place a range order (limit order using liquidity)
+   */
+  async placeRangeOrder(config: {
+    token0: string;
+    token1: string;
+    fee: number;
+    direction: 'buy' | 'sell';
+    amount: string;
+    targetPrice: number;
+    rangeWidth: number;
+    autoExecute: boolean;
+    slippageTolerance?: number;
+  }): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+    try {
+      logger.info('Placing range order via TradingEngine', config);
+      return await this.rangeOrderStrategy.placeRangeOrder(config);
+    } catch (error) {
+      logger.error('Failed to place range order:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Cancel a range order
+   */
+  async cancelRangeOrder(orderId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      logger.info(`Cancelling range order: ${orderId}`);
+      return await this.rangeOrderStrategy.cancelRangeOrder(orderId);
+    } catch (error) {
+      logger.error('Failed to cancel range order:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  /**
+   * Get range order status
+   */
+  getRangeOrderStatus(orderId: string): any { // eslint-disable-line @typescript-eslint/no-explicit-any
+    return this.rangeOrderStrategy.getOrderStatus(orderId);
+  }
+
+  /**
+   * Get all range orders
+   */
+  getAllRangeOrders(): any[] { // eslint-disable-line @typescript-eslint/no-explicit-any
+    return this.rangeOrderStrategy.getAllOrders();
+  }
+
+  /**
+   * Add a new liquidity position
+   */
+  async addLiquidityPosition(params: {
+    token0: string;
+    token1: string;
+    fee: number;
+    minPrice: number;
+    maxPrice: number;
+    amount0Desired: string;
+    amount1Desired: string;
+    slippageTolerance?: number;
+  }): Promise<string> {
+    try {
+      logger.info('Adding liquidity position via TradingEngine', params);
+      return await this.liquidityManager.addLiquidityByPrice(params);
+    } catch (error) {
+      logger.error('Failed to add liquidity position:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Remove a liquidity position
+   */
+  async removeLiquidityPosition(params: {
+    positionId: string;
+    liquidity: string;
+    slippageTolerance?: number;
+  }): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+    try {
+      logger.info('Removing liquidity position via TradingEngine', params);
+      return await this.liquidityManager.removeLiquidity(params);
+    } catch (error) {
+      logger.error('Failed to remove liquidity position:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Collect fees from a position
+   */
+  async collectPositionFees(positionId: string): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+    try {
+      logger.info(`Collecting fees for position: ${positionId}`);
+      return await this.liquidityManager.collectFees({ positionId });
+    } catch (error) {
+      logger.error('Failed to collect position fees:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get fee analysis for a position
+   */
+  async getPositionFeeAnalysis(positionId: string): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+    try {
+      return await this.feeCalculator.calculateAccruedFees(positionId);
+    } catch (error) {
+      logger.error('Failed to get fee analysis:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get rebalance recommendations
+   */
+  async getRebalanceRecommendations(): Promise<any[]> { // eslint-disable-line @typescript-eslint/no-explicit-any
+    try {
+      return await this.rebalanceEngine.checkRebalanceSignals();
+    } catch (error) {
+      logger.error('Failed to get rebalance recommendations:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Execute manual rebalance
+   */
+  async executeManualRebalance(positionId: string, strategy: string): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+    try {
+      logger.info(`Manually executing rebalance for position ${positionId} with strategy ${strategy}`);
+      return await this.rebalanceEngine.executeRebalance(positionId, strategy);
+    } catch (error) {
+      logger.error('Failed to execute manual rebalance:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get comprehensive liquidity analytics
+   */
+  async getLiquidityAnalytics(): Promise<{
+    totalPositions: number;
+    totalLiquidity: number;
+    totalFeesEarned: number;
+    averageAPR: number;
+    positionPerformance: any[]; // eslint-disable-line @typescript-eslint/no-explicit-any
+    rangeOrderStats: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    marketMakingStats: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  }> {
+    try {
+      const positions = await this.liquidityManager.getAllPositions();
+      const rangeOrderStats = this.rangeOrderStrategy.getStatistics();
+      const marketMakingStats = this.marketMakingStrategy.getStatus();
+
+      const totalFeesEarned = await this.feeCalculator.getTotalFeesCollected();
+      const positionPerformance = await Promise.all(
+        positions.map(async (pos) => {
+          const analysis = await this.feeCalculator.calculateAccruedFees(pos.id);
+          return {
+            positionId: pos.id,
+            token0: pos.token0,
+            token1: pos.token1,
+            feesEarned: analysis.totalFeesUSD,
+            apr: analysis.estimatedAPR,
+            inRange: pos.inRange,
+            timeInRange: pos.timeInRangePercentage
+          };
+        })
+      );
+
+      const totalLiquidity = positions.reduce((sum, pos) => sum + (pos.liquidityValue || 0), 0);
+      const averageAPR = positionPerformance.reduce((sum, perf) => sum + perf.apr, 0) / Math.max(positionPerformance.length, 1);
+
+      return {
+        totalPositions: positions.length,
+        totalLiquidity,
+        totalFeesEarned,
+        averageAPR,
+        positionPerformance,
+        rangeOrderStats,
+        marketMakingStats
+      };
+
+    } catch (error) {
+      logger.error('Failed to get liquidity analytics:', error);
+      return {
+        totalPositions: 0,
+        totalLiquidity: 0,
+        totalFeesEarned: 0,
+        averageAPR: 0,
+        positionPerformance: [],
+        rangeOrderStats: {},
+        marketMakingStats: {}
+      };
     }
   }
 }

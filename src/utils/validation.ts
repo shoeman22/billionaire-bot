@@ -217,64 +217,117 @@ export class InputValidator {
 
   /**
    * Validate GalaChain token format: Collection$Category$Type$AdditionalKey
-   * Enhanced validation to prevent malformed API calls that could waste money
+   * HIGH PRIORITY FIX: Enhanced validation to prevent edge cases and malformed API calls
    */
   static validateTokenFormat(token: string): ValidationResult {
     const errors: string[] = [];
     const warnings: string[] = [];
 
+    // CRITICAL: Null/undefined/empty checks
     if (!token || typeof token !== 'string') {
       errors.push('Token must be a non-empty string');
       return { isValid: false, errors, warnings };
     }
 
-    const parts = token.split('$');
+    const trimmedToken = token.trim();
+    if (trimmedToken.length === 0) {
+      errors.push('Token cannot be empty or whitespace only');
+      return { isValid: false, errors, warnings };
+    }
 
+    // CRITICAL: Check for dangerous characters before parsing
+    if (/[<>"'`&|;\n\r\t]/.test(trimmedToken)) {
+      errors.push('Token contains dangerous characters that could cause injection attacks');
+      return { isValid: false, errors, warnings };
+    }
+
+    // CRITICAL: Split validation
+    const parts = trimmedToken.split('$');
     if (parts.length !== 4) {
-      errors.push('Token must follow format: Collection$Category$Type$AdditionalKey');
+      errors.push(`Invalid format: expected 4 parts separated by '$', got ${parts.length} parts. Format: Collection$Category$Type$AdditionalKey`);
       return { isValid: false, errors, warnings };
     }
 
     const [collection, category, type, additionalKey] = parts;
 
-    // Validate each component with detailed security checks
+    // CRITICAL: Check for empty components
     const componentNames = ['Collection', 'Category', 'Type', 'AdditionalKey'];
     const components = [collection, category, type, additionalKey];
 
     for (let i = 0; i < components.length; i++) {
       const component = components[i];
       const componentName = componentNames[i];
-      const validation = this.validateTokenComponentDetailed(component, componentName);
 
+      if (!component || component.trim().length === 0) {
+        errors.push(`${componentName} component cannot be empty`);
+        continue;
+      }
+
+      const validation = this.validateTokenComponentDetailed(component.trim(), componentName);
       if (!validation.isValid) {
         errors.push(...validation.errors);
       }
     }
 
-    // Check for path traversal attempts
-    if (token.includes('..') || token.includes('/') || token.includes('\\')) {
-      errors.push('Token contains invalid path characters');
+    // CRITICAL: Security checks for injection attacks
+    const securityChecks = [
+      { pattern: /\.\./, message: 'Path traversal attempt detected (..)' },
+      { pattern: /[/\\]/, message: 'File system path characters detected' },
+      { pattern: /javascript:/i, message: 'JavaScript protocol detected' },
+      { pattern: /data:/i, message: 'Data protocol detected' },
+      { pattern: /vbscript:/i, message: 'VBScript protocol detected' },
+      { pattern: /<script/i, message: 'Script tag detected' },
+      { pattern: /eval\s*\(/i, message: 'Eval function detected' },
+      { pattern: /function\s*\(/i, message: 'Function declaration detected' },
+      { pattern: /\${/, message: 'Template literal injection detected' },
+      { pattern: /\[\[|\]\]/, message: 'Double bracket injection detected' },
+      { pattern: /\x00|\x08|\x0B|\x0C|\x0E|\x1F|\x7F/, message: 'Control characters detected' },
+      { pattern: /\\[nrtbfav]/, message: 'Escape sequence detected' }
+    ];
+
+    for (const check of securityChecks) {
+      if (check.pattern.test(trimmedToken)) {
+        errors.push(`Security violation: ${check.message}`);
+      }
     }
 
-    // Check total length
-    if (token.length > 100) {
-      errors.push('Token identifier too long (max 100 characters)');
+    // CRITICAL: Length validation (prevent DoS)
+    if (trimmedToken.length > 80) {
+      errors.push(`Token too long: ${trimmedToken.length} characters (max 80)`);
     }
 
-    // Additional validation for API safety
+    // CRITICAL: Component length validation
+    for (let i = 0; i < components.length; i++) {
+      if (components[i] && components[i].length > 20) {
+        errors.push(`${componentNames[i]} component too long: ${components[i].length} characters (max 20)`);
+      }
+    }
+
+    // CRITICAL: Reserved word validation
+    const reservedWords = ['null', 'undefined', 'NaN', 'Infinity', 'constructor', 'prototype', '__proto__', 'toString', 'valueOf'];
+    for (let i = 0; i < components.length; i++) {
+      if (reservedWords.includes(components[i].toLowerCase())) {
+        errors.push(`${componentNames[i]} cannot be a reserved word: ${components[i]}`);
+      }
+    }
+
+    // CRITICAL: API safety validation
     if (errors.length === 0) {
-      // Check that token doesn't contain control characters that could break API calls
-       
-      if (/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(token)) {
-        errors.push('Token contains control characters that could cause API failures');
+      // Check for URL encoding that could bypass validation
+      if (/%[0-9A-Fa-f]{2}/.test(trimmedToken)) {
+        errors.push('URL-encoded characters detected - potential bypass attempt');
       }
 
-      // Ensure token parts don't start/end with special characters
-      const parts = token.split('$');
-      for (let i = 0; i < parts.length; i++) {
-        if (parts[i].startsWith('-') || parts[i].endsWith('-') ||
-            parts[i].startsWith('_') || parts[i].endsWith('_')) {
-          errors.push(`Token component ${i + 1} has invalid start/end characters`);
+      // Check for Unicode normalization issues
+      if (trimmedToken !== trimmedToken.normalize('NFC')) {
+        warnings.push('Token contains non-normalized Unicode characters');
+      }
+
+      // Validate character set for each component
+      for (let i = 0; i < components.length; i++) {
+        const component = components[i];
+        if (!/^[A-Za-z0-9][A-Za-z0-9_-]*[A-Za-z0-9]$|^[A-Za-z0-9]$/.test(component)) {
+          errors.push(`${componentNames[i]} has invalid format: must start and end with alphanumeric, can contain '_' and '-' in middle`);
         }
       }
     }

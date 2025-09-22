@@ -527,6 +527,34 @@ export function isErrorResponse(response: any): response is ErrorResponse { // e
   return response && (response.error === true || response.status >= 400);
 }
 
+// Token validation helpers
+export function isTokenClassKey(obj: any): obj is TokenClassKey { // eslint-disable-line @typescript-eslint/no-explicit-any
+  return typeof obj === 'object' &&
+         obj !== null &&
+         'collection' in obj &&
+         'category' in obj &&
+         'type' in obj &&
+         'additionalKey' in obj &&
+         typeof obj.collection === 'string' &&
+         typeof obj.category === 'string' &&
+         typeof obj.type === 'string' &&
+         typeof obj.additionalKey === 'string';
+}
+
+export function isTokenString(value: any): value is string { // eslint-disable-line @typescript-eslint/no-explicit-any
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  // Check for valid token format with $ or | separators
+  const parts = value.includes('$') ? value.split('$') : value.split('|');
+  return parts.length === 4 && parts.every(part => part.length > 0);
+}
+
+export function isValidToken(token: any): token is TokenClassKey | string { // eslint-disable-line @typescript-eslint/no-explicit-any
+  return isTokenClassKey(token) || isTokenString(token);
+}
+
 // Token helper functions
 export function parseTokenKey(compositeKey: string): ParsedToken {
   const parts = compositeKey.split('$');

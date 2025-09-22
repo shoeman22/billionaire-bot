@@ -6,7 +6,6 @@
 // GSwapWrapper type imported via IGSwapLike interface
 import { logger } from '../utils/logger';
 import { TRADING_CONSTANTS } from '../config/constants';
-import { createTokenClassKey } from '../types/galaswap';
 import { safeParseFloat } from '../utils/safe-parse';
 
 // Interface for GSwap-like objects with pools service (generic to avoid SDK type conflicts)
@@ -233,10 +232,11 @@ export class PriceTracker {
     try {
       // Connect to WebSocket using SDK events
       // SDK handles WebSocket connections internally
-      // Subscribe to price updates for each token
+      // Subscribe to price updates for each token (using string format)
       for (const tokenKey of this.TOKENS_TO_TRACK) {
-        const _tokenClassKey = createTokenClassKey(tokenKey);
         // SDK event system will handle price updates
+        // tokenKey is already in the correct string format
+        logger.debug(`Subscribing to price updates for ${tokenKey}`);
       }
 
       this.wsConnected = true;
@@ -297,17 +297,29 @@ export class PriceTracker {
       // Get prices for all tracked tokens using SDK
       for (const tokenKey of this.TOKENS_TO_TRACK) {
         try {
-          const poolData = await this.gswap.pools.getPoolData(tokenKey, 'GUSDC$Unit$none$none', 10000);
+          // Pass tokenKey as string directly - no conversions needed
+          const poolData = await this.gswap.pools.getPoolData(
+            tokenKey, // Already a string from TOKENS constant
+            'GUSDC$Unit$none$none',
+            10000
+          );
 
           if (poolData?.sqrtPrice) {
-            const tokenClassKey = createTokenClassKey(tokenKey);
             // Calculate real price from sqrtPriceX96 using SDK
-            const priceResult = this.gswap.pools.calculateSpotPrice(tokenKey, 'GUSDC$Unit$none$none', poolData.sqrtPrice);
+            // Pass tokens as strings directly
+            const priceResult = this.gswap.pools.calculateSpotPrice(
+              tokenKey, // Pass as string
+              'GUSDC$Unit$none$none',
+              poolData.sqrtPrice
+            );
             const calculatedPrice = priceResult ? safeParseFloat(priceResult.toString(), 0) : 0;
 
             if (calculatedPrice > 0) {
+              // Extract token symbol from composite key directly
+              const tokenSymbol = tokenKey.split('$')[0].toUpperCase();
+
               const priceData: PriceData = {
-                token: tokenClassKey.collection.toUpperCase(),
+                token: tokenSymbol,
                 price: calculatedPrice,
                 priceUsd: calculatedPrice,
                 change24h: 0, // Would need historical data
@@ -316,9 +328,12 @@ export class PriceTracker {
               };
 
               this.updatePriceData(priceData);
+              logger.debug(`Updated price for ${tokenSymbol}: $${calculatedPrice.toFixed(6)}`);
             } else {
               logger.warn(`Invalid price calculated for ${tokenKey}: ${calculatedPrice}`);
             }
+          } else {
+            logger.warn(`No sqrtPrice returned for ${tokenKey}`);
           }
         } catch (error) {
           logger.warn(`Failed to get price for ${tokenKey}:`, error);
