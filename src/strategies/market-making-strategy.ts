@@ -7,9 +7,10 @@
 import { LiquidityManager, AddLiquidityParams } from '../services/liquidity-manager';
 import { Position } from '../entities/Position';
 import { logger } from '../utils/logger';
-import { TRADING_CONSTANTS, STRATEGY_CONSTANTS } from '../config/constants';
+// Unused imports removed
+// import { TRADING_CONSTANTS, STRATEGY_CONSTANTS } from '../config/constants';
 import { safeParseFloat } from '../utils/safe-parse';
-import BigNumber from 'bignumber.js';
+// import BigNumber from 'bignumber.js';
 
 export interface MarketMakingConfig {
   token0: string;
@@ -301,11 +302,14 @@ export class MarketMakingStrategy {
       throw new Error('Failed to retrieve created position');
     }
 
+    // Convert LiquidityPosition to Position for storage
+    const convertedPosition = this.convertLiquidityPositionToPosition(position);
+
     // Store position with metadata
     const mmPosition: MarketMakingPosition = {
       id: positionId,
       type,
-      position,
+      position: convertedPosition,
       createdPrice: currentPrice,
       targetRange: range,
       isActive: true,
@@ -567,17 +571,19 @@ export class MarketMakingStrategy {
 
     if (newPosition) {
       const currentPrice = await this.getCurrentPrice();
+      const convertedNewPosition = this.convertLiquidityPositionToPosition(newPosition);
+
       const newMmPosition: MarketMakingPosition = {
         ...mmPosition,
         id: newPositionId,
-        position: newPosition,
+        position: convertedNewPosition,
         createdPrice: currentPrice || mmPosition.createdPrice,
         targetRange: newRange,
         isActive: true
       };
 
       this.positions.set(newPositionId, newMmPosition);
-      newPosition.incrementRebalance();
+      // Remove incrementRebalance call as it doesn't exist on LiquidityPosition
     }
   }
 
@@ -705,7 +711,7 @@ export class MarketMakingStrategy {
    */
   private estimateRebalanceBenefit(position: MarketMakingPosition, newRange: { min: number; max: number }, currentPrice: number): number {
     // Simplified benefit estimation based on expected fee generation
-    const rangeWidth = (newRange.max - newRange.min) / currentPrice;
+    const _rangeWidth = (newRange.max - newRange.min) / currentPrice;
     const expectedVolume = position.position.currentValueUSD * 0.1; // Assume 10% daily volume
     const expectedFees = expectedVolume * (this.config.fee / 1000000); // Fee tier in basis points
     return expectedFees * 365; // Annualized
@@ -746,5 +752,71 @@ export class MarketMakingStrategy {
     if (this.config.rebalanceThreshold <= 0) {
       throw new Error('Rebalance threshold must be positive');
     }
+  }
+
+  /**
+   * Initialize strategy - required for TradingEngine compatibility
+   */
+  async initialize(): Promise<void> {
+    await this.start();
+  }
+
+  /**
+   * Execute strategy - required for TradingEngine compatibility
+   */
+  async execute(): Promise<void> {
+    await this.update();
+  }
+
+  /**
+   * Convert LiquidityPosition to Position for compatibility
+   */
+  private convertLiquidityPositionToPosition(liquidityPosition: any): Position { // eslint-disable-line @typescript-eslint/no-explicit-any
+    const position = new Position();
+    position.id = liquidityPosition.id;
+    position.walletAddress = 'market-making'; // Default wallet address
+    position.token0 = liquidityPosition.token0;
+    position.token1 = liquidityPosition.token1;
+    position.token0Symbol = liquidityPosition.token0?.split('$')[0] || 'UNK';
+    position.token1Symbol = liquidityPosition.token1?.split('$')[0] || 'UNK';
+    position.fee = liquidityPosition.fee;
+    position.tickLower = liquidityPosition.tickLower;
+    position.tickUpper = liquidityPosition.tickUpper;
+    position.minPrice = liquidityPosition.minPrice;
+    position.maxPrice = liquidityPosition.maxPrice;
+    position.liquidity = liquidityPosition.liquidity;
+    position.amount0 = liquidityPosition.amount0;
+    position.amount1 = liquidityPosition.amount1;
+    position.uncollectedFees0 = liquidityPosition.uncollectedFees0;
+    position.uncollectedFees1 = liquidityPosition.uncollectedFees1;
+    position.inRange = liquidityPosition.inRange;
+    position.isActive = true;
+    position.strategy = 'market_making';
+    position.rebalanceCount = 0;
+    position.totalFeesCollected0 = '0';
+    position.totalFeesCollected1 = '0';
+    position.initialValueUSD = 0;
+    position.currentValueUSD = 0;
+    position.impermanentLoss = 0;
+    position.totalAPR = 0;
+    position.feeAPR = 0;
+    position.timeInRangeMs = 0;
+    position.timeOutOfRangeMs = 0;
+    position.metadata = { notes: 'Market making position' };
+    return position;
+  }
+
+  /**
+   * Get strategy status - required for TradingEngine compatibility
+   */
+  getStatus(): any { // eslint-disable-line @typescript-eslint/no-explicit-any
+    return {
+      isRunning: this.isRunning,
+      positionCount: this.positions.size,
+      activePositions: Array.from(this.positions.values()).filter(p => p.isActive).length,
+      startTime: this.startTime,
+      lastRebalance: this.lastRebalance,
+      uptime: this.isRunning ? Date.now() - this.startTime : 0
+    };
   }
 }

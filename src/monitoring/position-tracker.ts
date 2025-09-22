@@ -422,7 +422,7 @@ export class PositionTracker {
   private async checkPositionAlerts(
     position: Position,
     currentPrice: number,
-    previousPrice: number
+    _previousPrice: number
   ): Promise<void> {
     const alerts: PositionAlert[] = [];
 
@@ -562,5 +562,12 @@ export class PositionTracker {
       lastUpdateTime: Date.now(),
       updateInterval: this.UPDATE_INTERVAL
     };
+  }
+
+  /**
+   * Get status - required for TradingEngine compatibility
+   */
+  getStatus(): any { // eslint-disable-line @typescript-eslint/no-explicit-any
+    return this.getStatistics();
   }
 }

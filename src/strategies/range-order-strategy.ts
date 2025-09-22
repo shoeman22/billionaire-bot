@@ -9,7 +9,7 @@ import { Position } from '../entities/Position';
 import { logger } from '../utils/logger';
 import { TRADING_CONSTANTS } from '../config/constants';
 import { safeParseFloat } from '../utils/safe-parse';
-import BigNumber from 'bignumber.js';
+// Unused import removed: BigNumber
 
 export interface RangeOrderConfig {
   token0: string;
@@ -107,12 +107,15 @@ export class RangeOrderStrategy {
         return { success: false, error: 'Failed to retrieve created position' };
       }
 
+      // Convert LiquidityPosition to Position for storage
+      const convertedPosition = this.convertLiquidityPositionToPosition(position);
+
       // Store order status
       const orderStatus: RangeOrderStatus = {
         orderId,
         status: 'active',
         config,
-        position,
+        position: convertedPosition,
         createdAt: Date.now()
       };
 
@@ -278,7 +281,7 @@ export class RangeOrderStrategy {
     }
 
     const validFeeTiers = [TRADING_CONSTANTS.FEE_TIERS.STABLE, TRADING_CONSTANTS.FEE_TIERS.STANDARD, TRADING_CONSTANTS.FEE_TIERS.VOLATILE];
-    if (!validFeeTiers.includes(config.fee)) {
+    if (!validFeeTiers.includes(config.fee as 500 | 3000 | 10000)) {
       return { valid: false, error: 'Invalid fee tier' };
     }
 
@@ -492,6 +495,44 @@ export class RangeOrderStrategy {
       order.status = 'expired';
       this.activeOrders.set(order.orderId, order);
     }
+  }
+
+  /**
+   * Convert LiquidityPosition to Position for compatibility
+   */
+  private convertLiquidityPositionToPosition(liquidityPosition: any): Position { // eslint-disable-line @typescript-eslint/no-explicit-any
+    const position = new Position();
+    position.id = liquidityPosition.id;
+    position.walletAddress = 'range-order'; // Placeholder for range orders
+    position.token0 = liquidityPosition.token0;
+    position.token1 = liquidityPosition.token1;
+    position.token0Symbol = liquidityPosition.token0?.split('$')[0] || 'UNK';
+    position.token1Symbol = liquidityPosition.token1?.split('$')[0] || 'UNK';
+    position.fee = liquidityPosition.fee;
+    position.tickLower = liquidityPosition.tickLower;
+    position.tickUpper = liquidityPosition.tickUpper;
+    position.minPrice = liquidityPosition.minPrice;
+    position.maxPrice = liquidityPosition.maxPrice;
+    position.liquidity = liquidityPosition.liquidity;
+    position.amount0 = liquidityPosition.amount0;
+    position.amount1 = liquidityPosition.amount1;
+    position.uncollectedFees0 = liquidityPosition.uncollectedFees0;
+    position.uncollectedFees1 = liquidityPosition.uncollectedFees1;
+    position.inRange = liquidityPosition.inRange;
+    position.isActive = true;
+    position.strategy = 'range_order';
+    position.rebalanceCount = 0;
+    position.totalFeesCollected0 = '0';
+    position.totalFeesCollected1 = '0';
+    position.initialValueUSD = 0;
+    position.currentValueUSD = 0;
+    position.impermanentLoss = 0;
+    position.totalAPR = 0;
+    position.feeAPR = 0;
+    position.timeInRangeMs = 0;
+    position.timeOutOfRangeMs = 0;
+    position.metadata = { notes: 'Range order position' };
+    return position;
   }
 
   /**

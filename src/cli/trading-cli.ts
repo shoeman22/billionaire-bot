@@ -168,13 +168,13 @@ async function generateRealExportData(tradingEngine: TradingEngine, exportType: 
     case 'positions':
       // Use real portfolio positions if available
       if (portfolio.positions && portfolio.positions.length > 0) {
-        return portfolio.positions.map((position: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
+        return portfolio.positions.map((position: { token?: string; symbol?: string; amount?: number; balance?: number; valueUsd?: number; value?: number }) => ({
           token: position.token || position.symbol || 'unknown',
           amount: position.amount || position.balance || 0,
           value_usd: position.valueUsd || position.value || 0
         }));
       } else if (portfolio.balances && portfolio.balances.length > 0) {
-        return portfolio.balances.map((balance: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
+        return portfolio.balances.map((balance: { token?: string; symbol?: string; amount?: number; balance?: number; valueUsd?: number; value?: number }) => ({
           token: balance.token || balance.symbol || 'unknown',
           amount: balance.amount || balance.balance || 0,
           value_usd: balance.valueUsd || balance.value || 0

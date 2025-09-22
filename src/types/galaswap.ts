@@ -527,6 +527,166 @@ export function isErrorResponse(response: any): response is ErrorResponse { // e
   return response && (response.error === true || response.status >= 400);
 }
 
+// CRITICAL FIX: Proper interfaces replacing any types
+export interface BlockchainPosition {
+  id?: string;
+  positionId?: string;
+  token0: string;
+  token1: string;
+  fee: number;
+  tickLower: number;
+  tickUpper: number;
+  liquidity: string;
+  amount0?: string;
+  amount1?: string;
+  fees0?: string;
+  fees1?: string;
+  token0Symbol?: string;
+  token1Symbol?: string;
+  lastUpdated?: number;
+  inRange?: boolean;
+
+  // Legacy compatibility properties for existing code
+  token?: string;
+  symbol?: string;
+  amount?: number;
+  balance?: number;
+  valueUsd?: number;
+  value?: number;
+  valueUSD?: number;
+  percentOfPortfolio?: number;
+  unrealizedPnL?: number;
+  openTime?: number;
+  age?: number;
+}
+
+export interface PortfolioBalance {
+  token: string;
+  amount: number;
+  valueUSD: number;
+}
+
+export interface PositionPerformance {
+  positionId: string;
+  token0: string;
+  token1: string;
+  feesEarned: number;
+  apr: number;
+  inRange: boolean;
+  timeInRange: number;
+}
+
+export interface LiquidityAnalytics {
+  totalPositions: number;
+  totalLiquidity: number;
+  totalFeesEarned: number;
+  averageAPR: number;
+  positionPerformance: PositionPerformance[];
+  rangeOrderStats: RangeOrderStats;
+  marketMakingStats: MarketMakingStats;
+}
+
+export interface RangeOrderStats {
+  totalOrders: number;
+  activeOrders: number;
+  filledOrders: number;
+  averageFillTime: number;
+}
+
+export interface MarketMakingStats {
+  activePositions: number;
+  totalVolume: number;
+  feesCollected: number;
+  impermanentLoss: number;
+}
+
+export interface MarketCondition {
+  overall: 'bullish' | 'bearish' | 'neutral';
+  confidence: number;
+  volatility: 'low' | 'medium' | 'high' | 'extreme';
+  liquidity: 'poor' | 'fair' | 'good' | 'excellent';
+  trend?: string;
+}
+
+export interface RiskValidationResult {
+  approved: boolean;
+  reason?: string;
+  adjustedAmount?: number;
+  riskScore?: number;
+  warnings?: string[];
+}
+
+export interface RangeOrder {
+  id: string;
+  token0: string;
+  token1: string;
+  fee: number;
+  direction: 'buy' | 'sell';
+  amount: string;
+  targetPrice: number;
+  rangeWidth: number;
+  status: 'pending' | 'active' | 'filled' | 'cancelled';
+  createdAt: number;
+  autoExecute: boolean;
+}
+
+export interface MarketMakingPosition {
+  id: string;
+  token0: string;
+  token1: string;
+  fee: number;
+  liquidity: string;
+  strategy: string;
+  status: 'active' | 'paused' | 'closed';
+  performance: {
+    feesEarned: number;
+    impermanentLoss: number;
+    netReturn: number;
+  };
+}
+
+export interface ArbitrageStatus {
+  isActive: boolean;
+  opportunities: {
+    total: number;
+    executed: number;
+    successful: number;
+    successRate: string;
+  };
+  performance: {
+    totalProfit: string;
+    avgProfitPerTrade: string;
+    profitMargin: string;
+  };
+  monitoring: {
+    lastUpdate: string;
+    activePairs: number;
+    avgOpportunitySize: string;
+  };
+  risk: {
+    riskLevel: 'low' | 'medium' | 'high';
+    riskFactors: string[];
+    lastRiskAssessment: string;
+  };
+}
+
+export interface FeeAnalysis {
+  totalFeesUSD: number;
+  estimatedAPR: number;
+  token0Fees: string;
+  token1Fees: string;
+  lastCollected: number;
+}
+
+export interface RebalanceRecommendation {
+  positionId: string;
+  strategy: string;
+  urgency: 'low' | 'medium' | 'high';
+  reason: string;
+  estimatedCost: number;
+  estimatedBenefit: number;
+}
+
 // Token validation helpers
 export function isTokenClassKey(obj: any): obj is TokenClassKey { // eslint-disable-line @typescript-eslint/no-explicit-any
   return typeof obj === 'object' &&
@@ -588,22 +748,35 @@ export function createTokenClassKey(compositeKey: string): TokenClassKey {
 // Legacy compatibility exports (for existing code)
 export interface LiquidityPosition {
   id: string;
-  owner: string;
-  pool: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  owner?: string;
+  pool?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  token0: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  token1: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  fee: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   tickLower: number;
   tickUpper: number;
+  minPrice: number;
+  maxPrice: number;
   liquidity: string;
-  depositedToken0: string;
-  depositedToken1: string;
-  withdrawnToken0: string;
-  withdrawnToken1: string;
-  collectedFeesToken0: string;
-  collectedFeesToken1: string;
-  uncollectedFeesToken0: string;
-  uncollectedFeesToken1: string;
+  amount0: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  amount1: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  uncollectedFees0: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  uncollectedFees1: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  depositedToken0?: string;
+  depositedToken1?: string;
+  withdrawnToken0?: string;
+  withdrawnToken1?: string;
+  collectedFeesToken0?: string;
+  collectedFeesToken1?: string;
+  uncollectedFeesToken0?: string;
+  uncollectedFeesToken1?: string;
   inRange: boolean;
-  createdAt: number;
-  updatedAt: number;
+  createdAt?: number;
+  updatedAt?: number;
+  lastUpdate: number;
+  timeInRangePercentage?: number;
+  liquidityValue?: number;
+  incrementRebalance?: () => void;
 }
 
 export interface GalaSwapToken {

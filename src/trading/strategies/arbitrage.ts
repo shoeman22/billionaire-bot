@@ -10,6 +10,7 @@ import { TRADING_CONSTANTS } from '../../config/constants';
 import { SwapExecutor } from '../execution/swap-executor';
 import { MarketAnalysis } from '../../monitoring/market-analysis';
 import { safeParseFloat } from '../../utils/safe-parse';
+import { ArbitrageStatus } from '../../types/galaswap';
 
 export interface ArbitrageOpportunity {
   tokenA: string;
@@ -301,7 +302,7 @@ export class ArbitrageStrategy {
     }
   }
 
-  getStatus(): any {
+  getStatus(): ArbitrageStatus {
     const successRate = this.executionStats.executedTrades > 0
       ? (this.executionStats.successfulTrades / this.executionStats.executedTrades) * 100
       : 0;
@@ -318,9 +319,21 @@ export class ArbitrageStrategy {
         totalProfit: this.executionStats.totalProfit.toFixed(2),
         avgProfitPerTrade: this.executionStats.successfulTrades > 0
           ? (this.executionStats.totalProfit / this.executionStats.successfulTrades).toFixed(2)
-          : '0'
+          : '0',
+        profitMargin: this.executionStats.executedTrades > 0
+          ? ((this.executionStats.totalProfit / this.executionStats.executedTrades) * 100).toFixed(2) + '%'
+          : '0%'
       },
-      lastScan: new Date().toISOString()
+      monitoring: {
+        lastUpdate: new Date().toISOString(),
+        activePairs: 0, // TODO: Implement active pairs tracking
+        avgOpportunitySize: '0'
+      },
+      risk: {
+        riskLevel: 'low',
+        riskFactors: [],
+        lastRiskAssessment: new Date().toISOString()
+      }
     };
   }
 }

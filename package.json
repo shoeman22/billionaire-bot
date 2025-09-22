@@ -55,7 +55,9 @@
     "dotenv": "^17.2.2",
     "elliptic": "^6.6.1",
     "js-sha3": "^0.9.3",
-    "json-stringify-deterministic": "^1.0.12"
+    "json-stringify-deterministic": "^1.0.12",
+    "reflect-metadata": "^0.2.2",
+    "typeorm": "^0.3.27"
   },
   "devDependencies": {
     "@types/bn.js": "^5.2.0",

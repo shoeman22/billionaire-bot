@@ -16,7 +16,7 @@ describe('FeeCalculator', () => {
   let mockLiquidityManager: jest.Mocked<LiquidityManager>;
 
   beforeEach(() => {
-    mockLiquidityManager = new MockLiquidityManager({} as any) as jest.Mocked<LiquidityManager>;
+    mockLiquidityManager = new MockLiquidityManager({} as any, 'eth|test-wallet-address') as jest.Mocked<LiquidityManager>;
 
     // Mock the gswap service
     (mockLiquidityManager as any).gswap = {
@@ -29,7 +29,7 @@ describe('FeeCalculator', () => {
     mockLiquidityManager.getPosition = jest.fn();
     mockLiquidityManager.getAllPositions = jest.fn();
 
-    feeCalculator = new FeeCalculator(mockLiquidityManager);
+    feeCalculator = new FeeCalculator();
   });
 
   afterEach(() => {

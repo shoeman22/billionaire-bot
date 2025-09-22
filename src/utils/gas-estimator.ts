@@ -4,7 +4,7 @@
  */
 
 import { logger } from './logger';
-import { TRADING_CONSTANTS } from '../config/constants';
+// Unused import removed: TRADING_CONSTANTS
 import BigNumber from 'bignumber.js';
 
 export interface GasEstimate {
@@ -76,6 +76,23 @@ export class GasEstimator {
 
   private static readonly GAS_PRICE_CACHE_TTL = 30000; // 30 seconds
 
+  // CRITICAL FIX: Circuit breaker for graceful degradation
+  private static circuitBreaker = {
+    failures: 0,
+    lastFailureTime: 0,
+    maxFailures: 3,
+    timeout: 300000, // 5 minutes
+    isOpen: false
+  };
+
+  // CRITICAL FIX: Conservative fallback for circuit breaker (emergency only)
+  private static readonly EMERGENCY_GAS_ESTIMATES = {
+    network: 'gala', // GalaChain network
+    baseGasPrice: 20, // Conservative estimate in gwei for GalaChain
+    lastUpdated: Date.now(),
+    source: 'emergency_fallback'
+  };
+
   /**
    * Estimate gas for a specific operation
    */
@@ -100,7 +117,7 @@ export class GasEstimator {
       // Calculate total cost in USD
       const totalCostUSD = GasEstimator.calculateGasCostUSD(gasLimit, gasPrice);
 
-      // Determine confidence based on data freshness and network conditions
+      // CRITICAL FIX: Determine confidence based on data freshness and circuit breaker state
       const confidence = GasEstimator.getEstimateConfidence(options);
 
       const estimate: GasEstimate = {
@@ -163,6 +180,7 @@ export class GasEstimator {
 
   /**
    * Get current gas price with network condition adjustments
+   * CRITICAL FIX: Implements circuit breaker with graceful degradation
    */
   private static async getCurrentGasPrice(options: GasEstimationOptions): Promise<number> {
     try {
@@ -172,24 +190,48 @@ export class GasEstimator {
         return GasEstimator.adjustGasPrice(cachedPrice, options);
       }
 
-      // In a real implementation, this would fetch from a gas price oracle
-      // For now, we'll use a simulated dynamic price based on network conditions
-      const baseGasPrice = await GasEstimator.fetchCurrentGasPrice();
+      // CRITICAL FIX: Check circuit breaker state
+      if (GasEstimator.isCircuitBreakerOpen()) {
+        logger.warn('⚡ Gas price circuit breaker is OPEN - using emergency fallback');
+        return GasEstimator.getEmergencyGasPrice(options);
+      }
 
-      // Cache the result
-      GasEstimator.gasPriceCache = {
-        price: baseGasPrice,
-        timestamp: Date.now(),
-        confidence: 'medium'
-      };
+      try {
+        // Attempt to fetch real gas price with circuit breaker protection
+        const baseGasPrice = await GasEstimator.fetchCurrentGasPrice();
 
-      return GasEstimator.adjustGasPrice(baseGasPrice, options);
+        // CRITICAL FIX: Reset circuit breaker on success
+        GasEstimator.resetCircuitBreaker();
+
+        // Cache the result
+        GasEstimator.gasPriceCache = {
+          price: baseGasPrice,
+          timestamp: Date.now(),
+          confidence: 'high' // Real data = high confidence
+        };
+
+        return GasEstimator.adjustGasPrice(baseGasPrice, options);
+
+      } catch (fetchError) {
+        // CRITICAL FIX: Increment circuit breaker failures
+        GasEstimator.recordCircuitBreakerFailure();
+
+        // If circuit breaker is now open, use emergency fallback
+        if (GasEstimator.isCircuitBreakerOpen()) {
+          logger.error('🔥 Gas price circuit breaker ACTIVATED - switching to emergency mode');
+          return GasEstimator.getEmergencyGasPrice(options);
+        }
+
+        // Still have failures left, throw error for retry
+        throw fetchError;
+      }
 
     } catch (error) {
-      logger.warn('Failed to fetch current gas price, using fallback', {
-        error: error instanceof Error ? error.message : String(error)
-      });
-      throw new Error('Current gas price fetch failed - no fallback available');
+      logger.error('Critical error in gas price fetching:', error);
+
+      // CRITICAL FIX: Last resort emergency pricing to prevent complete system halt
+      logger.warn('🚨 EMERGENCY: Using last-resort gas pricing to prevent system halt');
+      return GasEstimator.getEmergencyGasPrice(options);
     }
   }
 
@@ -226,12 +268,12 @@ export class GasEstimator {
         }
       }
 
-      // If all sources fail, THROW ERROR instead of fallback
-      throw new Error('All gas price sources failed - cannot proceed without reliable gas data');
+      // CRITICAL FIX: If all sources fail, throw specific error for circuit breaker handling
+      throw new Error('All gas price sources exhausted - triggering circuit breaker');
 
     } catch (error) {
       logger.error('Error fetching real gas price:', error);
-      throw new Error(`Gas price fetch failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(`Gas price sources failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
@@ -243,7 +285,7 @@ export class GasEstimator {
       // Note: This would need actual API key and network for production
       // For now, using a simulated response structure
       const response = await fetch('https://ethgasstation.info/api/ethgasAPI.json');
-      const data = await response.json();
+      const data = await response.json() as { fast: number };
 
       // ETH Gas Station returns in 10ths of gwei
       return Math.round(data.fast / 10);
@@ -262,7 +304,7 @@ export class GasEstimator {
       const response = await fetch(
         `https://api.etherscan.io/api?module=gastracker&action=gasoracle&apikey=${apiKey}`
       );
-      const data = await response.json();
+      const data = await response.json() as { status: string; result?: { ProposeGasPrice: string } };
 
       if (data.status === '1' && data.result?.ProposeGasPrice) {
         return parseInt(data.result.ProposeGasPrice);
@@ -364,39 +406,95 @@ export class GasEstimator {
 
   /**
    * Get confidence level for estimate
+   * CRITICAL FIX: Account for circuit breaker state in confidence calculation
    */
   private static getEstimateConfidence(options: GasEstimationOptions): 'high' | 'medium' | 'low' {
-    // High confidence for simple operations with current data
+    // CRITICAL FIX: Low confidence if circuit breaker is open (using emergency pricing)
+    if (GasEstimator.circuitBreaker.isOpen) {
+      return 'low';
+    }
+
+    // CRITICAL FIX: Low confidence if cache is from emergency fallback
+    if (GasEstimator.gasPriceCache?.confidence === 'low') {
+      return 'low';
+    }
+
+    // High confidence for simple operations with current real data
     if (options.complexity === 'simple' && GasEstimator.gasPriceCache) {
       const cacheAge = Date.now() - GasEstimator.gasPriceCache.timestamp;
-      if (cacheAge < 10000) { // Less than 10 seconds old
+      if (cacheAge < 10000 && GasEstimator.gasPriceCache.confidence === 'high') { // Less than 10 seconds old with real data
         return 'high';
       }
     }
 
-    // Medium confidence for most cases
-    if (options.complexity !== 'complex') {
+    // Medium confidence for most cases with real data
+    if (options.complexity !== 'complex' && !GasEstimator.circuitBreaker.isOpen) {
       return 'medium';
     }
 
-    // Low confidence for complex operations or stale data
+    // Low confidence for complex operations, stale data, or degraded conditions
     return 'low';
   }
 
   /**
-   * Get fallback gas price when fetching fails - REMOVED
-   * CRITICAL FIX: No fallback pricing - throw error if we don't know real gas costs
+   * CRITICAL FIX: Circuit breaker management methods
    */
-  private static getFallbackGasPrice(options: GasEstimationOptions): number {
-    throw new Error('Gas price fetch failed - refusing to use fallback pricing for production safety');
+  private static isCircuitBreakerOpen(): boolean {
+    const now = Date.now();
+
+    // Check if timeout has passed and we should try again
+    if (GasEstimator.circuitBreaker.isOpen &&
+        (now - GasEstimator.circuitBreaker.lastFailureTime) > GasEstimator.circuitBreaker.timeout) {
+      logger.info('🔄 Gas price circuit breaker timeout expired - attempting reset');
+      GasEstimator.circuitBreaker.isOpen = false;
+      GasEstimator.circuitBreaker.failures = 0;
+      return false;
+    }
+
+    return GasEstimator.circuitBreaker.isOpen;
+  }
+
+  private static recordCircuitBreakerFailure(): void {
+    GasEstimator.circuitBreaker.failures++;
+    GasEstimator.circuitBreaker.lastFailureTime = Date.now();
+
+    if (GasEstimator.circuitBreaker.failures >= GasEstimator.circuitBreaker.maxFailures) {
+      GasEstimator.circuitBreaker.isOpen = true;
+      logger.error(`⚡ Gas price circuit breaker OPENED after ${GasEstimator.circuitBreaker.failures} failures`);
+    }
+  }
+
+  private static resetCircuitBreaker(): void {
+    if (GasEstimator.circuitBreaker.failures > 0 || GasEstimator.circuitBreaker.isOpen) {
+      logger.info('✅ Gas price circuit breaker RESET - real data source restored');
+    }
+    GasEstimator.circuitBreaker.failures = 0;
+    GasEstimator.circuitBreaker.isOpen = false;
+    GasEstimator.circuitBreaker.lastFailureTime = 0;
   }
 
   /**
-   * Get fallback gas estimate when estimation fails - REMOVED
-   * CRITICAL FIX: No fallback estimates - fail fast if we can't get real data
+   * CRITICAL FIX: Emergency gas pricing for circuit breaker fallback
+   * Conservative estimates to prevent system halt while marking low confidence
    */
-  private static getFallbackEstimate(options: GasEstimationOptions): GasEstimate {
-    throw new Error(`Gas estimation failed for ${options.operation} - refusing to provide fallback estimate`);
+  private static getEmergencyGasPrice(options: GasEstimationOptions): number {
+    logger.warn('🚨 Using EMERGENCY gas pricing - estimates may be inaccurate');
+
+    // Use conservative base price adjusted for network conditions
+    let emergencyPrice = GasEstimator.EMERGENCY_GAS_ESTIMATES.baseGasPrice;
+
+    // Apply urgency and congestion multipliers (conservative approach)
+    emergencyPrice *= GasEstimator.GAS_PRICE_MULTIPLIERS.urgency[options.urgency];
+
+    // Use higher multiplier for emergency conditions to ensure execution
+    if (options.networkConditions?.congestion) {
+      emergencyPrice *= GasEstimator.GAS_PRICE_MULTIPLIERS.congestion[options.networkConditions.congestion];
+    }
+
+    // Add 20% buffer for emergency conditions
+    emergencyPrice *= 1.2;
+
+    return Math.round(emergencyPrice);
   }
 
   /**

@@ -7,12 +7,13 @@
 import { GSwapWrapper } from './gswap-wrapper';
 import { logger } from '../utils/logger';
 import { TRADING_CONSTANTS } from '../config/constants';
-import { safeParseFloat } from '../utils/safe-parse';
+// Unused import removed: safeParseFloat
 import BigNumber from 'bignumber.js';
 import { randomBytes } from 'crypto';
 import { promisify } from 'util';
 import { InputValidator } from '../utils/validation';
 import { RetryHelper } from '../utils/retry-helper';
+import { BlockchainPosition } from '../types/galaswap';
 import { GasEstimator, GasEstimationOptions } from '../utils/gas-estimator';
 
 const randomBytesAsync = promisify(randomBytes);
@@ -73,6 +74,12 @@ export interface PositionAnalytics {
   apr: number;
   utilization: number;
   timeInRange: number;
+}
+
+interface SDKPositionSizeResult {
+  amount0: string;
+  amount1: string;
+  liquidity: string;
 }
 
 export class LiquidityManager {
@@ -478,28 +485,55 @@ export class LiquidityManager {
       if (result?.positions) {
         // Update local position cache with blockchain data
         for (const blockchainPosition of result.positions) {
-          // CRITICAL FIX: Use blockchain position ID, not generate new one
-          const positionId = blockchainPosition.id || blockchainPosition.positionId ||
-            `${blockchainPosition.token0}-${blockchainPosition.token1}-${blockchainPosition.fee}-${blockchainPosition.tickLower}-${blockchainPosition.tickUpper}`;
+          // CRITICAL FIX: Implement deterministic position ID generation
+          const positionId = this.generateDeterministicPositionId(blockchainPosition);
 
-          // Look for existing position by blockchain ID or create mapping
-          let localPosition = this.positions.get(positionId);
+          // Check for ID collision with existing positions
+          const existingPosition = this.positions.get(positionId);
+          if (existingPosition) {
+            // Verify this is the same position (not a collision)
+            if (!this.isSamePosition(existingPosition, blockchainPosition)) {
+              logger.error('CRITICAL: Position ID collision detected!', {
+                positionId,
+                existing: {
+                  token0: existingPosition.token0,
+                  token1: existingPosition.token1,
+                  fee: existingPosition.fee,
+                  tickLower: existingPosition.tickLower,
+                  tickUpper: existingPosition.tickUpper
+                },
+                blockchain: {
+                  token0: blockchainPosition.token0,
+                  token1: blockchainPosition.token1,
+                  fee: blockchainPosition.fee,
+                  tickLower: blockchainPosition.tickLower,
+                  tickUpper: blockchainPosition.tickUpper
+                }
+              });
 
-          // If not found by ID, try to find by token pair and range
-          if (!localPosition) {
-            for (const [localId, position] of this.positions.entries()) {
-              if (position.token0 === blockchainPosition.token0 &&
-                  position.token1 === blockchainPosition.token1 &&
-                  position.fee === blockchainPosition.fee &&
-                  position.tickLower === blockchainPosition.tickLower &&
-                  position.tickUpper === blockchainPosition.tickUpper) {
-                localPosition = position;
-                // Update the position with correct blockchain ID
-                this.positions.delete(localId);
-                localPosition.id = positionId;
-                break;
+              // Generate collision-safe ID
+              const safePositionId = this.generateCollisionSafeId(blockchainPosition);
+              logger.warn(`Using collision-safe ID: ${safePositionId}`);
+
+              // Update local reference
+              let localPosition = this.positions.get(safePositionId);
+              if (!localPosition) {
+                localPosition = this.createLocalPositionFromBlockchain(blockchainPosition, safePositionId);
+                this.positions.set(safePositionId, localPosition);
+              } else {
+                this.updateLocalPositionFromBlockchain(localPosition, blockchainPosition);
               }
+              continue;
             }
+          }
+
+          // Normal flow: create or update position with deterministic ID
+          let localPosition = this.positions.get(positionId);
+          if (!localPosition) {
+            localPosition = this.createLocalPositionFromBlockchain(blockchainPosition, positionId);
+            this.positions.set(positionId, localPosition);
+          } else {
+            this.updateLocalPositionFromBlockchain(localPosition, blockchainPosition);
           }
 
           if (localPosition) {
@@ -626,10 +660,11 @@ export class LiquidityManager {
         otherTokenDecimals
       );
 
+      const positionResult = result as SDKPositionSizeResult;
       return {
-        amount0: result.amount0 || '0',
-        amount1: result.amount1 || '0',
-        liquidity: result.liquidity || '0'
+        amount0: positionResult.amount0 || '0',
+        amount1: positionResult.amount1 || '0',
+        liquidity: positionResult.liquidity || '0'
       };
 
     } catch (error) {
@@ -717,7 +752,7 @@ export class LiquidityManager {
   /**
    * Generate unique position ID
    */
-  private async generatePositionId(token0: string, token1: string, fee: number): Promise<string> {
+  private async generatePositionId(_token0: string, _token1: string, _fee: number): Promise<string> {
     this.instanceCounter++;
     // Use async crypto for non-blocking randomness
     const randomBytesBuffer = await randomBytesAsync(4);
@@ -798,6 +833,106 @@ export class LiquidityManager {
       totalLiquidityUSD: 0, // Would need USD conversion
       totalFeesCollected: 0, // Would need to track historically
       avgAPR: 0 // Would need time-weighted calculations
+    };
+  }
+
+  // ============================================
+  // CRITICAL FIX: Position ID Management Methods
+  // ============================================
+
+  /**
+   * Generate deterministic position ID from blockchain position data
+   * CRITICAL FIX: Prevents ID collisions with consistent deterministic generation
+   */
+  private generateDeterministicPositionId(position: BlockchainPosition): string {
+    // Use blockchain ID if available (highest priority)
+    if (position.id) {
+      return position.id.toString();
+    }
+    if (position.positionId) {
+      return position.positionId.toString();
+    }
+
+    // Generate deterministic ID from position parameters
+    const token0 = (position.token0 || '').toString();
+    const token1 = (position.token1 || '').toString();
+    const fee = (position.fee || 0).toString();
+    const tickLower = (position.tickLower || 0).toString();
+    const tickUpper = (position.tickUpper || 0).toString();
+
+    // Create deterministic hash-like ID
+    const rawId = `${token0}-${token1}-${fee}-${tickLower}-${tickUpper}`;
+
+    // Add wallet address for uniqueness across users
+    const walletSuffix = this.walletAddress.substring(4, 12); // Use part of wallet address
+    return `pos_${rawId}_${walletSuffix}`;
+  }
+
+  /**
+   * Generate collision-safe ID when deterministic ID conflicts
+   */
+  private generateCollisionSafeId(position: any): string { // eslint-disable-line @typescript-eslint/no-explicit-any
+    const baseId = this.generateDeterministicPositionId(position);
+    const timestamp = Date.now().toString(36);
+    const random = Math.random().toString(36).substring(2, 6);
+    return `${baseId}_${timestamp}_${random}`;
+  }
+
+  /**
+   * Check if two positions represent the same liquidity position
+   */
+  private isSamePosition(localPosition: LiquidityPosition, blockchainPosition: any): boolean { // eslint-disable-line @typescript-eslint/no-explicit-any
+    return localPosition.token0 === blockchainPosition.token0 &&
+           localPosition.token1 === blockchainPosition.token1 &&
+           localPosition.fee === blockchainPosition.fee &&
+           localPosition.tickLower === blockchainPosition.tickLower &&
+           localPosition.tickUpper === blockchainPosition.tickUpper;
+  }
+
+  /**
+   * Create local position object from blockchain data
+   */
+  private createLocalPositionFromBlockchain(blockchainPosition: any, positionId: string): LiquidityPosition { // eslint-disable-line @typescript-eslint/no-explicit-any
+    return {
+      id: positionId,
+      token0: blockchainPosition.token0 || '',
+      token1: blockchainPosition.token1 || '',
+      fee: blockchainPosition.fee || 3000,
+      tickLower: blockchainPosition.tickLower || 0,
+      tickUpper: blockchainPosition.tickUpper || 0,
+      minPrice: 0, // Will be calculated from ticks
+      maxPrice: 0, // Will be calculated from ticks
+      liquidity: blockchainPosition.liquidity || '0',
+      amount0: blockchainPosition.amount0 || '0',
+      amount1: blockchainPosition.amount1 || '0',
+      uncollectedFees0: blockchainPosition.fees0 || '0',
+      uncollectedFees1: blockchainPosition.fees1 || '0',
+      lastUpdate: Date.now(),
+      inRange: true, // Will be calculated
+      createdAt: Date.now()
+    };
+  }
+
+  /**
+   * Update local position with fresh blockchain data
+   */
+  private updateLocalPositionFromBlockchain(localPosition: LiquidityPosition, blockchainPosition: any): void { // eslint-disable-line @typescript-eslint/no-explicit-any
+    localPosition.liquidity = blockchainPosition.liquidity || localPosition.liquidity;
+    localPosition.amount0 = blockchainPosition.amount0 || localPosition.amount0;
+    localPosition.amount1 = blockchainPosition.amount1 || localPosition.amount1;
+    localPosition.uncollectedFees0 = blockchainPosition.fees0 || localPosition.uncollectedFees0;
+    localPosition.uncollectedFees1 = blockchainPosition.fees1 || localPosition.uncollectedFees1;
+    localPosition.lastUpdate = Date.now();
+  }
+
+  /**
+   * Get status - required for TradingEngine compatibility
+   */
+  getStatus(): any { // eslint-disable-line @typescript-eslint/no-explicit-any
+    return {
+      totalPositions: this.positions.size,
+      syncedAt: Date.now(),
+      isInitialized: this.positions.size > 0
     };
   }
 }

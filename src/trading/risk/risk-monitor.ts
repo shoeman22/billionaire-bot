@@ -9,6 +9,7 @@ import { logger } from '../../utils/logger';
 import { AlertSystem } from '../../monitoring/alerts';
 import { safeParseFloat } from '../../utils/safe-parse';
 import { calculatePriceFromSqrtPriceX96, getPoolPrice } from '../../utils/price-math';
+import { TokenClassKey, BlockchainPosition } from '../../types/galaswap';
 
 export interface RiskConfig {
   maxDailyLossPercent: number;
@@ -58,7 +59,14 @@ export interface MarketAnomalyAlert {
   type: 'price_spike' | 'volume_surge' | 'liquidity_drop' | 'volatility_spike';
   severity: 'low' | 'medium' | 'high' | 'critical';
   token?: string;
-  data: any;
+  data: {
+    currentValue: number;
+    previousValue: number;
+    percentChange: number;
+    threshold: number;
+    timeframe: string;
+    [key: string]: unknown;
+  };
   recommendation: string;
 }
 
@@ -454,7 +462,7 @@ export class RiskMonitor {
   /**
    * Extract token symbol from token class key
    */
-  private extractTokenSymbol(tokenClassKey: any): string {
+  private extractTokenSymbol(tokenClassKey: TokenClassKey | string): string {
     if (!tokenClassKey) return '';
 
     if (typeof tokenClassKey === 'string') {
@@ -471,12 +479,8 @@ export class RiskMonitor {
   /**
    * Public method to calculate risk metrics from a portfolio object
    */
-  calculateRiskMetrics(portfolio: any): RiskMetrics {
+  calculateRiskMetrics(portfolio: { positions: BlockchainPosition[]; totalValue: number; balances: Array<{ token: string; amount: number; valueUSD?: number }> }): RiskMetrics {
     // Convert portfolio object to position snapshots if needed
-    if (portfolio.riskMetrics) {
-      // Portfolio already has risk metrics, return them
-      return portfolio.riskMetrics;
-    }
 
     // Use real position data from portfolio - NO MOCK POSITIONS ALLOWED
     if (!portfolio.positions || portfolio.positions.length === 0) {
@@ -495,11 +499,11 @@ export class RiskMonitor {
     }
 
     // Convert portfolio positions to PositionSnapshot format if needed
-    const realPositions: PositionSnapshot[] = portfolio.positions.map((pos: any) => ({
+    const realPositions: PositionSnapshot[] = portfolio.positions.map((pos: BlockchainPosition) => ({
       token: pos.token || pos.symbol || 'UNKNOWN',
       amount: pos.amount || 0,
       valueUSD: pos.valueUSD || pos.value || 0,
-      percentOfPortfolio: pos.percentOfPortfolio || (pos.valueUSD / portfolio.totalValue),
+      percentOfPortfolio: pos.percentOfPortfolio || ((pos.valueUSD || 0) / portfolio.totalValue),
       unrealizedPnL: pos.unrealizedPnL || 0,
       openTime: pos.openTime || Date.now(),
       age: pos.age || 0
@@ -692,9 +696,10 @@ export class RiskMonitor {
             type: 'volatility_spike',
             severity: valueChange > 0.25 ? 'critical' : valueChange > 0.15 ? 'high' : 'medium',
             data: {
-              oldValue: oldSnapshot.totalValue,
-              newValue: currentSnapshot.totalValue,
-              changePercent: valueChange * 100,
+              currentValue: currentSnapshot.totalValue,
+              previousValue: oldSnapshot.totalValue,
+              percentChange: valueChange * 100,
+              threshold: 10,
               timeframe: '5 minutes'
             },
             recommendation: `Portfolio value changed ${(valueChange * 100).toFixed(2)}% rapidly - monitor closely`
@@ -710,8 +715,11 @@ export class RiskMonitor {
           severity: currentSnapshot.riskMetrics.volatilityScore > normalVolatility * 10 ? 'critical' :
                    currentSnapshot.riskMetrics.volatilityScore > normalVolatility * 6 ? 'high' : 'medium',
           data: {
-            currentVolatility: currentSnapshot.riskMetrics.volatilityScore,
-            normalVolatility,
+            currentValue: currentSnapshot.riskMetrics.volatilityScore,
+            previousValue: normalVolatility,
+            percentChange: ((currentSnapshot.riskMetrics.volatilityScore - normalVolatility) / normalVolatility) * 100,
+            threshold: normalVolatility * 3,
+            timeframe: 'current',
             multiple: currentSnapshot.riskMetrics.volatilityScore / normalVolatility
           },
           recommendation: 'High market volatility detected - reduce position sizes'
@@ -724,6 +732,11 @@ export class RiskMonitor {
           type: 'liquidity_drop',
           severity: currentSnapshot.riskMetrics.maxConcentration > 0.8 ? 'critical' : 'high',
           data: {
+            currentValue: currentSnapshot.riskMetrics.maxConcentration,
+            previousValue: 0.3, // Previous acceptable concentration
+            percentChange: ((currentSnapshot.riskMetrics.maxConcentration - 0.3) / 0.3) * 100,
+            threshold: 0.5,
+            timeframe: 'current',
             concentration: currentSnapshot.riskMetrics.maxConcentration,
             riskScore: currentSnapshot.riskMetrics.riskScore
           },
@@ -737,6 +750,11 @@ export class RiskMonitor {
           type: 'price_spike',
           severity: currentSnapshot.riskMetrics.drawdown > 0.25 ? 'critical' : 'high',
           data: {
+            currentValue: currentSnapshot.riskMetrics.drawdown,
+            previousValue: 0.05, // Previous acceptable drawdown
+            percentChange: ((currentSnapshot.riskMetrics.drawdown - 0.05) / 0.05) * 100,
+            threshold: 0.15,
+            timeframe: 'current',
             drawdown: currentSnapshot.riskMetrics.drawdown,
             portfolioValue: currentSnapshot.totalValue
           },
@@ -750,6 +768,11 @@ export class RiskMonitor {
           type: 'liquidity_drop',
           severity: currentSnapshot.riskMetrics.liquidityScore < 10 ? 'critical' : 'medium',
           data: {
+            currentValue: currentSnapshot.riskMetrics.liquidityScore,
+            previousValue: 60, // Previous acceptable liquidity score
+            percentChange: ((currentSnapshot.riskMetrics.liquidityScore - 60) / 60) * 100,
+            threshold: 30,
+            timeframe: 'current',
             liquidityScore: currentSnapshot.riskMetrics.liquidityScore
           },
           recommendation: 'Low liquidity conditions detected - avoid large trades'
@@ -786,7 +809,12 @@ export class RiskMonitor {
     tokenOut: string;
     amountIn: number;
     currentPortfolio: PortfolioSnapshot;
-    marketConditions: any;
+    marketConditions: {
+      volatility: number;
+      liquidity: number;
+      priceStability: number;
+      [key: string]: unknown;
+    };
   }): Promise<{
     approved: boolean;
     reason?: string;

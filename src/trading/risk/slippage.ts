@@ -27,7 +27,7 @@ export interface TradeParameters {
 }
 
 export class SlippageProtection {
-  private config: TradingConfig;
+  public config: TradingConfig;
   private readonly MAX_SLIPPAGE = 0.05; // 5% absolute maximum
   private readonly HIGH_IMPACT_THRESHOLD = 0.02; // 2% price impact is high
 
@@ -134,7 +134,7 @@ export class SlippageProtection {
     priceImpact: number,
     tradeParams: TradeParameters
   ): number {
-    let baseSlippage = this.config.defaultSlippageTolerance;
+    let baseSlippage = this.config.defaultSlippageTolerance ?? 0.005; // Default 0.5% if not set
 
     // Adjust based on market condition
     switch (marketCondition) {
@@ -271,7 +271,7 @@ export class SlippageProtection {
     highImpactThreshold: number;
   } {
     return {
-      defaultTolerance: this.config.defaultSlippageTolerance,
+      defaultTolerance: this.config.defaultSlippageTolerance ?? 0.005,
       maxSlippage: this.config.maxSlippage || this.MAX_SLIPPAGE,
       highImpactThreshold: this.HIGH_IMPACT_THRESHOLD,
     };
@@ -615,38 +615,44 @@ export class SlippageProtection {
    * Front-running protection assessment
    */
   assessFrontRunningRisk(tradeParams: TradeParameters): {
-    riskLevel: 'low' | 'medium' | 'high';
-    protectionRecommendations: string[];
-    delayRecommendation?: number; // milliseconds
+    riskLevel: 'low' | 'medium' | 'high' | 'critical';
+    probability: number;
+    protectionMethods: string[];
+    timeBasedRisk?: number;
   } {
     const amountIn = safeParseFloat(tradeParams.amountIn, 0);
     const poolLiquidity = safeParseFloat(tradeParams.poolLiquidity, 0);
     const impactRatio = poolLiquidity > 0 ? amountIn / poolLiquidity : 0;
 
-    let riskLevel: 'low' | 'medium' | 'high';
-    const protectionRecommendations: string[] = [];
-    let delayRecommendation: number | undefined;
+    let riskLevel: 'low' | 'medium' | 'high' | 'critical';
+    const protectionMethods: string[] = [];
+    let timeBasedRisk: number | undefined;
+    let probability: number;
 
     if (impactRatio < 0.01) { // Small trade
       riskLevel = 'low';
-      protectionRecommendations.push('Standard transaction settings recommended');
+      probability = 0.1;
+      protectionMethods.push('Standard transaction settings recommended');
     } else if (impactRatio < 0.05) { // Medium trade
       riskLevel = 'medium';
-      protectionRecommendations.push('Consider using private mempool or MEV protection');
-      protectionRecommendations.push('Use tighter slippage tolerance to reduce MEV opportunity');
-      delayRecommendation = Math.random() * 3000 + 1000; // 1-4 second random delay
+      probability = 0.3;
+      protectionMethods.push('Consider using private mempool or MEV protection');
+      protectionMethods.push('Use tighter slippage tolerance to reduce MEV opportunity');
+      timeBasedRisk = Math.random() * 3000 + 1000; // 1-4 second random delay
     } else { // Large trade
       riskLevel = 'high';
-      protectionRecommendations.push('STRONGLY recommend splitting trade to reduce MEV risk');
-      protectionRecommendations.push('Use private mempool and MEV protection services');
-      protectionRecommendations.push('Consider time-weighted execution');
-      delayRecommendation = Math.random() * 5000 + 2000; // 2-7 second random delay
+      probability = 0.7;
+      protectionMethods.push('STRONGLY recommend splitting trade to reduce MEV risk');
+      protectionMethods.push('Use private mempool and MEV protection services');
+      protectionMethods.push('Consider time-weighted execution');
+      timeBasedRisk = Math.random() * 5000 + 2000; // 2-7 second random delay
     }
 
     return {
       riskLevel,
-      protectionRecommendations,
-      delayRecommendation
+      probability,
+      protectionMethods,
+      timeBasedRisk
     };
   }
 
@@ -659,10 +665,10 @@ export class SlippageProtection {
     maxAcceptableImpact: number = 0.02
   ): {
     shouldSplit: boolean;
-    recommendedChunks: number;
+    optimalChunks: number;
     chunkSize: number;
-    estimatedTotalImpact: number;
-    timeEstimate: number; // minutes
+    timingInterval: number;
+    estimatedSlippageReduction: number;
   } {
     const poolLiquidity = safeParseFloat(tradeParams.poolLiquidity, 0);
 
@@ -672,10 +678,10 @@ export class SlippageProtection {
     if (totalAmount <= maxChunkSize) {
       return {
         shouldSplit: false,
-        recommendedChunks: 1,
+        optimalChunks: 1,
         chunkSize: totalAmount,
-        estimatedTotalImpact: this.calculatePriceImpact({ ...tradeParams, amountIn: totalAmount.toString() }),
-        timeEstimate: 0.1 // ~6 seconds for single trade
+        timingInterval: 6, // seconds for single trade
+        estimatedSlippageReduction: 0 // no reduction needed
       };
     }
 
@@ -692,10 +698,10 @@ export class SlippageProtection {
 
     return {
       shouldSplit: true,
-      recommendedChunks,
+      optimalChunks: recommendedChunks,
       chunkSize,
-      estimatedTotalImpact,
-      timeEstimate
+      timingInterval: 30, // seconds between chunks
+      estimatedSlippageReduction: Math.max(0, estimatedTotalImpact * 0.3) // 30% reduction estimate
     };
   }
 
@@ -712,8 +718,19 @@ export class SlippageProtection {
     finalSlippageTolerance: number;
     warnings: string[];
     requirements: string[];
-    frontRunningRisk: any;
-    splittingRecommendation: any;
+    frontRunningRisk: {
+      riskLevel: 'low' | 'medium' | 'high' | 'critical';
+      probability: number;
+      protectionMethods: string[];
+      timeBasedRisk?: number;
+    };
+    splittingRecommendation: {
+      shouldSplit: boolean;
+      optimalChunks: number;
+      chunkSize: number;
+      timingInterval: number;
+      estimatedSlippageReduction: number;
+    };
   } {
     const warnings: string[] = [];
     const requirements: string[] = [];
@@ -726,7 +743,7 @@ export class SlippageProtection {
 
     // Dynamic slippage adjustment
     const dynamicSlippage = this.calculateDynamicSlippage(
-      this.config.defaultSlippageTolerance,
+      this.config.defaultSlippageTolerance ?? 0.005,
       marketConditions
     );
 
@@ -747,14 +764,14 @@ export class SlippageProtection {
       warnings.push('High MEV/front-running risk');
     }
     if (splittingRecommendation.shouldSplit) {
-      warnings.push(`Large trade detected - recommend splitting into ${splittingRecommendation.recommendedChunks} chunks`);
+      warnings.push(`Large trade detected - recommend splitting into ${splittingRecommendation.optimalChunks} chunks`);
     }
 
     // Collect requirements
-    if (dynamicSlippage.adjustedSlippage > this.config.defaultSlippageTolerance * 2) {
+    if (dynamicSlippage.adjustedSlippage > (this.config.defaultSlippageTolerance ?? 0.005) * 2) {
       requirements.push('Increased slippage tolerance required due to market conditions');
     }
-    frontRunningRisk.protectionRecommendations.forEach(rec => requirements.push(rec));
+    frontRunningRisk.protectionMethods.forEach((rec: string) => requirements.push(rec));
 
     // Final approval decision
     const finalSlippageTolerance = Math.max(

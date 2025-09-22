@@ -5,6 +5,17 @@
 
 import { logger } from './logger';
 
+interface ErrorWithStatus extends Error {
+  status?: number;
+  statusCode?: number;
+}
+
+interface ErrorWithCode extends Error {
+  code?: string;
+}
+
+type RetryableError = ErrorWithStatus & ErrorWithCode;
+
 export interface RetryOptions {
   maxRetries: number;
   baseDelay: number;
@@ -187,8 +198,9 @@ export class RetryHelper {
     );
 
     // Check for HTTP status codes (if error has status property)
-    const httpStatus = (error as any).status || (error as any).statusCode;
-    const hasRetryableStatus = httpStatus && retryableHttpCodes.includes(httpStatus);
+    const httpError = error as RetryableError;
+    const httpStatus = httpError.status || httpError.statusCode;
+    const hasRetryableStatus = Boolean(httpStatus && retryableHttpCodes.includes(httpStatus));
 
     // Non-retryable errors (business logic, validation, authentication)
     const nonRetryablePatterns = [
@@ -274,8 +286,8 @@ export class RetryHelper {
   /**
    * Circuit breaker pattern for critical operations
    */
-  static createCircuitBreaker(
-    operation: () => Promise<any>,
+  static createCircuitBreaker<T>(
+    operation: () => Promise<T>,
     options: {
       failureThreshold: number;
       resetTimeout: number;
@@ -286,7 +298,7 @@ export class RetryHelper {
     let lastFailureTime = 0;
     let state: 'CLOSED' | 'OPEN' | 'HALF_OPEN' = 'CLOSED';
 
-    return async (): Promise<any> => {
+    return async (): Promise<T> => {
       const now = Date.now();
 
       // Reset failure count if monitor window has passed

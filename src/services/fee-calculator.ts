@@ -7,9 +7,10 @@
 import { Position } from '../entities/Position';
 import { getPositionRepository } from '../config/database';
 import { logger } from '../utils/logger';
-import { TRADING_CONSTANTS, STRATEGY_CONSTANTS } from '../config/constants';
-import { safeParseFloat } from '../utils/safe-parse';
-import BigNumber from 'bignumber.js';
+// Unused imports removed
+// import { TRADING_CONSTANTS, STRATEGY_CONSTANTS } from '../config/constants';
+// import { safeParseFloat } from '../utils/safe-parse';
+// import BigNumber from 'bignumber.js';
 import { Repository } from 'typeorm';
 
 export interface FeeSnapshot {
@@ -681,5 +682,21 @@ export class FeeCalculator {
       oldestSnapshot: oldestTimestamp,
       newestSnapshot: newestTimestamp
     };
+  }
+
+  /**
+   * Calculate accrued fees - required for TradingEngine compatibility
+   */
+  async calculateAccruedFees(): Promise<number> {
+    const metrics = await this.calculateGlobalFeeMetrics();
+    return metrics.totalFeesUncollectedUSD;
+  }
+
+  /**
+   * Get total fees collected - required for TradingEngine compatibility
+   */
+  async getTotalFeesCollected(): Promise<number> {
+    const metrics = await this.calculateGlobalFeeMetrics();
+    return metrics.totalFeesEarnedUSD;
   }
 }

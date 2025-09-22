@@ -15,12 +15,13 @@ export interface BotConfig {
 
 export interface TradingConfig {
   maxPositionSize: number;
-  defaultSlippageTolerance: number;
-  minProfitThreshold: number;
+  defaultSlippageTolerance?: number; // Optional for test compatibility
+  minProfitThreshold?: number; // Optional for test compatibility
   maxDailyVolume?: number;
   maxSlippage?: number;
   maxPortfolioConcentration?: number;
   emergencyStopLoss?: number;
+  riskLevel?: 'low' | 'medium' | 'high';
   wallet?: {
     address?: string;
   };
@@ -35,10 +36,13 @@ export interface TradingConfig {
 export interface ApiConfig {
   baseUrl: string;
   wsUrl: string;
+  maxRetries?: number;
+  timeout?: number; // API request timeout in milliseconds
 }
 
 export interface WalletConfig {
   address: string;
+  maxPositionSize?: number;
   // Private key removed for security - use SignerService instead
 }
 

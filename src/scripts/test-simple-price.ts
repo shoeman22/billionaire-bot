@@ -11,7 +11,7 @@ import { validateEnvironment } from '../config/environment';
 
 // Load environment variables
 config();
-import { GSwap, PrivateKeySigner } from '../../services/gswap-wrapper';
+import { GSwap, PrivateKeySigner } from '../services/gswap-wrapper';
 
 async function testSimplePrice(): Promise<void> {
   logger.info('🧪 Testing Simple Price API Calls...');

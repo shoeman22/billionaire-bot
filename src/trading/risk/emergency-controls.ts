@@ -233,60 +233,28 @@ export class EmergencyControls {
     severity: 'low' | 'medium' | 'high' | 'critical';
   }> {
     try {
-      // Check portfolio loss threshold
-      const portfolioLossPercent = portfolioData.baselineValue > 0 ?
-        Math.abs(portfolioData.totalPnL) / portfolioData.baselineValue : 0;
-
-      if (portfolioLossPercent >= this.triggers.portfolioLossPercent) {
-        return {
-          shouldTrigger: true,
-          emergencyType: 'PORTFOLIO_LOSS',
-          reason: `Portfolio loss ${(portfolioLossPercent * 100).toFixed(2)}% exceeds emergency threshold ${(this.triggers.portfolioLossPercent * 100).toFixed(2)}%`,
-          severity: 'critical'
-        };
+      // Check portfolio loss conditions
+      const portfolioCheck = this.checkPortfolioLossConditions(portfolioData);
+      if (portfolioCheck.shouldTrigger) {
+        return portfolioCheck;
       }
 
-      // Check daily loss threshold
-      const dailyLossPercent = portfolioData.dailyStartValue > 0 ?
-        Math.abs(portfolioData.dailyPnL) / portfolioData.dailyStartValue : 0;
-
-      if (dailyLossPercent >= this.triggers.dailyLossPercent) {
-        return {
-          shouldTrigger: true,
-          emergencyType: 'DAILY_LOSS',
-          reason: `Daily loss ${(dailyLossPercent * 100).toFixed(2)}% exceeds emergency threshold ${(this.triggers.dailyLossPercent * 100).toFixed(2)}%`,
-          severity: 'critical'
-        };
+      // Check daily loss conditions
+      const dailyCheck = this.checkDailyLossConditions(portfolioData);
+      if (dailyCheck.shouldTrigger) {
+        return dailyCheck;
       }
 
-      // Check volatility spike
-      if (portfolioData.volatility >= this.triggers.volatilityThreshold) {
-        return {
-          shouldTrigger: true,
-          emergencyType: 'VOLATILITY_SPIKE',
-          reason: `Volatility ${(portfolioData.volatility * 100).toFixed(2)}% exceeds emergency threshold ${(this.triggers.volatilityThreshold * 100).toFixed(2)}%`,
-          severity: 'high'
-        };
+      // Check volatility conditions
+      const volatilityCheck = this.checkVolatilityConditions(portfolioData);
+      if (volatilityCheck.shouldTrigger) {
+        return volatilityCheck;
       }
 
-      // Check system error accumulation
-      if (this.systemErrorCount >= this.triggers.systemErrorCount) {
-        return {
-          shouldTrigger: true,
-          emergencyType: 'SYSTEM_ERROR',
-          reason: `System error count ${this.systemErrorCount} exceeds threshold ${this.triggers.systemErrorCount}`,
-          severity: 'high'
-        };
-      }
-
-      // Check API failure accumulation
-      if (this.apiFailureCount >= this.triggers.apiFailureCount) {
-        return {
-          shouldTrigger: true,
-          emergencyType: 'API_FAILURE',
-          reason: `API failure count ${this.apiFailureCount} exceeds threshold ${this.triggers.apiFailureCount}`,
-          severity: 'high'
-        };
+      // Check system health conditions
+      const systemCheck = this.checkSystemHealthConditions();
+      if (systemCheck.shouldTrigger) {
+        return systemCheck;
       }
 
       // No emergency conditions met
@@ -304,6 +272,127 @@ export class EmergencyControls {
         severity: 'critical'
       };
     }
+  }
+
+  /**
+   * Check portfolio loss emergency conditions
+   */
+  private checkPortfolioLossConditions(portfolioData: {
+    totalPnL: number;
+    baselineValue: number;
+  }): {
+    shouldTrigger: boolean;
+    emergencyType?: EmergencyType;
+    reason?: string;
+    severity: 'low' | 'medium' | 'high' | 'critical';
+  } {
+    const portfolioLossPercent = portfolioData.baselineValue > 0 ?
+      Math.abs(portfolioData.totalPnL) / portfolioData.baselineValue : 0;
+
+    if (portfolioLossPercent >= this.triggers.portfolioLossPercent) {
+      return {
+        shouldTrigger: true,
+        emergencyType: 'PORTFOLIO_LOSS',
+        reason: `Portfolio loss ${(portfolioLossPercent * 100).toFixed(2)}% exceeds emergency threshold ${(this.triggers.portfolioLossPercent * 100).toFixed(2)}%`,
+        severity: 'critical'
+      };
+    }
+
+    return {
+      shouldTrigger: false,
+      severity: 'low'
+    };
+  }
+
+  /**
+   * Check daily loss emergency conditions
+   */
+  private checkDailyLossConditions(portfolioData: {
+    dailyPnL: number;
+    dailyStartValue: number;
+  }): {
+    shouldTrigger: boolean;
+    emergencyType?: EmergencyType;
+    reason?: string;
+    severity: 'low' | 'medium' | 'high' | 'critical';
+  } {
+    const dailyLossPercent = portfolioData.dailyStartValue > 0 ?
+      Math.abs(portfolioData.dailyPnL) / portfolioData.dailyStartValue : 0;
+
+    if (dailyLossPercent >= this.triggers.dailyLossPercent) {
+      return {
+        shouldTrigger: true,
+        emergencyType: 'DAILY_LOSS',
+        reason: `Daily loss ${(dailyLossPercent * 100).toFixed(2)}% exceeds emergency threshold ${(this.triggers.dailyLossPercent * 100).toFixed(2)}%`,
+        severity: 'critical'
+      };
+    }
+
+    return {
+      shouldTrigger: false,
+      severity: 'low'
+    };
+  }
+
+  /**
+   * Check volatility spike emergency conditions
+   */
+  private checkVolatilityConditions(portfolioData: {
+    volatility: number;
+  }): {
+    shouldTrigger: boolean;
+    emergencyType?: EmergencyType;
+    reason?: string;
+    severity: 'low' | 'medium' | 'high' | 'critical';
+  } {
+    if (portfolioData.volatility >= this.triggers.volatilityThreshold) {
+      return {
+        shouldTrigger: true,
+        emergencyType: 'VOLATILITY_SPIKE',
+        reason: `Volatility ${(portfolioData.volatility * 100).toFixed(2)}% exceeds emergency threshold ${(this.triggers.volatilityThreshold * 100).toFixed(2)}%`,
+        severity: 'high'
+      };
+    }
+
+    return {
+      shouldTrigger: false,
+      severity: 'low'
+    };
+  }
+
+  /**
+   * Check system health emergency conditions
+   */
+  private checkSystemHealthConditions(): {
+    shouldTrigger: boolean;
+    emergencyType?: EmergencyType;
+    reason?: string;
+    severity: 'low' | 'medium' | 'high' | 'critical';
+  } {
+    // Check system error accumulation
+    if (this.systemErrorCount >= this.triggers.systemErrorCount) {
+      return {
+        shouldTrigger: true,
+        emergencyType: 'SYSTEM_ERROR',
+        reason: `System error count ${this.systemErrorCount} exceeds threshold ${this.triggers.systemErrorCount}`,
+        severity: 'high'
+      };
+    }
+
+    // Check API failure accumulation
+    if (this.apiFailureCount >= this.triggers.apiFailureCount) {
+      return {
+        shouldTrigger: true,
+        emergencyType: 'API_FAILURE',
+        reason: `API failure count ${this.apiFailureCount} exceeds threshold ${this.triggers.apiFailureCount}`,
+        severity: 'high'
+      };
+    }
+
+    return {
+      shouldTrigger: false,
+      severity: 'low'
+    };
   }
 
   /**
@@ -466,12 +555,24 @@ export class EmergencyControls {
     error?: string;
   }> {
     try {
+      // CRITICAL FIX: Validate wallet address before emergency execution
+      if (!this.walletAddress || !this.walletAddress.startsWith('eth|')) {
+        throw new Error(`Invalid wallet address for emergency swap: ${this.walletAddress}`);
+      }
+
+      // Validate wallet address matches configuration
+      if (this.config.wallet?.address && this.walletAddress !== this.config.wallet.address) {
+        throw new Error(`Wallet address mismatch: emergency=${this.walletAddress}, config=${this.config.wallet.address}`);
+      }
+
+      logger.warn(`🚨 EMERGENCY SWAP EXECUTION with validated wallet: ${this.walletAddress.substring(0, 10)}...`);
+
       // Emergency swap to USDC with high slippage tolerance
       const result = await this.swapExecutor.executeSwap({
         tokenIn: plan.token,
         tokenOut: 'USDC',
         amountIn: plan.amount.toString(),
-        userAddress: this.walletAddress, // CRITICAL FIX: Use actual wallet address
+        userAddress: this.walletAddress, // Validated wallet address
         slippageTolerance: plan.maxSlippage,
         urgency: 'high'
       });
@@ -518,7 +619,17 @@ export class EmergencyControls {
     error?: string;
   }> {
     try {
-      logger.error(`🚨 EMERGENCY MARKET SELL: ${plan.token} - ${plan.amount}`);
+      // CRITICAL FIX: Validate wallet address before emergency execution
+      if (!this.walletAddress || !this.walletAddress.startsWith('eth|')) {
+        throw new Error(`Invalid wallet address for emergency market sell: ${this.walletAddress}`);
+      }
+
+      // Validate wallet address matches configuration
+      if (this.config.wallet?.address && this.walletAddress !== this.config.wallet.address) {
+        throw new Error(`Wallet address mismatch: emergency=${this.walletAddress}, config=${this.config.wallet.address}`);
+      }
+
+      logger.error(`🚨 EMERGENCY MARKET SELL with validated wallet: ${plan.token} - ${plan.amount}`);
 
       // Determine output token (sell to USDC for emergency liquidity)
       const outputToken = 'USDC';
@@ -533,7 +644,7 @@ export class EmergencyControls {
         tokenOut: createTokenClassKey(outputToken),
         amountIn: plan.amount.toString(),
         amountOutMinimum: amountOutMinimum.toString(),
-        userAddress: this.walletAddress, // CRITICAL FIX: Use actual wallet address
+        userAddress: this.walletAddress, // Validated wallet address
         fee: FEE_TIERS.STANDARD, // Use standard fee tier for emergency
         slippageTolerance: plan.maxSlippage,
         deadline: Math.floor(Date.now() / 1000) + 1800 // 30 minute deadline for emergency
@@ -544,7 +655,7 @@ export class EmergencyControls {
         tokenIn: plan.token,
         tokenOut: outputToken,
         amountIn: plan.amount.toString(),
-        userAddress: this.walletAddress, // CRITICAL FIX: Use actual wallet address
+        userAddress: this.walletAddress, // Validated wallet address
         slippageTolerance: plan.maxSlippage,
         urgency: 'high'
       });

@@ -6,12 +6,14 @@
 
 import { LiquidityManager } from './liquidity-manager';
 import { Position } from '../entities/Position';
-import { FeeCalculator, FeeOptimization } from './fee-calculator';
+import { FeeCalculator } from './fee-calculator';
+// Unused import removed: FeeOptimization
 import { getPositionRepository } from '../config/database';
 import { logger } from '../utils/logger';
-import { TRADING_CONSTANTS, STRATEGY_CONSTANTS } from '../config/constants';
+// Unused imports removed
+// import { TRADING_CONSTANTS, STRATEGY_CONSTANTS } from '../config/constants';
 import { safeParseFloat } from '../utils/safe-parse';
-import BigNumber from 'bignumber.js';
+// import BigNumber from 'bignumber.js';
 import { Repository } from 'typeorm';
 
 export interface RebalanceSignal {
@@ -725,7 +727,7 @@ export class RebalanceEngine {
   /**
    * Estimate rebalance benefit
    */
-  private async estimateRebalanceBenefit(position: Position, newRange: { min: number; max: number }): Promise<number> {
+  private async estimateRebalanceBenefit(position: Position, _newRange: { min: number; max: number }): Promise<number> {
     // Simplified benefit estimation based on improved utilization
     const currentUtilization = position.timeInRangePercent;
     const expectedUtilization = 80; // Assume 80% with new range
@@ -923,5 +925,46 @@ export class RebalanceEngine {
     const timestamp = Date.now();
     const random = Math.random().toString(36).substring(2, 8);
     return `rb_${timestamp}_${random}`;
+  }
+
+  /**
+   * Check rebalance signals - required for TradingEngine compatibility
+   */
+  async checkRebalanceSignals(): Promise<RebalanceSignal[]> {
+    const positions = await this.positionRepo?.find() || [];
+    const allSignals: RebalanceSignal[] = [];
+
+    for (const position of positions) {
+      try {
+        const signals = await this.analyzePosition(position);
+        allSignals.push(...signals);
+      } catch (error) {
+        logger.error(`Error analyzing position ${position.id}:`, error);
+      }
+    }
+
+    return allSignals;
+  }
+
+  /**
+   * Execute rebalance - required for TradingEngine compatibility
+   */
+  async executeRebalance(): Promise<void> {
+    await this.processActionQueue();
+  }
+
+  /**
+   * Get status - required for TradingEngine compatibility
+   */
+  getStatus(): any { // eslint-disable-line @typescript-eslint/no-explicit-any
+    const totalActiveSignals = Array.from(this.activeSignals.values()).reduce((sum, signals) => sum + signals.length, 0);
+
+    return {
+      activeSignals: totalActiveSignals,
+      queuedActions: this.actionQueue.length,
+      executionHistory: this.executionHistory.length,
+      lastDetectionTime: Date.now(),
+      isEnabled: this.isRunning
+    };
   }
 }

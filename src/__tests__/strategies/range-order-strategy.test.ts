@@ -16,7 +16,7 @@ describe('RangeOrderStrategy', () => {
   let mockLiquidityManager: jest.Mocked<LiquidityManager>;
 
   beforeEach(() => {
-    mockLiquidityManager = new MockLiquidityManager({} as any) as jest.Mocked<LiquidityManager>;
+    mockLiquidityManager = new MockLiquidityManager({} as any, 'eth|test-wallet-address') as jest.Mocked<LiquidityManager>;
 
     // Mock the gswap pools service
     (mockLiquidityManager as any).gswap = {

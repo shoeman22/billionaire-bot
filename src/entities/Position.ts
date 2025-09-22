@@ -11,100 +11,100 @@ import { Entity, PrimaryColumn, Column, CreateDateColumn, UpdateDateColumn, Inde
 @Index(['inRange', 'isActive'])
 export class Position {
   @PrimaryColumn('varchar', { length: 50 })
-  id: string;
+  id!: string;
 
   @Column('varchar', { length: 100 })
-  walletAddress: string;
+  walletAddress!: string;
 
   @Column('varchar', { length: 100 })
-  token0: string;
+  token0!: string;
 
   @Column('varchar', { length: 100 })
-  token1: string;
+  token1!: string;
 
   @Column('varchar', { length: 50 })
-  token0Symbol: string;
+  token0Symbol!: string;
 
   @Column('varchar', { length: 50 })
-  token1Symbol: string;
+  token1Symbol!: string;
 
   @Column('integer')
-  fee: number;
+  fee!: number;
 
   @Column('integer')
-  tickLower: number;
+  tickLower!: number;
 
   @Column('integer')
-  tickUpper: number;
+  tickUpper!: number;
 
   @Column('decimal', { precision: 20, scale: 8 })
-  minPrice: number;
+  minPrice!: number;
 
   @Column('decimal', { precision: 20, scale: 8 })
-  maxPrice: number;
+  maxPrice!: number;
 
   @Column('varchar', { length: 100 })
-  liquidity: string;
+  liquidity!: string;
 
   @Column('varchar', { length: 100 })
-  amount0: string;
+  amount0!: string;
 
   @Column('varchar', { length: 100 })
-  amount1: string;
+  amount1!: string;
 
   @Column('varchar', { length: 100, default: '0' })
-  uncollectedFees0: string;
+  uncollectedFees0!: string;
 
   @Column('varchar', { length: 100, default: '0' })
-  uncollectedFees1: string;
+  uncollectedFees1!: string;
 
   @Column('varchar', { length: 100, default: '0' })
-  totalFeesCollected0: string;
+  totalFeesCollected0!: string;
 
   @Column('varchar', { length: 100, default: '0' })
-  totalFeesCollected1: string;
+  totalFeesCollected1!: string;
 
   @Column('boolean', { default: true })
-  inRange: boolean;
+  inRange!: boolean;
 
   @Column('boolean', { default: true })
-  isActive: boolean;
+  isActive!: boolean;
 
   @Column('varchar', { length: 50, nullable: true })
-  strategy: string; // 'market_making', 'range_order', 'fee_farming', etc.
+  strategy!: string; // 'market_making', 'range_order', 'fee_farming', etc.
 
   @Column('integer', { default: 0 })
-  rebalanceCount: number;
+  rebalanceCount!: number;
 
   @Column('timestamp', { nullable: true })
-  lastRebalanceAt: Date;
+  lastRebalanceAt!: Date;
 
   @Column('timestamp', { nullable: true })
-  lastFeeCollectionAt: Date;
+  lastFeeCollectionAt!: Date;
 
   @Column('decimal', { precision: 20, scale: 8, default: 0 })
-  initialValueUSD: number;
+  initialValueUSD!: number;
 
   @Column('decimal', { precision: 20, scale: 8, default: 0 })
-  currentValueUSD: number;
+  currentValueUSD!: number;
 
   @Column('decimal', { precision: 10, scale: 6, default: 0 })
-  impermanentLoss: number;
+  impermanentLoss!: number;
 
   @Column('decimal', { precision: 10, scale: 6, default: 0 })
-  totalAPR: number;
+  totalAPR!: number;
 
   @Column('decimal', { precision: 10, scale: 6, default: 0 })
-  feeAPR: number;
+  feeAPR!: number;
 
   @Column('integer', { default: 0 })
-  timeInRangeMs: number; // Milliseconds spent in range
+  timeInRangeMs!: number; // Milliseconds spent in range
 
   @Column('integer', { default: 0 })
-  timeOutOfRangeMs: number; // Milliseconds spent out of range
+  timeOutOfRangeMs!: number; // Milliseconds spent out of range
 
   @Column('json', { nullable: true })
-  metadata: {
+  metadata!: {
     creationTx?: string;
     lastUpdateTx?: string;
     priceAtCreation?: number;
@@ -116,10 +116,10 @@ export class Position {
   };
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 
   // Computed properties for convenience
   get tokenPair(): string {
@@ -211,7 +211,7 @@ export class Position {
     if (!this.metadata?.autoRebalance) return false;
 
     const threshold = this.metadata.rebalanceThreshold || priceChangeThreshold;
-    const currentRange = this.maxPrice - this.minPrice;
+    const _currentRange = this.maxPrice - this.minPrice;
     const priceChange = Math.abs(this.profitLossPercent);
 
     return priceChange > threshold || !this.inRange;

@@ -11,7 +11,7 @@ import { validateEnvironment } from '../config/environment';
 
 // Load environment variables
 config();
-import { GSwap, PrivateKeySigner } from '../../services/gswap-wrapper';
+import { GSwap, PrivateKeySigner } from '../services/gswap-wrapper';
 import { PositionLimits } from '../trading/risk/position-limits';
 import { SlippageProtection } from '../trading/risk/slippage';
 import { RiskMonitor } from '../trading/risk/risk-monitor';
@@ -89,7 +89,7 @@ async function testRiskManagementSystem(): Promise<void> {
       volume24h: '50000'
     });
 
-    logger.info(`Trade splitting: ${tradeSplitting.shouldSplit ? `Split into ${tradeSplitting.recommendedChunks} chunks` : 'No splitting needed'}`);
+    logger.info(`Trade splitting: ${tradeSplitting.shouldSplit ? `Split into ${tradeSplitting.optimalChunks} chunks` : 'No splitting needed'}`);
 
     // Test 3: Risk Monitor System
     logger.info('🧪 Testing Risk Monitor System...');
@@ -121,7 +121,11 @@ async function testRiskManagementSystem(): Promise<void> {
           riskScore: 25
         }
       },
-      marketConditions: {}
+      marketConditions: {
+        volatility: 0.1,
+        liquidity: 100000,
+        priceStability: 0.95
+      }
     });
 
     logger.info(`Trade validation: ${tradeValidation.approved ? 'APPROVED' : 'REJECTED'} (${tradeValidation.reason || 'No reason'})`);
@@ -134,7 +138,8 @@ async function testRiskManagementSystem(): Promise<void> {
     const emergencyControls = new EmergencyControls(
       config.trading,
       gswap,
-      swapExecutor
+      swapExecutor,
+      config.wallet.address
     );
 
     // Test emergency condition checking
@@ -189,7 +194,7 @@ async function testRiskManagementSystem(): Promise<void> {
 
     // Test dynamic slippage calculation
     const dynamicSlippage = slippageProtection.calculateDynamicSlippage(
-      config.trading.defaultSlippageTolerance,
+      config.trading.defaultSlippageTolerance ?? 0.005,
       {
         volatility: integrationTest.marketVolatility,
         liquidity: 50000,

@@ -8,6 +8,7 @@ import { SlippageProtection, SlippageAnalysis } from '../risk/slippage';
 import { TRADING_CONSTANTS } from '../../config/constants';
 import { logger } from '../../utils/logger';
 import { safeParseFloat } from '../../utils/safe-parse';
+import { ApiResponseParser, ResponseValidators } from '../../utils/api-response-parser';
 import {
   QuoteRequest,
   QuoteResponse,
@@ -241,12 +242,24 @@ export class SwapExecutor {
       return false;
     }
 
-    if (!quote.data || !quote.data.amountOut) {
-      logger.error('Quote response missing required data');
+    // Parse quote response with comprehensive validation
+    const quoteResult = ApiResponseParser.parseNested<{
+      amountOut: string;
+      priceImpact?: number;
+    }>(quote, ['data'], {
+      required: ['amountOut'],
+      validators: {
+        amountOut: ResponseValidators.isValidString,
+        priceImpact: (value: unknown) => value === undefined || ResponseValidators.isNonNegativeNumber(value)
+      }
+    });
+
+    if (!quoteResult.success) {
+      logger.error('Quote response validation failed:', quoteResult.error?.message);
       return false;
     }
 
-    const amountOut = safeParseFloat(quote.data.amountOut, 0);
+    const amountOut = safeParseFloat(quoteResult.data!.amountOut, 0);
     if (amountOut <= 0) {
       logger.error('Invalid amount out in quote response');
       return false;
@@ -298,9 +311,33 @@ export class SwapExecutor {
     };
     const currentPrice = price;
 
-    // Calculate quoted price
+    // Calculate quoted price with safe parsing
     const amountIn = safeParseFloat(request.amountIn, 0);
-    const amountOut = safeParseFloat(quote.data.amountOut, 0);
+
+    // Parse quote data safely
+    const quoteData = ApiResponseParser.parseNested<{
+      amountOut: string;
+    }>(quote, ['data'], {
+      required: ['amountOut'],
+      validators: {
+        amountOut: ResponseValidators.isValidString
+      }
+    });
+
+    if (!quoteData.success) {
+      logger.error('Quote data parsing failed:', quoteData.error?.message);
+      return {
+        currentPrice: 0,
+        expectedPrice: 0,
+        slippagePercent: 0,
+        isAcceptable: false,
+        recommendedMaxSlippage: this.slippageProtection.config.defaultSlippageTolerance ?? 0.005,
+        priceImpact: 0,
+        marketCondition: 'illiquid'
+      };
+    }
+
+    const amountOut = safeParseFloat(quoteData.data!.amountOut, 0);
     const quotedPrice = amountIn > 0 ? amountOut / amountIn : 0;
 
     // Get real market data for analysis
@@ -333,7 +370,23 @@ export class SwapExecutor {
       }
 
       // Enhanced slippage calculation with bounds checking
-      const expectedOutput = safeParseFloat(quote.data.amountOut, 0);
+      // Parse quote output safely
+      const outputResult = ApiResponseParser.parseNested<{
+        amountOut: string;
+        newSqrtPrice?: string;
+      }>(quote, ['data'], {
+        required: ['amountOut'],
+        validators: {
+          amountOut: ResponseValidators.isValidString,
+          newSqrtPrice: (value: unknown) => value === undefined || ResponseValidators.isValidString(value)
+        }
+      });
+
+      if (!outputResult.success) {
+        throw new Error(`Quote output parsing failed: ${outputResult.error?.message}`);
+      }
+
+      const expectedOutput = safeParseFloat(outputResult.data!.amountOut, 0);
       const slippageTolerance = request.slippageTolerance || 0.01;
 
       // Validate slippage tolerance
@@ -363,7 +416,7 @@ export class SwapExecutor {
         tokenOut: createTokenClassKey(request.tokenOut),
         amountIn: request.amountIn,
         fee: feeTier,
-        sqrtPriceLimit: quote.data.newSqrtPrice || '0',
+        sqrtPriceLimit: outputResult.data!.newSqrtPrice || '0',
         amountInMaximum: request.amountIn,
         amountOutMinimum: minimumAmountOut
       };
@@ -547,23 +600,35 @@ export class SwapExecutor {
         };
       }
 
-      const transactionId = (bundleResponse as BundleResponse).data.data;
+      // Parse bundle response with comprehensive validation
+      const bundleResult = ApiResponseParser.parseNested<{
+        data: string;
+        message: string;
+        error?: string;
+      }>(bundleResponse, ['data'], {
+        required: ['data', 'message'],
+        validators: {
+          data: ResponseValidators.isValidTransactionId,
+          message: ResponseValidators.isValidString
+        }
+      });
 
-      // Validate transaction ID
-      if (!transactionId || typeof transactionId !== 'string') {
-        throw new Error('Invalid transaction ID received from bundle execution');
+      if (!bundleResult.success) {
+        throw new Error(`Invalid bundle response: ${bundleResult.error?.message}`);
       }
+
+      const { data: transactionId, message: bundleHash, error: bundleStatus } = bundleResult.data!;
 
       logger.info('Swap transaction submitted successfully', {
         transactionId,
-        bundleHash: (bundleResponse as BundleResponse).data.message,
-        bundleStatus: (bundleResponse as BundleResponse).data.error
+        bundleHash,
+        bundleStatus
       });
 
       return {
         success: true,
         transactionId,
-        hash: (bundleResponse as BundleResponse).data.message,
+        hash: bundleHash,
         executionTime: 0, // Will be set by caller
       };
 
@@ -1151,9 +1216,21 @@ export class SwapExecutor {
       const priceHistory = await this.buildRealPriceHistory(tokenIn, tokenOut, poolLiquidity);
       let volatility24h = 0.05; // Default 5% volatility
 
-      if (priceHistory && !priceHistory.error && priceHistory.data && Array.isArray(priceHistory.data.prices)) {
+      // Parse price history response safely
+      const historyResult = ApiResponseParser.parseNested<{
+        prices: Array<{ price: string }>;
+      }>(priceHistory, ['data'], {
+        required: ['prices'],
+        validators: {
+          prices: (value: unknown) => Array.isArray(value)
+        }
+      });
+
+      if (historyResult.success && !priceHistory.error) {
         // Calculate volatility from real price history
-        const prices = priceHistory.data.prices.map(p => safeParseFloat(p.price || '0', 0)).filter(p => p > 0);
+        const prices = historyResult.data!.prices
+          .map(p => safeParseFloat(p.price || '0', 0))
+          .filter(p => p > 0);
         if (prices.length > 1) {
           const returns = prices.slice(1).map((price, i) => Math.log(price / prices[i]));
           const avgReturn = returns.reduce((sum, r) => sum + r, 0) / returns.length;

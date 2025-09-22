@@ -237,7 +237,7 @@ export class InputValidator {
 
     // CRITICAL: Check for dangerous characters before parsing
     if (/[<>"'`&|;\n\r\t]/.test(trimmedToken)) {
-      errors.push('Token contains dangerous characters that could cause injection attacks');
+      errors.push('Token contains unsafe characters that could cause injection attacks');
       return { isValid: false, errors, warnings };
     }
 
@@ -271,18 +271,18 @@ export class InputValidator {
 
     // CRITICAL: Security checks for injection attacks
     const securityChecks = [
-      { pattern: /\.\./, message: 'Path traversal attempt detected (..)' },
-      { pattern: /[/\\]/, message: 'File system path characters detected' },
-      { pattern: /javascript:/i, message: 'JavaScript protocol detected' },
-      { pattern: /data:/i, message: 'Data protocol detected' },
-      { pattern: /vbscript:/i, message: 'VBScript protocol detected' },
-      { pattern: /<script/i, message: 'Script tag detected' },
-      { pattern: /eval\s*\(/i, message: 'Eval function detected' },
-      { pattern: /function\s*\(/i, message: 'Function declaration detected' },
-      { pattern: /\${/, message: 'Template literal injection detected' },
-      { pattern: /\[\[|\]\]/, message: 'Double bracket injection detected' },
-      { pattern: /\x00|\x08|\x0B|\x0C|\x0E|\x1F|\x7F/, message: 'Control characters detected' },
-      { pattern: /\\[nrtbfav]/, message: 'Escape sequence detected' }
+      { pattern: /\.\./, message: 'invalid path traversal attempt detected (..)' },
+      { pattern: /[/\\]/, message: 'unsafe file system path characters detected' },
+      { pattern: /javascript:/i, message: 'invalid JavaScript protocol detected' },
+      { pattern: /data:/i, message: 'invalid data protocol detected' },
+      { pattern: /vbscript:/i, message: 'unsafe VBScript protocol detected' },
+      { pattern: /<script/i, message: 'unsafe script tag detected' },
+      { pattern: /eval\s*\(/i, message: 'unsafe eval function detected' },
+      { pattern: /function\s*\(/i, message: 'invalid function declaration detected' },
+      { pattern: /\${/, message: 'unsafe template literal injection detected' },
+      { pattern: /\[\[|\]\]/, message: 'invalid double bracket injection detected' },
+      { pattern: /\x00|\x08|\x0B|\x0C|\x0E|\x1F|\x7F/, message: 'invalid control characters detected' },
+      { pattern: /\\[nrtbfav]/, message: 'invalid escape sequence detected' }
     ];
 
     for (const check of securityChecks) {

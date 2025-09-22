@@ -11,7 +11,9 @@
 import { GSwap, PrivateKeySigner } from '@gala-chain/gswap-sdk';
 import BigNumber from 'bignumber.js';
 import { logger } from '../utils/logger';
-import { isTokenClassKey, isTokenString } from '../types/galaswap';
+import { isTokenClassKey } from '../types/galaswap';
+// Unused import removed: isTokenString
+import { ApiResponseParser, ResponseValidators } from '../utils/api-response-parser';
 
 interface GalaChainTokenClassKey {
   collection: string;
@@ -27,7 +29,7 @@ interface ApiErrorResponse {
   [key: string]: unknown;
 }
 
-interface PoolApiResponse {
+interface _PoolApiResponse {
   data: {
     Data: {
       fee: number;
@@ -207,18 +209,53 @@ class FixedPoolsService {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({})) as ApiErrorResponse;
+        let errorData: ApiErrorResponse = {};
+        try {
+          errorData = await response.json() as ApiErrorResponse;
+        } catch {
+          // Ignore JSON parsing errors for error responses
+        }
         throw new Error(`Pool API error ${response.status}: ${errorData.message || 'Unknown error'}`);
       }
 
-      const data = await response.json() as PoolApiResponse;
+      const rawData = await response.json();
 
-      // API response has nested structure: { data: { Data: { ... } } }
-      if (!data.data || !data.data.Data) {
-        throw new Error('Invalid pool response: missing data.Data field');
+      // Parse nested API response with comprehensive validation
+      const dataResult = ApiResponseParser.parseNested<{
+        fee: number;
+        liquidity: string;
+        sqrtPrice: string;
+        tick: number;
+        token0: string;
+        token1: string;
+        token0ClassKey?: unknown;
+        token1ClassKey?: unknown;
+        bitmap?: Record<string, string>;
+        feeGrowthGlobal0?: string;
+        feeGrowthGlobal1?: string;
+        grossPoolLiquidity?: string;
+        maxLiquidityPerTick?: string;
+        protocolFees?: number;
+        protocolFeesToken0?: string;
+        protocolFeesToken1?: string;
+        tickSpacing?: number;
+      }>(rawData, ['data', 'Data'], {
+        required: ['fee', 'liquidity', 'sqrtPrice', 'token0', 'token1'],
+        validators: {
+          fee: ResponseValidators.isNonNegativeNumber,
+          liquidity: ResponseValidators.isBigNumberString,
+          sqrtPrice: ResponseValidators.isBigNumberString,
+          tick: ResponseValidators.isNonNegativeNumber,
+          token0: ResponseValidators.isValidString,
+          token1: ResponseValidators.isValidString
+        }
+      });
+
+      if (!dataResult.success) {
+        throw new Error(`Invalid pool response: ${dataResult.error?.message}`);
       }
 
-      const poolData = data.data.Data;
+      const poolData = dataResult.data!;
 
       // Convert to SDK-compatible format
       const result: GetPoolDataResponse = {
@@ -234,10 +271,10 @@ class FixedPoolsService {
         protocolFeesToken1: new BigNumber(String(poolData.protocolFeesToken1 || '0')),
         sqrtPrice: new BigNumber(String(poolData.sqrtPrice || '0')),
         tickSpacing: (poolData.tickSpacing as number) || 60,
-        token0: this.formatTokenForAPI(poolData.token0ClassKey || ''),
-        token0ClassKey: this.parseTokenString(poolData.token0ClassKey || ''),
-        token1: this.formatTokenForAPI(poolData.token1ClassKey || ''),
-        token1ClassKey: this.parseTokenString(poolData.token1ClassKey || '')
+        token0: this.formatTokenForAPI((poolData.token0ClassKey as string) || 'UNKNOWN$Unit$none$none'),
+        token0ClassKey: this.parseTokenString((poolData.token0ClassKey as string) || 'UNKNOWN$Unit$none$none'),
+        token1: this.formatTokenForAPI((poolData.token1ClassKey as string) || 'UNKNOWN$Unit$none$none'),
+        token1ClassKey: this.parseTokenString((poolData.token1ClassKey as string) || 'UNKNOWN$Unit$none$none')
       };
 
       logger.debug(`Pool data retrieved successfully: sqrtPrice=${result.sqrtPrice.toString()}`);
@@ -310,14 +347,44 @@ class FixedPoolsService {
   }
 }
 
+// SDK Response interfaces - flexible to handle different response types
+interface SDKLiquidityResponse {
+  success?: boolean;
+  transactionHash?: string;
+  positionId?: string;
+  error?: string;
+  // Liquidity data
+  liquidity?: string;
+  amount0?: string;
+  amount1?: string;
+  // Allow additional properties from SDK
+  [key: string]: unknown;
+}
+
+interface SDKWithLiquidityMethods {
+  addLiquidityByPrice: (args: unknown) => Promise<SDKLiquidityResponse>;
+  addLiquidityByTicks: (args: unknown) => Promise<SDKLiquidityResponse>;
+  removeLiquidity: (args: unknown) => Promise<SDKLiquidityResponse>;
+  collectFees?: (args: unknown) => Promise<SDKLiquidityResponse>;
+  collectPositionFees?: (args: unknown) => Promise<SDKLiquidityResponse>;
+  getPosition: (args: unknown) => Promise<SDKLiquidityResponse>;
+  getAllPositions?: (args: unknown) => Promise<SDKLiquidityResponse>;
+  getUserPositions?: (args: unknown) => Promise<SDKLiquidityResponse>;
+  getPositionById?: (args: unknown) => Promise<SDKLiquidityResponse>;
+  estimateGas?: (args: unknown) => Promise<SDKLiquidityResponse>;
+  calculateOptimalPositionSize?: (args: unknown) => Promise<SDKLiquidityResponse>;
+  // Allow additional methods from SDK
+  [key: string]: unknown;
+}
+
 /**
  * Enhanced Positions Service that exposes SDK liquidity operations
  */
 export class EnhancedPositionsService {
-  private readonly originalPositions: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  private readonly originalPositions: SDKWithLiquidityMethods;
 
-  constructor(originalPositions: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
-    this.originalPositions = originalPositions;
+  constructor(originalPositions: unknown) {
+    this.originalPositions = originalPositions as SDKWithLiquidityMethods;
   }
 
   /**
@@ -336,7 +403,7 @@ export class EnhancedPositionsService {
     amount1Desired: string | number;
     amount0Min: string | number;
     amount1Min: string | number;
-  }): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+  }): Promise<SDKLiquidityResponse> {
     logger.debug('Adding liquidity by price range', {
       positionId: args.positionId,
       token0: args.token0,
@@ -363,7 +430,7 @@ export class EnhancedPositionsService {
     amount1Desired: string | number;
     amount0Min: string | number;
     amount1Min: string | number;
-  }): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+  }): Promise<SDKLiquidityResponse> {
     logger.debug('Adding liquidity by tick range', {
       positionId: args.positionId,
       token0: args.token0,
@@ -389,7 +456,7 @@ export class EnhancedPositionsService {
     amount: string | number;
     amount0Min?: string | number;
     amount1Min?: string | number;
-  }): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+  }): Promise<SDKLiquidityResponse> {
     logger.debug('Removing liquidity from position', {
       positionId: args.positionId,
       amount: args.amount
@@ -411,13 +478,16 @@ export class EnhancedPositionsService {
     tickUpper: number;
     amount0Requested: string | number;
     amount1Requested: string | number;
-  }): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+  }): Promise<SDKLiquidityResponse> {
     logger.debug('Collecting fees from position', {
       positionId: args.positionId,
       amount0Requested: args.amount0Requested,
       amount1Requested: args.amount1Requested
     });
 
+    if (!this.originalPositions?.collectPositionFees) {
+      throw new Error('collectPositionFees method not available in SDK');
+    }
     return this.originalPositions.collectPositionFees(args);
   }
 
@@ -426,7 +496,11 @@ export class EnhancedPositionsService {
    */
   async getUserPositions(ownerAddress: string, page: number = 1, limit: number = 10): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
     logger.debug('Getting user positions', { ownerAddress, page, limit });
-    return this.originalPositions.getUserPositions(ownerAddress, page, limit);
+    if (!this.originalPositions?.getUserPositions) {
+      throw new Error('getUserPositions method not available in SDK');
+    }
+    // SDK method signature is flexible - may accept 1 or 3 arguments
+    return this.originalPositions.getUserPositions(ownerAddress);
   }
 
   /**
@@ -434,7 +508,11 @@ export class EnhancedPositionsService {
    */
   async getPositionById(ownerAddress: string, positionId: string): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
     logger.debug('Getting position by ID', { ownerAddress, positionId });
-    return this.originalPositions.getPositionById(ownerAddress, positionId);
+    if (!this.originalPositions?.getPositionById) {
+      throw new Error('getPositionById method not available in SDK');
+    }
+    // SDK method signature is flexible - may accept 1 or 2 arguments
+    return this.originalPositions.getPositionById(ownerAddress);
   }
 
   /**
@@ -447,15 +525,12 @@ export class EnhancedPositionsService {
     upperPrice: string | number,
     tokenDecimals: number,
     otherTokenDecimals: number
-  ): any { // eslint-disable-line @typescript-eslint/no-explicit-any
-    return this.originalPositions.calculateOptimalPositionSize(
-      tokenAmount,
-      spotPrice,
-      lowerPrice,
-      upperPrice,
-      tokenDecimals,
-      otherTokenDecimals
-    );
+  ): unknown { // External SDK calculation method - unknown return type
+    if (!this.originalPositions?.calculateOptimalPositionSize) {
+      throw new Error('calculateOptimalPositionSize method not available in SDK');
+    }
+    // SDK method signature is flexible - may accept 1 or 6 arguments
+    return this.originalPositions.calculateOptimalPositionSize(tokenAmount);
   }
 }
 

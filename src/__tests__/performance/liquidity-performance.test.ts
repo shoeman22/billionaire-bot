@@ -48,9 +48,9 @@ describe('Liquidity Performance Tests', () => {
       }
     } as any;
 
-    liquidityManager = new LiquidityManager(mockGSwap);
+    liquidityManager = new LiquidityManager(mockGSwap, 'eth|test-wallet-address');
     rangeOrderStrategy = new RangeOrderStrategy(liquidityManager);
-    feeCalculator = new FeeCalculator(liquidityManager);
+    feeCalculator = new FeeCalculator();
     rebalanceEngine = new RebalanceEngine(liquidityManager, feeCalculator);
   });
 
@@ -442,7 +442,7 @@ describe('Liquidity Performance Tests', () => {
 
       // Create and destroy many objects
       for (let i = 0; i < 1000; i++) {
-        const manager = new LiquidityManager({} as any);
+        const manager = new LiquidityManager({} as any, 'eth|test-wallet-address');
         const strategy = new RangeOrderStrategy(manager);
 
         // Simulate some operations
