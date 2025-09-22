@@ -35,13 +35,36 @@ async function inspectSDKServices() {
 
     // Check specifically for swaps service
     if ((originalSDK as any).swaps) {
-      console.log('\n🎯 FOUND SWAPS SERVICE! Methods:');
+      console.log('\n🎯 FOUND SWAPS SERVICE!');
       const swapsService = (originalSDK as any).swaps;
+
+      console.log('\n📋 SWAPS SERVICE METHODS:');
       Object.getOwnPropertyNames(swapsService).forEach(method => {
         if (typeof swapsService[method] === 'function') {
           console.log(`  • swaps.${method}()`);
         }
       });
+
+      // Also check prototype methods
+      const prototype = Object.getPrototypeOf(swapsService);
+      if (prototype) {
+        console.log('\n🔧 SWAPS PROTOTYPE METHODS:');
+        Object.getOwnPropertyNames(prototype).forEach(method => {
+          if (typeof prototype[method] === 'function' && method !== 'constructor') {
+            console.log(`  • swaps.${method}()`);
+          }
+        });
+      }
+
+      // Check constructor methods
+      if (swapsService.constructor && swapsService.constructor.prototype) {
+        console.log('\n⚙️ SWAPS CONSTRUCTOR PROTOTYPE:');
+        Object.getOwnPropertyNames(swapsService.constructor.prototype).forEach(method => {
+          if (typeof swapsService.constructor.prototype[method] === 'function' && method !== 'constructor') {
+            console.log(`  • swaps.${method}()`);
+          }
+        });
+      }
     } else {
       console.log('\n❌ No swaps service found');
     }

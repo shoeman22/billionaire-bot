@@ -59,7 +59,15 @@
     "dev-component-test": "tsx src/scripts/dev-test-suite.ts --components-only",
     "dev-risk-check": "tsx src/scripts/dev-test-suite.ts --risk-only",
     "production-test": "tsx src/scripts/production-test-suite.ts",
-    "production-readiness-check": "npm run dev-test-suite && npm run dev-performance-benchmark && npm run test:all"
+    "production-readiness-check": "npm run dev-test-suite && npm run dev-performance-benchmark && npm run test:all",
+    "hunt-deals": "tsx hunt-deals.ts",
+    "arbitrage": "tsx manual-arbitrage-steps.ts",
+    "arbitrage:quote1": "tsx manual-arbitrage-steps.ts quote1",
+    "arbitrage:quote2": "tsx manual-arbitrage-steps.ts quote2",
+    "arbitrage:trade1": "tsx manual-arbitrage-steps.ts trade1",
+    "arbitrage:trade2": "tsx manual-arbitrage-steps.ts trade2",
+    "arbitrage:full": "tsx manual-arbitrage-steps.ts full",
+    "arbitrage:help": "tsx manual-arbitrage-steps.ts"
   },
   "dependencies": {
     "@gala-chain/api": "^2.4.3",
