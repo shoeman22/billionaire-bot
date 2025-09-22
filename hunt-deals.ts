@@ -31,7 +31,10 @@ async function huntDeals(): Promise<void> {
 
     const env = validateEnvironment();
     const signer = new PrivateKeySigner(process.env.WALLET_PRIVATE_KEY || '');
-    const gSwap = new GSwap({ signer: signer });
+    const gSwap = new GSwap({
+      signer: signer,
+      walletAddress: env.wallet.address
+    });
 
     // Connect to event socket for real-time updates
     try {

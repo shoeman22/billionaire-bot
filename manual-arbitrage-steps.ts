@@ -19,7 +19,10 @@ const step = process.argv[2];
 async function setupGSwap() {
   const env = validateEnvironment();
   const signer = new PrivateKeySigner(process.env.WALLET_PRIVATE_KEY || '');
-  const gSwap = new GSwap({ signer: signer });
+  const gSwap = new GSwap({
+    signer: signer,
+    walletAddress: env.wallet.address
+  });
 
   try {
     GSwap.events?.connectEventSocket();
