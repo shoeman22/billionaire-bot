@@ -141,7 +141,7 @@ async function discoverTokens(): Promise<void> {
 }
 
 // Run the test if this script is executed directly
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   discoverTokens()
     .then(() => {
       logger.info('🎉 Token Discovery Completed');

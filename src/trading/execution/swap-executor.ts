@@ -3,7 +3,7 @@
  * Handles end-to-end swap execution with error handling and monitoring
  */
 
-import { GSwap } from '@gala-chain/gswap-sdk';
+import { GSwap } from '../../services/gswap-wrapper';
 import { SlippageProtection, SlippageAnalysis } from '../risk/slippage';
 import { TRADING_CONSTANTS } from '../../config/constants';
 import { logger } from '../../utils/logger';

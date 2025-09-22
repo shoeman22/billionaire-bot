@@ -119,7 +119,7 @@ async function testCorrectPricing(): Promise<void> {
   }
 }
 
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   testCorrectPricing()
     .then(() => {
       logger.info('\n✨ Pricing Fix Test Completed Successfully');

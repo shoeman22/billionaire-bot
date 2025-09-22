@@ -4,7 +4,7 @@
  */
 
 import { PriceTracker } from './price-tracker';
-import { GSwap } from '@gala-chain/gswap-sdk';
+import { GSwap } from '../services/gswap-wrapper';
 import { logger } from '../utils/logger';
 import { TRADING_CONSTANTS } from '../config/constants';
 // calculatePriceFromSqrtPriceX96 removed - not used in this file

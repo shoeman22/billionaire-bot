@@ -11,7 +11,7 @@ import { validateEnvironment } from '../config/environment';
 
 // Load environment variables
 config();
-import { GSwap, PrivateKeySigner } from '@gala-chain/gswap-sdk';
+import { GSwap, PrivateKeySigner } from '../../services/gswap-wrapper';
 
 async function testSimplePrice(): Promise<void> {
   logger.info('🧪 Testing Simple Price API Calls...');
@@ -97,7 +97,7 @@ async function testSimplePrice(): Promise<void> {
 }
 
 // Run the test if this script is executed directly
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   testSimplePrice()
     .then(() => {
       logger.info('🎉 Simple Price Tests Completed');

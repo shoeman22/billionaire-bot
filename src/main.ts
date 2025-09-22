@@ -4,7 +4,11 @@
  * Main entry point for the trading system
  */
 
+import dotenv from 'dotenv';
 import { Command } from 'commander';
+
+// Load environment variables
+dotenv.config();
 import { validateEnvironment } from './config/environment';
 import { TradingEngine } from './trading/TradingEngine';
 import { logger } from './utils/logger';
@@ -207,8 +211,14 @@ function setupGracefulShutdown(tradingEngine: TradingEngine): void {
   });
 }
 
-// Parse command line arguments
-if (require.main === module) {
+// Parse command line arguments (ESM compatible)
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+if (import.meta.url === `file://${process.argv[1]}`) {
   program.parse();
 }
 

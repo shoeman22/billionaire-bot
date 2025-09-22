@@ -11,7 +11,7 @@ import { validateEnvironment } from '../config/environment';
 
 // Load environment variables
 config();
-import { GSwap, PrivateKeySigner } from '@gala-chain/gswap-sdk';
+import { GSwap, PrivateKeySigner } from '../../services/gswap-wrapper';
 import { PositionLimits } from '../trading/risk/position-limits';
 import { SlippageProtection } from '../trading/risk/slippage';
 import { RiskMonitor } from '../trading/risk/risk-monitor';
@@ -216,7 +216,7 @@ async function testRiskManagementSystem(): Promise<void> {
 }
 
 // Run the test if this script is executed directly
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   testRiskManagementSystem()
     .then(() => {
       logger.info('🎉 Risk Management System Tests Completed Successfully');

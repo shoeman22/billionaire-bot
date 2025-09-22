@@ -3,7 +3,7 @@
  * Utilities for creating test data and scenarios
  */
 
-import { GSwap } from '@gala-chain/gswap-sdk';
+import { GSwap } from '../../services/gswap-wrapper';
 import { BotConfig } from '../../config/environment';
 import { safeParseFloat } from '../../utils/safe-parse';
 

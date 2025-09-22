@@ -169,8 +169,8 @@ async function testRealPrices(): Promise<void> {
   }
 }
 
-// Run the test if this script is executed directly
-if (require.main === module) {
+// Run the test if this script is executed directly (ESM compatible)
+if (import.meta.url === `file://${process.argv[1]}`) {
   testRealPrices()
     .then(() => {
       logger.info('🎉 Real Price Tests Completed Successfully');

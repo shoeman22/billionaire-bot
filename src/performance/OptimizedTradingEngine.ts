@@ -3,7 +3,7 @@
  * High-performance trading engine with intelligent caching, batch processing, and parallel execution
  */
 
-import { GSwap as _GSwap } from '@gala-chain/gswap-sdk';
+import { GSwap as _GSwap } from '../services/gswap-wrapper';
 import { BotConfig } from '../config/environment';
 import { logger } from '../utils/logger';
 import { PerformanceMonitor } from './PerformanceMonitor';

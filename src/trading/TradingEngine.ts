@@ -3,7 +3,7 @@
  * Core trading orchestrator for the billionaire bot
  */
 
-import { GSwap, PrivateKeySigner } from '@gala-chain/gswap-sdk';
+import { GSwap, PrivateKeySigner } from '../services/gswap-wrapper';
 import { BotConfig } from '../config/environment';
 import { TRADING_CONSTANTS } from '../config/constants';
 import { logger } from '../utils/logger';

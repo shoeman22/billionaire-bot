@@ -43,8 +43,10 @@ async function main(): Promise<void> {
   }
 }
 
-// Start the application
-if (require.main === module) {
+// Start the application (ESM compatible)
+import { fileURLToPath } from 'url';
+
+if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((error) => {
     console.error('Unhandled error:', error);
     process.exit(1);

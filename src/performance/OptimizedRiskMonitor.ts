@@ -3,7 +3,7 @@
  * High-performance risk assessment with parallel calculations and caching
  */
 
-import { GSwap } from '@gala-chain/gswap-sdk';
+import { GSwap } from '../services/gswap-wrapper';
 import { TradingConfig } from '../config/environment';
 import { logger } from '../utils/logger';
 import { safeParseFloat } from '../utils/safe-parse';

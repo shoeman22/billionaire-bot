@@ -216,8 +216,8 @@ program
   .description('Command Line Interface for Billionaire Bot trading operations')
   .version('1.0.0');
 
-// Parse command line arguments
-if (require.main === module) {
+// Parse command line arguments (ESM compatible)
+if (import.meta.url === `file://${process.argv[1]}`) {
   program.parse();
 }
 

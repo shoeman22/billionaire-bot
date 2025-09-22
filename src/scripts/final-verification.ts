@@ -120,7 +120,7 @@ async function finalVerification(): Promise<void> {
 }
 
 // Run the verification if this script is executed directly
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   finalVerification()
     .then(() => {
       logger.info('\n✨ Final Verification Completed Successfully');
