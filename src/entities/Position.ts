@@ -76,10 +76,10 @@ export class Position {
   @Column('integer', { default: 0 })
   rebalanceCount!: number;
 
-  @Column('timestamp', { nullable: true })
+  @Column('datetime', { nullable: true })
   lastRebalanceAt!: Date;
 
-  @Column('timestamp', { nullable: true })
+  @Column('datetime', { nullable: true })
   lastFeeCollectionAt!: Date;
 
   @Column('decimal', { precision: 20, scale: 8, default: 0 })

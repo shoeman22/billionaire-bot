@@ -33,6 +33,10 @@
     "test-connection": "tsx src/main.ts test",
     "manual-trade": "tsx src/main.ts trade",
     "portfolio": "tsx src/main.ts portfolio",
+    "analyze-market": "tsx src/scripts/test-market-analysis.ts",
+    "dry-run": "tsx src/scripts/dry-run-trading.ts",
+    "test-components": "tsx src/scripts/test-components-only.ts",
+    "test-risk-management": "tsx src/scripts/test-risk-management.ts",
     "performance:benchmark": "tsx src/scripts/performance-benchmark.ts benchmark",
     "performance:optimize": "tsx src/scripts/performance-benchmark.ts optimize",
     "performance:fastpath": "tsx src/scripts/performance-benchmark.ts fastpath",
@@ -57,6 +61,7 @@
     "js-sha3": "^0.9.3",
     "json-stringify-deterministic": "^1.0.12",
     "reflect-metadata": "^0.2.2",
+    "sqlite3": "^5.1.7",
     "typeorm": "^0.3.27"
   },
   "devDependencies": {

@@ -7,6 +7,10 @@ import { DataSource, DataSourceOptions } from 'typeorm';
 import { Position } from '../entities/Position';
 import { logger } from '../utils/logger';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+// ES module dirname replacement
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Database configuration based on environment
 export const getDatabaseConfig = (): DataSourceOptions => {
