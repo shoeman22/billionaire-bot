@@ -51,14 +51,14 @@ async function executeSimpleArbitrage(): Promise<void> {
       logger.info(`   Quote: ${startAmount} GALA → ${expectedGusdc.toFixed(6)} GUSDC`);
 
       // Execute trade using the proven pattern
-      const swap1 = await gSwap.swaps.exactInputSingle({
+      const swap1 = await gSwap.swaps.swap({
         tokenIn: 'GALA|Unit|none|none',
         tokenOut: 'GUSDC|Unit|none|none',
-        fee: quote1.feeTier,
+        fee: parseInt(quote1.feeTier.toString(), 10), // Ensure fee is integer
         recipient: env.wallet.address,
         deadline: Math.floor(Date.now() / 1000) + 1200, // 20 minutes
-        amountIn: startAmount,
-        amountOutMinimum: expectedGusdc * 0.95, // 5% slippage tolerance
+        amountIn: parseFloat(startAmount.toString()), // Ensure number
+        amountOutMinimum: parseFloat((expectedGusdc * 0.95).toString()), // 5% slippage tolerance
         sqrtPriceLimitX96: 0
       });
 
@@ -89,14 +89,14 @@ async function executeSimpleArbitrage(): Promise<void> {
           logger.info(`   Quote: ${expectedGusdc.toFixed(6)} GUSDC → ${expectedGalaReturn.toFixed(6)} GALA`);
 
           // Execute return trade
-          const swap2 = await gSwap.swaps.exactInputSingle({
+          const swap2 = await gSwap.swaps.swap({
             tokenIn: 'GUSDC|Unit|none|none',
             tokenOut: 'GALA|Unit|none|none',
-            fee: quote2.feeTier,
+            fee: parseInt(quote2.feeTier.toString(), 10), // Ensure fee is integer
             recipient: env.wallet.address,
             deadline: Math.floor(Date.now() / 1000) + 1200, // 20 minutes
-            amountIn: expectedGusdc,
-            amountOutMinimum: expectedGalaReturn * 0.95, // 5% slippage tolerance
+            amountIn: parseFloat(expectedGusdc.toString()), // Ensure number
+            amountOutMinimum: parseFloat((expectedGalaReturn * 0.95).toString()), // 5% slippage tolerance
             sqrtPriceLimitX96: 0
           });
 

@@ -74,11 +74,11 @@ async function step2_executeFirstTrade(inputAmount: number, minOutput: number, f
     const swapParams = {
       tokenIn: 'GALA|Unit|none|none',
       tokenOut: 'GUSDC|Unit|none|none',
-      fee: feeTier,
+      fee: parseInt(feeTier.toString(), 10), // Ensure fee is integer
       recipient: env.wallet.address,
       deadline: Math.floor(Date.now() / 1000) + 1200, // 20 minutes
-      amountIn: inputAmount,
-      amountOutMinimum: minOutput * 0.95, // 5% slippage tolerance
+      amountIn: parseFloat(inputAmount.toString()), // Ensure number
+      amountOutMinimum: parseFloat((minOutput * 0.95).toString()), // 5% slippage tolerance
       sqrtPriceLimitX96: 0
     };
 
@@ -146,11 +146,11 @@ async function step4_executeReturnTrade(inputAmount: number, minOutput: number, 
     const swapParams = {
       tokenIn: 'GUSDC|Unit|none|none',
       tokenOut: 'GALA|Unit|none|none',
-      fee: feeTier,
+      fee: parseInt(feeTier.toString(), 10), // Ensure fee is integer
       recipient: env.wallet.address,
       deadline: Math.floor(Date.now() / 1000) + 1200, // 20 minutes
-      amountIn: inputAmount,
-      amountOutMinimum: minOutput * 0.95, // 5% slippage tolerance
+      amountIn: parseFloat(inputAmount.toString()), // Ensure number
+      amountOutMinimum: parseFloat((minOutput * 0.95).toString()), // 5% slippage tolerance
       sqrtPriceLimitX96: 0
     };
 
