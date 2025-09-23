@@ -19,10 +19,18 @@ const step = process.argv[2];
 async function setupGSwap() {
   const env = validateEnvironment();
   const signer = new PrivateKeySigner(process.env.WALLET_PRIVATE_KEY || '');
+
   const gSwap = new GSwap({
-    signer: signer,
+    signer,
     walletAddress: env.wallet.address
   });
+
+  try {
+    await gSwap.connectSocket();
+    logger.info('📡 Connected to bundler socket for transaction monitoring');
+  } catch (error) {
+    logger.warn('⚠️ Bundler socket connection failed, will return transaction ID only');
+  }
 
   try {
     GSwap.events?.connectEventSocket();
@@ -53,6 +61,13 @@ async function step1_getQuote() {
     logger.info(`   Fee Tier: ${quote.feeTier}`);
     logger.info(`   Rate: 1 GALA = ${(quote.outTokenAmount.toNumber() / amount).toFixed(6)} GUSDC`);
 
+    logger.info(`🔍 Quote Debug Info:`, {
+      feeTier: quote.feeTier,
+      feeTierType: typeof quote.feeTier,
+      feeTierString: quote.feeTier.toString(),
+      feeTierParsed: parseInt(quote.feeTier.toString(), 10)
+    });
+
     return {
       amount,
       outputAmount: quote.outTokenAmount.toNumber(),
@@ -70,27 +85,80 @@ async function step2_executeFirstTrade(inputAmount: number, minOutput: number, f
   const { gSwap, env } = await setupGSwap();
 
   try {
-    // Create swap parameters
-    const swapParams = {
+    // Use official docs API signature
+    logger.info(`🔧 Using official docs swap signature`);
+    logger.info(`🔍 Parameters:`, {
       tokenIn: 'GALA|Unit|none|none',
       tokenOut: 'GUSDC|Unit|none|none',
-      fee: parseInt(feeTier.toString(), 10), // Ensure fee is integer
-      recipient: env.wallet.address,
-      deadline: Math.floor(Date.now() / 1000) + 1200, // 20 minutes
-      amountIn: parseFloat(inputAmount.toString()), // Ensure number
-      amountOutMinimum: parseFloat((minOutput * 0.95).toString()), // 5% slippage tolerance
-      sqrtPriceLimitX96: 0
-    };
+      feeTier: feeTier,
+      exactIn: inputAmount,
+      amountOutMinimum: minOutput * 0.95,
+      recipient: env.wallet.address
+    });
 
-    logger.info(`🔧 Swap Parameters:`, swapParams);
+    // Generate swap payload using official docs signature
+    const swapPayload = await gSwap.swaps.swap(
+      'GALA|Unit|none|none', // Token to sell
+      'GUSDC|Unit|none|none', // Token to buy
+      feeTier, // Use the fee tier from the quote
+      {
+        exactIn: inputAmount,
+        amountOutMinimum: minOutput * 0.95, // 5% slippage - let SDK handle negative values
+      },
+      env.wallet.address, // your wallet address
+    );
 
-    // Generate swap payload
-    const swapPayload = await gSwap.swaps.swap(swapParams);
+    logger.info(`📝 Generated swap payload:`, typeof swapPayload);
+    logger.info(`🔍 Swap payload properties:`, Object.keys(swapPayload));
 
-    logger.info(`📝 Generated swap payload`);
+    // Check if swapPayload has execution method or if it's already executed
+    if (swapPayload && typeof swapPayload === 'object') {
+      const payload = swapPayload as any;
 
-    // Execute the bundle
-    const result = await gSwap.bundles.executeBundle(swapPayload);
+      logger.info(`🔍 Payload details:`, {
+        transactionId: payload.transactionId,
+        message: payload.message,
+        error: payload.error,
+        waitDelegateType: typeof payload.waitDelegate
+      });
+
+      // Check if there's a transaction ID (indicates successful submission)
+      if (payload.transactionId) {
+        logger.info(`✅ Transaction submitted with ID: ${payload.transactionId}`);
+
+        // If there's a waitDelegate, it might be awaitable
+        if (payload.waitDelegate && typeof payload.waitDelegate === 'function') {
+          logger.info(`🔄 Waiting for transaction confirmation...`);
+          try {
+            const result = await payload.waitDelegate();
+            logger.info(`✅ Transaction confirmed:`, result);
+            return result.hash || payload.transactionId;
+          } catch (error: any) {
+            logger.error(`❌ Transaction failed:`, error);
+
+            // Extract transaction hash from error details if available
+            if (error.details?.transactionHash) {
+              logger.info(`✅ Transaction was executed: ${error.details.transactionHash}`);
+              logger.info(`❌ But failed with: ${error.details.Message}`);
+              return error.details.transactionHash;
+            }
+
+            throw error;
+          }
+        }
+
+        return payload.transactionId;
+      }
+
+      // Check for errors
+      if (payload.error) {
+        logger.error(`❌ Transaction error: ${payload.error}`);
+        throw new Error(payload.error);
+      }
+    }
+
+    logger.info(`❓ Unknown payload format`);
+    return 'unknown-transaction-format';
 
     if (result.hash) {
       logger.info(`✅ Trade Executed!`);
@@ -142,36 +210,80 @@ async function step4_executeReturnTrade(inputAmount: number, minOutput: number, 
   const { gSwap, env } = await setupGSwap();
 
   try {
-    // Create return swap parameters
-    const swapParams = {
+    // Use official docs API signature for return trade
+    logger.info(`🔧 Using official docs return swap signature`);
+    logger.info(`🔍 Return Parameters:`, {
       tokenIn: 'GUSDC|Unit|none|none',
       tokenOut: 'GALA|Unit|none|none',
-      fee: parseInt(feeTier.toString(), 10), // Ensure fee is integer
-      recipient: env.wallet.address,
-      deadline: Math.floor(Date.now() / 1000) + 1200, // 20 minutes
-      amountIn: parseFloat(inputAmount.toString()), // Ensure number
-      amountOutMinimum: parseFloat((minOutput * 0.95).toString()), // 5% slippage tolerance
-      sqrtPriceLimitX96: 0
-    };
+      feeTier: feeTier,
+      exactIn: inputAmount,
+      amountOutMinimum: minOutput * 0.95,
+      recipient: env.wallet.address
+    });
 
-    logger.info(`🔧 Return Swap Parameters:`, swapParams);
+    // Generate return swap payload using official docs signature
+    const swapPayload = await gSwap.swaps.swap(
+      'GUSDC|Unit|none|none', // Token to sell
+      'GALA|Unit|none|none', // Token to buy
+      feeTier, // Use the fee tier from the quote
+      {
+        exactIn: inputAmount,
+        amountOutMinimum: minOutput * 0.95, // 5% slippage - let SDK handle negative values
+      },
+      env.wallet.address, // your wallet address
+    );
 
-    // Generate swap payload
-    const swapPayload = await gSwap.swaps.swap(swapParams);
+    logger.info(`📝 Generated return swap payload:`, typeof swapPayload);
+    logger.info(`🔍 Return swap payload properties:`, Object.keys(swapPayload));
 
-    logger.info(`📝 Generated return swap payload`);
+    // Check if swapPayload has execution method or if it's already executed
+    if (swapPayload && typeof swapPayload === 'object') {
+      const payload = swapPayload as any;
 
-    // Execute the bundle
-    const result = await gSwap.bundles.executeBundle(swapPayload);
+      logger.info(`🔍 Return payload details:`, {
+        transactionId: payload.transactionId,
+        message: payload.message,
+        error: payload.error,
+        waitDelegateType: typeof payload.waitDelegate
+      });
 
-    if (result.hash) {
-      logger.info(`✅ Return Trade Executed!`);
-      logger.info(`   Transaction Hash: ${result.hash}`);
-      logger.info(`   View on GalaScan: https://galascan.io/tx/${result.hash}`);
-      return result.hash;
-    } else {
-      throw new Error('No transaction hash returned');
+      // Check if there's a transaction ID (indicates successful submission)
+      if (payload.transactionId) {
+        logger.info(`✅ Return transaction submitted with ID: ${payload.transactionId}`);
+
+        // If there's a waitDelegate, it might be awaitable
+        if (payload.waitDelegate && typeof payload.waitDelegate === 'function') {
+          logger.info(`🔄 Waiting for return transaction confirmation...`);
+          try {
+            const result = await payload.waitDelegate();
+            logger.info(`✅ Return transaction confirmed:`, result);
+            return result.hash || payload.transactionId;
+          } catch (error: any) {
+            logger.error(`❌ Return transaction failed:`, error);
+
+            // Extract transaction hash from error details if available
+            if (error.details?.transactionHash) {
+              logger.info(`✅ Return transaction was executed: ${error.details.transactionHash}`);
+              logger.info(`❌ But failed with: ${error.details.Message}`);
+              return error.details.transactionHash;
+            }
+
+            throw error;
+          }
+        }
+
+        return payload.transactionId;
+      }
+
+      // Check for errors
+      if (payload.error) {
+        logger.error(`❌ Return transaction error: ${payload.error}`);
+        throw new Error(payload.error);
+      }
     }
+
+    logger.info(`❓ Unknown return payload format`);
+    return 'unknown-return-transaction-format';
 
   } catch (error) {
     logger.error('❌ Return trade execution failed:', error);
