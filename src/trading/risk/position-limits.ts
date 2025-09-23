@@ -7,7 +7,6 @@ import { GSwap } from '../../services/gswap-simple';
 import { TradingConfig } from '../../config/environment';
 import { logger } from '../../utils/logger';
 import { safeParseFloat } from '../../utils/safe-parse';
-import { calculatePriceFromSqrtPriceX96 } from '../../utils/price-math';
 
 export interface PositionLimitsConfig {
   maxPositionSize: number;
@@ -34,9 +33,9 @@ export class PositionLimits {
     this.gswap = gswap;
     this.limitsConfig = {
       maxPositionSize: config.maxPositionSize,
-      maxTotalExposure: config.maxPositionSize * 5, // 5x max position size
-      maxPositionsPerToken: 3,
-      concentrationLimit: 0.3, // 30% max concentration
+      maxTotalExposure: config.maxPositionSize * 10, // 10x max position size for arbitrage bot
+      maxPositionsPerToken: 10, // Allow more positions for active trading
+      concentrationLimit: config.concentrationLimit || 1.0, // Use config or default to 100%
     };
 
     logger.info('Position Limits initialized with config:', this.limitsConfig);
@@ -47,6 +46,12 @@ export class PositionLimits {
    */
   async checkLimits(userAddress: string): Promise<boolean> {
     try {
+      // Check if portfolio limits are disabled for arbitrage trading
+      if (this.config.disablePortfolioLimits) {
+        logger.debug('Portfolio limits disabled - skipping position checks');
+        return true;
+      }
+
       // Get current positions from GalaSwap API using real SDK operations
       const exposures = await this.calculateExposures(userAddress);
 
@@ -128,55 +133,49 @@ export class PositionLimits {
   }
 
   /**
-   * Get token balances for user wallet
+   * Get token balances for user wallet using direct wallet balance API
    */
   private async getTokenBalances(userAddress: string): Promise<{ token: string; amount: number }[]> {
     try {
-      logger.debug('Fetching token balances for address:', userAddress);
+      logger.debug('Fetching wallet token balances for address:', userAddress);
 
-      // Get user positions from GalaSwap SDK
-      const positionsResponse = await this.gswap.positions.getUserPositions(userAddress);
+      // Get user assets directly from wallet (not liquidity positions)
+      const assetsResponse = await this.gswap.assets.getUserAssets(userAddress, 1, 20);
 
-      if (!positionsResponse?.positions) {
-        logger.warn('No positions found or API error');
+      if (!assetsResponse?.tokens) {
+        logger.debug('No tokens found in wallet');
         return [];
       }
 
-      // Aggregate balances by token from positions
-      const balanceMap = new Map<string, number>();
+      // Convert SDK format to our internal format
+      const balances = assetsResponse.tokens
+        .map(token => ({
+          token: token.symbol || token.name,
+          amount: safeParseFloat(token.quantity || '0', 0)
+        }))
+        .filter(balance => balance.amount > 0); // Only include non-zero balances
 
-      for (const position of positionsResponse.positions) {
-        // Extract token symbols from position - handle different response formats
-        const token0 = this.getTokenSymbol(position, 0);
-        const token1 = this.getTokenSymbol(position, 1);
-
-        // Handle different amount fields
-        const amount0 = (position as any).amount0 || (position as any).tokensOwed0 || (position as any).liquidity;
-        const amount1 = (position as any).amount1 || (position as any).tokensOwed1 || (position as any).fees0;
-
-        // Add token0 balance
-        if (token0 && amount0) {
-          const currentBalance = balanceMap.get(token0) || 0;
-          balanceMap.set(token0, currentBalance + safeParseFloat(amount0, 0));
-        }
-
-        // Add token1 balance
-        if (token1 && amount1) {
-          const currentBalance = balanceMap.get(token1) || 0;
-          balanceMap.set(token1, currentBalance + safeParseFloat(amount1, 0));
-        }
-      }
-
-      // Convert map to array format
-      const balances = Array.from(balanceMap.entries()).map(([token, amount]) => ({
-        token,
-        amount
-      }));
-
-      logger.debug(`Found ${balances.length} token balances for ${userAddress}:`, balances);
+      logger.debug(`Found ${balances.length} wallet token balances for ${userAddress}:`, balances);
       return balances;
 
     } catch (error) {
+      // Handle API limit errors gracefully
+      if (error && typeof error === 'object' && 'message' in error &&
+          error.message.includes('400') && error.message.includes('limit')) {
+        logger.warn('getUserAssets API limit exceeded, retrying with smaller limit');
+        try {
+          const assetsResponse = await this.gswap.assets.getUserAssets(userAddress, 1, 10);
+          const balances = assetsResponse?.tokens?.map(token => ({
+            token: token.symbol || token.name,
+            amount: safeParseFloat(token.quantity || '0', 0)
+          })).filter(balance => balance.amount > 0) || [];
+          return balances;
+        } catch (retryError) {
+          logger.error('Error fetching token balances on retry:', retryError);
+          return [];
+        }
+      }
+
       logger.error('Error fetching token balances from GalaSwap API:', error);
       return [];
     }
@@ -192,28 +191,65 @@ export class PositionLimits {
       // Parallelize price fetching for all tokens
       const pricePromises = tokens.map(async (token) => {
         try {
-          const poolData = await this.gswap.pools.getPoolData(token, 'GUSDC$Unit$none$none', 3000);
-
-          if (poolData?.liquidity) {
-            // Calculate real price from sqrtPrice using pool mathematics
-            const sqrtPrice = poolData.sqrtPrice;
-            if (sqrtPrice) {
-              // Calculate price using safe BigInt mathematics
-              const actualPrice = calculatePriceFromSqrtPriceX96(BigInt(sqrtPrice.toString()));
-              const price = actualPrice > 0 ? actualPrice : 1.0;
-              logger.debug(`Fetched price for ${token}: $${price}`);
-              return { token, price };
-            } else {
-              const price = 1.0; // Fallback for stable pairs
-              logger.debug(`Fetched price for ${token}: $${price}`);
-              return { token, price };
+          // Use direct API call instead of non-existent SDK method
+          // Convert token symbol to full dollar format for API
+          let dollarFormatToken: string;
+          if (token.includes('|') || token.includes('$')) {
+            // Already in full format, just convert to dollar format
+            dollarFormatToken = token.replace(/\|/g, '$');
+          } else {
+            // Convert symbol to full token format
+            switch (token) {
+              case 'GALA':
+                dollarFormatToken = 'GALA$Unit$none$none';
+                break;
+              case 'GUSDC':
+              case 'USDC':
+                dollarFormatToken = 'GUSDC$Unit$none$none';
+                break;
+              case 'ETIME':
+                dollarFormatToken = 'ETIME$Unit$none$none';
+                break;
+              case 'SILK':
+                dollarFormatToken = 'SILK$Unit$none$none';
+                break;
+              default:
+                // Assume standard format for unknown tokens
+                dollarFormatToken = `${token}$Unit$none$none`;
             }
+          }
+          const baseUrl = process.env.API_BASE_URL || 'https://dex-backend-prod1.defi.gala.com';
+          const response = await fetch(`${baseUrl}/v1/trade/price?token=${encodeURIComponent(dollarFormatToken)}`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
+            signal: AbortSignal.timeout(5000)
+          });
+
+          if (!response.ok) {
+            throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+          }
+
+          const poolData = await response.json();
+
+          const priceUsd = parseFloat(poolData.data || '0');
+          if (priceUsd > 0) {
+            logger.debug(`API price for ${token}: $${priceUsd}`);
+            return { token, price: priceUsd };
           } else {
             logger.warn(`Failed to fetch price for ${token}`);
             // Fallback to default prices for known tokens
             let price: number;
             switch (token) {
+              case 'GALA':
+              case 'GALA|Unit|none|none':
+                price = 0.015; // Reasonable GALA price fallback
+                break;
               case 'USDC':
+              case 'GUSDC':
+              case 'GUSDC|Unit|none|none':
               case 'USDT':
                 price = 1.0; // Stablecoins default to $1
                 break;
@@ -224,8 +260,15 @@ export class PositionLimits {
           }
         } catch (tokenError) {
           logger.error(`Error fetching price for ${token}:`, tokenError);
-          // Use fallback pricing
-          const price = token === 'USDC' || token === 'USDT' ? 1.0 : 0.01;
+          // Use fallback pricing for known tokens
+          let price: number;
+          if (token.includes('GALA')) {
+            price = 0.015; // GALA fallback
+          } else if (token.includes('USDC') || token.includes('USDT')) {
+            price = 1.0; // Stablecoin fallback
+          } else {
+            price = 0.01; // Default fallback
+          }
           return { token, price };
         }
       });
@@ -299,6 +342,12 @@ export class PositionLimits {
     userAddress: string
   ): Promise<{ allowed: boolean; reason?: string }> {
     try {
+      // Check if portfolio limits are disabled for arbitrage trading
+      if (this.config.disablePortfolioLimits) {
+        logger.debug('Portfolio limits disabled - allowing position');
+        return { allowed: true };
+      }
+
       this.resetDailyLimitsIfNeeded();
 
       const exposures = await this.calculateExposures(userAddress);
@@ -446,8 +495,14 @@ export class PositionLimits {
     totalValue: number;
     positions: Array<{ token: string; value: number }>;
   }): Promise<{ valid: boolean; violations: string[] }> {
+    // Check if portfolio limits are disabled for arbitrage trading
+    if (this.config.disablePortfolioLimits) {
+      logger.debug('Portfolio limits disabled - skipping concentration validation');
+      return { valid: true, violations: [] };
+    }
+
     const violations: string[] = [];
-    const maxConcentration = this.config.maxPortfolioConcentration || 0.5;
+    const maxConcentration = this.config.concentrationLimit || this.config.maxPortfolioConcentration || 1.0;
 
     for (const position of portfolio.positions) {
       const concentration = position.value / portfolio.totalValue;

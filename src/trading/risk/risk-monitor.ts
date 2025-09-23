@@ -10,6 +10,9 @@ import { AlertSystem } from '../../monitoring/alerts';
 import { safeParseFloat } from '../../utils/safe-parse';
 import { calculatePriceFromSqrtPriceX96, getPoolPrice } from '../../utils/price-math';
 import { TokenClassKey, BlockchainPosition } from '../../types/galaswap';
+import { TRADING_CONSTANTS } from '../../config/constants';
+import { TradingMode } from '../../types/trading';
+import { getRiskProfile } from './risk-profiles';
 
 export interface RiskConfig {
   maxDailyLossPercent: number;
@@ -123,7 +126,7 @@ export class RiskMonitor {
 
     try {
       // Initialize baseline portfolio value
-      const initialSnapshot = await this.capturePortfolioSnapshot(userAddress);
+      const initialSnapshot = await this.capturePortfolioSnapshot(userAddress, TradingMode.MIXED);
       this.baselinePortfolioValue = initialSnapshot.totalValue;
       this.dailyStartValue = initialSnapshot.totalValue;
       this.portfolioSnapshots.push(initialSnapshot);
@@ -131,7 +134,7 @@ export class RiskMonitor {
       // Start monitoring loop
       this.monitoringInterval = setInterval(async () => {
         try {
-          await this.performRiskCheck(userAddress);
+          await this.performRiskCheck(userAddress, TradingMode.MIXED);
         } catch (error) {
           logger.error('Error in risk monitoring cycle:', error);
         }
@@ -165,14 +168,18 @@ export class RiskMonitor {
   /**
    * Perform comprehensive risk check
    */
-  async performRiskCheck(userAddress: string): Promise<{
+  async performRiskCheck(userAddress: string, tradingMode: TradingMode = TradingMode.MIXED): Promise<{
     riskLevel: 'low' | 'medium' | 'high' | 'critical';
     shouldContinueTrading: boolean;
     alerts: string[];
     emergencyActions: string[];
   }> {
     try {
-      const snapshot = await this.capturePortfolioSnapshot(userAddress);
+      // Validate trading mode enum
+      if (!Object.values(TradingMode).includes(tradingMode)) {
+        throw new Error(`Invalid trading mode: ${tradingMode}. Must be one of: ${Object.values(TradingMode).join(', ')}`);
+      }
+      const snapshot = await this.capturePortfolioSnapshot(userAddress, tradingMode);
       this.portfolioSnapshots.push(snapshot);
 
       // Keep only last 24 hours of snapshots
@@ -200,16 +207,40 @@ export class RiskMonitor {
         }
       }
 
-      // Check position concentration
-      const concentrationCheck = this.checkConcentrationRisk(snapshot);
-      if (concentrationCheck.violated) {
-        alerts.push(concentrationCheck.message);
+      // Get risk profile for trading mode
+      const riskProfile = getRiskProfile(tradingMode);
+
+      // Emergency override: Force concentration checks during extreme volatility
+      const isExtremeVolatility = snapshot.riskMetrics.volatilityScore > this.riskConfig.emergencyStopTriggers.unusualVolatility;
+      const shouldForceConcentrationCheck = isExtremeVolatility && snapshot.riskMetrics.maxConcentration > 0.70;
+
+      // Check position concentration (if not ignored OR emergency override active)
+      if (!riskProfile.ignoreChecks.includes('concentration') || shouldForceConcentrationCheck) {
+        // Use configuration-based limit or default to 100% for arbitrage bot
+        const concentrationLimit = shouldForceConcentrationCheck ?
+          Math.min(riskProfile.maxConcentration, 0.70) :
+          (this.config.concentrationLimit || riskProfile.maxConcentration || 1.0);
+
+        const concentrationCheck = this.checkConcentrationRisk(snapshot, concentrationLimit);
+        if (concentrationCheck.violated) {
+          const message = shouldForceConcentrationCheck ?
+            `EMERGENCY OVERRIDE: ${concentrationCheck.message} (extreme volatility detected)` :
+            concentrationCheck.message;
+          alerts.push(message);
+
+          // Add emergency action if concentration is very high during volatility
+          if (shouldForceConcentrationCheck && snapshot.riskMetrics.maxConcentration > 0.85) {
+            emergencyActions.push('REDUCE_CONCENTRATION');
+          }
+        }
       }
 
-      // Check position age limits
-      const ageCheck = this.checkPositionAges(snapshot);
-      if (ageCheck.violated) {
-        alerts.push(ageCheck.message);
+      // Check position age limits (if not ignored)
+      if (!riskProfile.ignoreChecks.includes('position_age')) {
+        const ageCheck = this.checkPositionAges(snapshot);
+        if (ageCheck.violated) {
+          alerts.push(ageCheck.message);
+        }
       }
 
       // Check daily volume limits
@@ -227,8 +258,8 @@ export class RiskMonitor {
         }
       }
 
-      // Calculate overall risk level
-      const riskLevel = this.calculateRiskLevel(snapshot.riskMetrics.riskScore);
+      // Calculate overall risk level using trading mode specific thresholds
+      const riskLevel = this.calculateRiskLevel(snapshot.riskMetrics.riskScore, riskProfile.riskThresholds);
       const shouldContinueTrading = emergencyActions.length === 0 && riskLevel !== 'critical' && riskLevel !== 'high';
 
       // Send alerts if necessary
@@ -268,7 +299,7 @@ export class RiskMonitor {
   /**
    * Capture current portfolio snapshot
    */
-  private async capturePortfolioSnapshot(userAddress: string): Promise<PortfolioSnapshot> {
+  private async capturePortfolioSnapshot(userAddress: string, tradingMode: TradingMode = TradingMode.MIXED): Promise<PortfolioSnapshot> {
     try {
       // Get real token balances using GalaSwap SDK
       const balances = await this.getTokenBalances(userAddress);
@@ -307,8 +338,8 @@ export class RiskMonitor {
       // Calculate daily volume from price tracker if available
       const dailyVolume = this.calculateDailyVolume(userAddress);
 
-      // Calculate risk metrics
-      const riskMetrics = this.calculateRiskMetricsInternal(positions, totalValue);
+      // Calculate risk metrics with trading mode-aware scoring
+      const riskMetrics = this.calculateRiskMetricsInternal(positions, totalValue, tradingMode);
 
       return {
         timestamp: Date.now(),
@@ -327,51 +358,47 @@ export class RiskMonitor {
   }
 
   /**
-   * Get token balances for the wallet
+   * Get token balances for the wallet using direct wallet balance API
    */
   private async getTokenBalances(userAddress: string): Promise<{ token: string; amount: number }[]> {
     try {
-      logger.debug(`Fetching real token balances for address: ${userAddress}`);
+      logger.debug(`Fetching wallet token balances for address: ${userAddress}`);
 
-      // Get user positions to extract token balances
-      const positionsResponse = await this.gswap.positions.getUserPositions(userAddress);
+      // Get user assets directly from wallet (not liquidity positions)
+      const assetsResponse = await this.gswap.assets.getUserAssets(userAddress, 1, 20);
 
-      if (!positionsResponse?.positions) {
-        logger.warn('Failed to fetch user positions, falling back to empty balances');
+      if (!assetsResponse?.tokens) {
+        logger.debug('No tokens found in wallet');
         return [];
       }
 
-      // Extract unique tokens from positions and calculate total balances
-      const tokenBalances = new Map<string, number>();
+      // Convert SDK format to our internal format
+      const balances = assetsResponse.tokens.map(token => ({
+        token: token.symbol || token.name,
+        amount: safeParseFloat(token.quantity || '0', 0)
+      })).filter(balance => balance.amount > 0); // Only include non-zero balances
 
-      for (const position of positionsResponse.positions) {
-        // Extract token balances from liquidity positions
-        const token0 = this.extractTokenSymbol(position.token0ClassKey);
-        const token1 = this.extractTokenSymbol(position.token1ClassKey);
-
-        if (token0 && position.liquidity) {
-          const liquidityAmount = safeParseFloat(position.liquidity?.toString() || '0', 0) / 2; // Approximate split
-          const current = tokenBalances.get(token0) || 0;
-          tokenBalances.set(token0, current + liquidityAmount);
-        }
-
-        if (token1 && position.liquidity) {
-          const liquidityAmount = safeParseFloat(position.liquidity?.toString() || '0', 0) / 2; // Approximate split
-          const current = tokenBalances.get(token1) || 0;
-          tokenBalances.set(token1, current + liquidityAmount);
-        }
-      }
-
-      // Convert map to array format
-      const balances = Array.from(tokenBalances.entries()).map(([token, amount]) => ({
-        token,
-        amount
-      }));
-
-      logger.debug(`Retrieved ${balances.length} token balances:`, balances);
+      logger.debug(`Retrieved ${balances.length} wallet token balances:`, balances);
       return balances;
 
     } catch (error) {
+      // Handle expected cases gracefully
+      if (error && typeof error === 'object' && 'message' in error) {
+        if (error.message.includes('400') && error.message.includes('limit')) {
+          logger.warn('getUserAssets API limit exceeded, retrying with smaller limit');
+          try {
+            const assetsResponse = await this.gswap.assets.getUserAssets(userAddress, 1, 10);
+            const balances = assetsResponse?.tokens?.map(token => ({
+              token: token.symbol || token.name,
+              amount: safeParseFloat(token.quantity || '0', 0)
+            })).filter(balance => balance.amount > 0) || [];
+            return balances;
+          } catch (retryError) {
+            logger.error('Error fetching token balances on retry:', retryError);
+            return [];
+          }
+        }
+      }
       logger.error('Error fetching token balances:', error);
       return [];
     }
@@ -390,44 +417,39 @@ export class RiskMonitor {
 
       const prices: { [token: string]: number } = {};
 
-      // Parallelize price fetching for all tokens
+      // Parallelize price fetching for all tokens using SDK
       const pricePromises = tokens.map(async (token) => {
         try {
-          let priceUsd = 0;
-          let priceFound = false;
+          // Convert token symbol to full token class key (pipe format)
+          const tokenClassKey = this.symbolToTokenClassKey(token);
+          // Convert to dollar format for API endpoint (proven working format)
+          const dollarFormatToken = tokenClassKey.replace(/\|/g, '$');
+          logger.debug(`Fetching price for token: ${token} (${dollarFormatToken})`);
 
-          // Try multiple stablecoin pairs in order of preference (FIXED format with $ separators)
-          const stablecoinPairs = [
-            { pair: 'GUSDC$Unit$none$none', decimals: 6, name: 'GUSDC' },
-            { pair: 'USDC$Stablecoin$none$none', decimals: 6, name: 'USDC' },
-            { pair: 'USDT$Stablecoin$none$none', decimals: 6, name: 'USDT' }
-          ];
+          // Use direct API call to /v1/trade/price endpoint (proven working method)
+          const baseUrl = process.env.API_BASE_URL || 'https://dex-backend-prod1.defi.gala.com';
+          const response = await fetch(`${baseUrl}/v1/trade/price?token=${encodeURIComponent(dollarFormatToken)}`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
+            signal: AbortSignal.timeout(5000)
+          });
 
-          for (const stablecoin of stablecoinPairs) {
-            try {
-              const poolData = await this.gswap.pools.getPoolData(token, stablecoin.pair, 3000);
-
-              if (poolData?.sqrtPrice && poolData?.liquidity) {
-                // Calculate real price from sqrtPriceX96 using safe math
-                priceUsd = calculatePriceFromSqrtPriceX96(BigInt(poolData.sqrtPrice.toString()), false, 18, stablecoin.decimals);
-                if (priceUsd > 0) {
-                  priceFound = true;
-                  logger.debug(`Real price for ${token}: $${priceUsd} via ${stablecoin.name} (sqrtPriceX96: ${poolData.sqrtPrice})`);
-                  break;
-                }
-              }
-            } catch (pairError) {
-              logger.debug(`Failed to get price for ${token} via ${stablecoin.name}:`, pairError);
-              continue; // Try next stablecoin pair
-            }
+          if (!response.ok) {
+            throw new Error(`API request failed: ${response.status} ${response.statusText}`);
           }
 
-          if (!priceFound) {
-            logger.warn(`Failed to get price data for ${token} from any stablecoin pair`);
-            // For production safety, fail explicitly rather than using mock prices
-            throw new Error(`No valid price data available for token ${token}`);
+          const data = await response.json();
+          logger.debug(`API response for ${token}:`, data);
+          const priceUsd = parseFloat(data.data || '0');
+
+          if (priceUsd <= 0) {
+            throw new Error(`Invalid price returned: ${priceUsd}. Full response: ${JSON.stringify(data)}`);
           }
 
+          logger.debug(`SDK price for ${token}: $${priceUsd}`);
           return { token, price: priceUsd };
         } catch (tokenError) {
           logger.error(`Error fetching price for ${token}:`, tokenError);
@@ -477,9 +499,28 @@ export class RiskMonitor {
   }
 
   /**
+   * Convert token symbol to full token class key
+   */
+  private symbolToTokenClassKey(symbol: string): string {
+    // Check if it's already a full token class key (pipe format for SDK)
+    if (symbol.includes('|')) {
+      return symbol;
+    }
+
+    // Map known symbols to their token class keys (now in pipe format)
+    const tokenKey = TRADING_CONSTANTS.TOKENS[symbol as keyof typeof TRADING_CONSTANTS.TOKENS];
+    if (tokenKey) {
+      return tokenKey;
+    }
+
+    // Fallback: assume it's a Unit token (SDK pipe format)
+    return `${symbol}|Unit|none|none`;
+  }
+
+  /**
    * Public method to calculate risk metrics from a portfolio object
    */
-  calculateRiskMetrics(portfolio: { positions: BlockchainPosition[]; totalValue: number; balances: Array<{ token: string; amount: number; valueUSD?: number }> }): RiskMetrics {
+  calculateRiskMetrics(portfolio: { positions: BlockchainPosition[]; totalValue: number; balances: Array<{ token: string; amount: number; valueUSD?: number }> }, tradingMode: TradingMode = TradingMode.MIXED): RiskMetrics {
     // Convert portfolio object to position snapshots if needed
 
     // Use real position data from portfolio - NO MOCK POSITIONS ALLOWED
@@ -509,13 +550,13 @@ export class RiskMonitor {
       age: pos.age || 0
     }));
 
-    return this.calculateRiskMetricsInternal(realPositions, portfolio.totalValue);
+    return this.calculateRiskMetricsInternal(realPositions, portfolio.totalValue, tradingMode);
   }
 
   /**
-   * Calculate comprehensive risk metrics
+   * Calculate comprehensive risk metrics with trading mode-aware scoring
    */
-  private calculateRiskMetricsInternal(positions: PositionSnapshot[], totalValue: number): RiskMetrics {
+  private calculateRiskMetricsInternal(positions: PositionSnapshot[], totalValue: number, tradingMode: TradingMode = TradingMode.MIXED): RiskMetrics {
     const totalExposure = positions.reduce((sum, pos) => sum + pos.valueUSD, 0);
     const maxConcentration = Math.max(...positions.map(pos => pos.percentOfPortfolio));
 
@@ -534,11 +575,15 @@ export class RiskMonitor {
     const variance = returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / returns.length;
     const volatilityScore = Math.sqrt(variance) * 100;
 
-    // Calculate overall risk score (0-100)
+    // Calculate overall risk score (0-100) with mode-aware weights
     let riskScore = 0;
-    riskScore += maxConcentration * 40; // Concentration risk (max 40 points)
-    riskScore += Math.min(isNaN(volatilityScore) ? 0 : volatilityScore, 30); // Volatility risk (max 30 points)
-    riskScore += drawdown * 30; // Drawdown risk (max 30 points)
+
+    // Trading mode-aware risk score weights
+    const riskWeights = this.getRiskScoringWeights(tradingMode);
+
+    riskScore += maxConcentration * riskWeights.concentration; // Concentration risk
+    riskScore += Math.min(isNaN(volatilityScore) ? 0 : volatilityScore, riskWeights.maxVolatility); // Volatility risk
+    riskScore += drawdown * riskWeights.drawdown; // Drawdown risk
 
     return {
       totalExposure,
@@ -549,6 +594,39 @@ export class RiskMonitor {
       sharpeRatio: volatilityScore > 0 ? avgReturn / volatilityScore : 0,
       riskScore: Math.min(riskScore, 100)
     };
+  }
+
+  /**
+   * Get risk scoring weights based on trading mode
+   */
+  private getRiskScoringWeights(tradingMode: TradingMode): { concentration: number; maxVolatility: number; drawdown: number } {
+    switch (tradingMode) {
+      case TradingMode.ARBITRAGE:
+        return {
+          concentration: 20,  // Reduced weight - concentration expected in arbitrage
+          maxVolatility: 30,  // Normal weight - volatility still matters
+          drawdown: 50        // Increased weight - drawdown more critical in high-concentration trades
+        };
+      case TradingMode.MARKET_MAKING:
+        return {
+          concentration: 35,  // Moderate weight - some concentration acceptable
+          maxVolatility: 25,  // Reduced weight - some volatility expected in market making
+          drawdown: 40        // Increased weight - inventory risk management critical
+        };
+      case TradingMode.PORTFOLIO:
+        return {
+          concentration: 40,  // Default weight - concentration is primary risk
+          maxVolatility: 30,  // Normal weight
+          drawdown: 30        // Normal weight
+        };
+      case TradingMode.MIXED:
+      default:
+        return {
+          concentration: 35,  // Balanced weight for mixed strategies
+          maxVolatility: 30,  // Normal weight
+          drawdown: 35        // Slightly increased weight for mixed approach
+        };
+    }
   }
 
   /**
@@ -596,16 +674,24 @@ export class RiskMonitor {
   /**
    * Check position concentration risk
    */
-  protected checkConcentrationRisk(snapshot: PortfolioSnapshot): {
+  protected checkConcentrationRisk(snapshot: PortfolioSnapshot, concentrationLimit: number = 0.3): {
     violated: boolean;
     message: string;
   } {
+    // Check if portfolio limits are disabled for arbitrage trading
+    if (this.config.disablePortfolioLimits) {
+      return {
+        violated: false,
+        message: `Portfolio limits disabled - concentration checks bypassed`
+      };
+    }
+
     const maxConcentration = snapshot.riskMetrics.maxConcentration;
-    const violated = maxConcentration > 0.3; // 30% max concentration
+    const violated = maxConcentration > concentrationLimit;
 
     return {
       violated,
-      message: `Maximum concentration: ${(maxConcentration * 100).toFixed(2)}% (limit: 30%)`
+      message: `Maximum concentration: ${(maxConcentration * 100).toFixed(2)}% (limit: ${(concentrationLimit * 100).toFixed(0)}%)`
     };
   }
 
@@ -794,10 +880,11 @@ export class RiskMonitor {
   /**
    * Calculate risk level from risk score
    */
-  protected calculateRiskLevel(riskScore: number): 'low' | 'medium' | 'high' | 'critical' {
-    if (riskScore >= this.RISK_THRESHOLDS.CRITICAL_RISK) return 'critical';
-    if (riskScore >= this.RISK_THRESHOLDS.HIGH_RISK) return 'high';
-    if (riskScore >= this.RISK_THRESHOLDS.MEDIUM_RISK) return 'medium';
+  protected calculateRiskLevel(riskScore: number, customThresholds?: { LOW_RISK: number; MEDIUM_RISK: number; HIGH_RISK: number; CRITICAL_RISK: number }): 'low' | 'medium' | 'high' | 'critical' {
+    const thresholds = customThresholds || this.RISK_THRESHOLDS;
+    if (riskScore >= thresholds.CRITICAL_RISK) return 'critical';
+    if (riskScore >= thresholds.HIGH_RISK) return 'high';
+    if (riskScore >= thresholds.MEDIUM_RISK) return 'medium';
     return 'low';
   }
 
@@ -808,6 +895,8 @@ export class RiskMonitor {
     tokenIn: string;
     tokenOut: string;
     amountIn: number;
+    userAddress: string;
+    tradingMode?: TradingMode;
     currentPortfolio: PortfolioSnapshot;
     marketConditions: {
       volatility: number;
@@ -823,7 +912,7 @@ export class RiskMonitor {
   }> {
     try {
       // Check if trading should be halted
-      const riskCheck = await this.performRiskCheck(params.currentPortfolio.positions[0]?.token || 'GALA');
+      const riskCheck = await this.performRiskCheck(params.userAddress, params.tradingMode || TradingMode.MIXED);
 
       if (!riskCheck.shouldContinueTrading) {
         return {

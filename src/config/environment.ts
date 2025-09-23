@@ -18,6 +18,8 @@ export interface TradingConfig {
   defaultSlippageTolerance?: number; // Optional for test compatibility
   minProfitThreshold?: number; // Optional for test compatibility
   maxDailyVolume?: number;
+  concentrationLimit?: number; // New: max portfolio concentration (1.0 = 100%)
+  disablePortfolioLimits?: boolean; // New: bypass all portfolio restrictions
   maxSlippage?: number;
   maxPortfolioConcentration?: number;
   emergencyStopLoss?: number;
@@ -120,9 +122,12 @@ export function validateEnvironment(): BotConfig {
 
   const config: BotConfig = {
     trading: {
-      maxPositionSize: safeParseFloat(process.env.MAX_POSITION_SIZE, 1000),
+      maxPositionSize: safeParseFloat(process.env.MAX_POSITION_SIZE, 10000000), // Default to $10M for arbitrage bot
       defaultSlippageTolerance: safeParseFloat(process.env.DEFAULT_SLIPPAGE_TOLERANCE, 0.01),
       minProfitThreshold: safeParseFloat(process.env.MIN_PROFIT_THRESHOLD, 0.001),
+      maxDailyVolume: safeParseFloat(process.env.MAX_DAILY_VOLUME, 100000000), // Default to $100M
+      concentrationLimit: safeParseFloat(process.env.CONCENTRATION_LIMIT, 1.0), // Default to 100%
+      disablePortfolioLimits: process.env.DISABLE_PORTFOLIO_LIMITS === 'true', // Default to enabled
     },
     api: {
       baseUrl: process.env.GALASWAP_API_URL!,

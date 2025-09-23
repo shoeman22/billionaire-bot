@@ -30,13 +30,13 @@ export const TRADING_CONSTANTS = {
     VOLATILE: 10000 // 1.00% for exotic/volatile pairs
   },
 
-  // Common GalaChain token identifiers
+  // Common GalaChain token identifiers (SDK pipe format)
   TOKENS: {
-    GALA: 'GALA$Unit$none$none',
-    GUSDC: 'GUSDC$Unit$none$none',
-    ETIME: 'ETIME$Unit$none$none',
-    SILK: 'SILK$Unit$none$none',
-    GTON: 'GTON$Unit$none$none',
+    GALA: 'GALA|Unit|none|none',
+    GUSDC: 'GUSDC|Unit|none|none',
+    ETIME: 'ETIME|Unit|none|none',
+    SILK: 'SILK|Unit|none|none',
+    GTON: 'GTON|Unit|none|none',
   },
 
   // Position management
@@ -48,9 +48,9 @@ export const TRADING_CONSTANTS = {
     WIDE_RANGE: 5000,   // +/- 5000 ticks
   },
 
-  // Risk management
-  MAX_POSITION_VALUE_USD: 10000,
-  MAX_DAILY_TRADES: 100,
+  // Risk management (optimized for arbitrage trading)
+  MAX_POSITION_VALUE_USD: 10000000,  // $10M - effectively unlimited for arbitrage bot
+  MAX_DAILY_TRADES: 10000,           // Allow high frequency trading
   MIN_LIQUIDITY_USD: 1000, // Minimum pool liquidity for trading
   MAX_PRICE_IMPACT: 0.05,  // 5% maximum price impact
 } as const;
@@ -203,7 +203,7 @@ export const SECURITY_CONSTANTS = {
   // Address formats
   ADDRESS_FORMATS: {
     GALACHAIN_PATTERN: /^eth\|0x[a-fA-F0-9]{40}$/,
-    TOKEN_PATTERN: /^[A-Z0-9]+\$[A-Z0-9]+\$[A-Za-z0-9]+\$[A-Za-z0-9]+$/,
+    TOKEN_PATTERN: /^[A-Za-z0-9]+\|[A-Za-z0-9]+(?:\|[A-Za-z0-9:$]+){1,2}$/,
   },
 
   // Validation rules
@@ -256,11 +256,17 @@ export const STRATEGY_CONSTANTS = {
 
   // Market making strategy
   MARKET_MAKING: {
-    TARGET_SPREAD: 0.002,        // 0.2% target spread
-    RANGE_WIDTH_PERCENTAGE: 0.1, // 10% range width
-    REBALANCE_THRESHOLD: 0.05,   // 5% price movement triggers rebalance
-    MAX_POSITION_USD: 50000,
-    FEE_COLLECTION_THRESHOLD: 0.01, // Collect fees when > 1%
+    DEFAULT_TOKEN0: 'GALA|Unit|none|none',  // Default primary token
+    DEFAULT_TOKEN1: 'GUSDC|Unit|none|none', // Default quote token
+    DEFAULT_FEE_TIER: 3000,                 // 0.3% fee tier
+    DEFAULT_CAPITAL: '1000',                // Default capital allocation
+    TARGET_SPREAD: 0.002,                   // 0.2% target spread
+    RANGE_WIDTH_PERCENTAGE: 0.1,            // 10% range width
+    REBALANCE_THRESHOLD: 0.05,              // 5% price movement triggers rebalance
+    MAX_POSITION_USD: 10000000,  // $10M - effectively unlimited for arbitrage bot
+    FEE_COLLECTION_THRESHOLD: 0.01,         // Collect fees when > 1%
+    AUTO_REBALANCE: true,                   // Enable automatic rebalancing
+    UTILIZATION_TARGET: 0.8,                // 80% capital utilization target
   },
 
   // Risk management
