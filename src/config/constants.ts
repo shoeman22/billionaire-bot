@@ -24,6 +24,22 @@ export const TRADING_CONSTANTS = {
   RETRY_DELAY: 1000, // 1 second
   BACKOFF_MULTIPLIER: 2,
 
+  // Safety margins (as percentages for FixedNumber operations)
+  SAFETY_MARGINS: {
+    EXOTIC_ARBITRAGE_EXTRA: 2, // Additional 2% safety margin for exotic arbitrage
+    EMERGENCY_LIQUIDITY: 20,   // 20% safety margin for emergency liquidation (80% floor)
+    EMERGENCY_MINIMUM_FLOOR: 0.01, // Absolute minimum for emergency operations
+  },
+
+  // Gas estimation buffers (as multipliers for FixedNumber operations)
+  GAS_BUFFERS: {
+    SWAP: 1.0,                  // No buffer for basic swaps
+    ADD_LIQUIDITY: 1.1,         // 10% buffer for add liquidity
+    REMOVE_LIQUIDITY: 1.05,     // 5% buffer for remove liquidity
+    COLLECT_FEES: 1.0,          // No buffer for fee collection
+    REBALANCE: 1.2,             // 20% buffer for multi-step operations
+  },
+
   // GalaSwap V3 fee tiers (in basis points)
   FEE_TIERS: {
     STABLE: 500,    // 0.05% for stable pairs (USDC/USDT)

@@ -8,9 +8,10 @@ import { SlippageProtection, SlippageAnalysis } from '../risk/slippage';
 import { TRADING_CONSTANTS } from '../../config/constants';
 import { getConfig } from '../../config/environment';
 import { logger } from '../../utils/logger';
-import { safeParseFloat } from '../../utils/safe-parse';
+import { safeParseFloat, safeParseFixedNumber, safeFixedToNumber } from '../../utils/safe-parse';
 import { ApiResponseParser, ResponseValidators } from '../../utils/api-response-parser';
 import { createQuoteWrapper } from '../../utils/quote-api';
+import { PrecisionMath, FixedNumber, TOKEN_DECIMALS } from '../../utils/precision-math';
 import {
   QuoteRequest,
   QuoteResponse,
@@ -313,8 +314,14 @@ export class SwapExecutor {
         // Use working quote method instead of broken getPoolData
         const quote = await this.quoteWrapper.quoteExactInput(usdcToken, request.tokenIn, 1);
         if (quote?.outTokenAmount) {
-          // Price = 1 USDC / tokens received for 1 USDC
-          price = 1 / safeParseFloat(quote.outTokenAmount.toString(), 0);
+          // Price = 1 USDC / tokens received for 1 USDC using precision math
+          const outAmountFixed = PrecisionMath.fromToken(quote.outTokenAmount.toString(), TOKEN_DECIMALS.GUSDC);
+          const oneUsdcFixed = PrecisionMath.fromToken('1', TOKEN_DECIMALS.GUSDC);
+
+          if (!outAmountFixed.isZero()) {
+            const priceFixed = PrecisionMath.divide(oneUsdcFixed, outAmountFixed);
+            price = safeFixedToNumber(priceFixed);
+          }
         }
       }
     } catch (error) {
@@ -328,8 +335,8 @@ export class SwapExecutor {
     };
     const currentPrice = price;
 
-    // Calculate quoted price with safe parsing
-    const amountIn = safeParseFloat(request.amountIn, 0);
+    // Calculate quoted price using precision math
+    const amountInFixed = PrecisionMath.fromToken(request.amountIn, TOKEN_DECIMALS.GALA);
 
     // Parse quote data safely
     const quoteData = ApiResponseParser.parseNested<{
@@ -354,8 +361,14 @@ export class SwapExecutor {
       };
     }
 
-    const amountOut = safeParseFloat(quoteData.data!.amountOut, 0);
-    const quotedPrice = amountIn > 0 ? amountOut / amountIn : 0;
+    const amountOutFixed = PrecisionMath.fromToken(quoteData.data!.amountOut, TOKEN_DECIMALS.GALA);
+
+    // Calculate quoted price using precision math to avoid floating point errors
+    let quotedPrice = 0;
+    if (!amountInFixed.isZero()) {
+      const quotedPriceFixed = PrecisionMath.divide(amountOutFixed, amountInFixed);
+      quotedPrice = safeFixedToNumber(quotedPriceFixed);
+    }
 
     // Get real market data for analysis
     const marketData = await this.getMarketData(this.tokenToString(request.tokenIn), this.tokenToString(request.tokenOut));
@@ -403,7 +416,7 @@ export class SwapExecutor {
         throw new Error(`Quote output parsing failed: ${outputResult.error?.message}`);
       }
 
-      const expectedOutput = safeParseFloat(outputResult.data!.amountOut, 0);
+      const expectedOutputFixed = PrecisionMath.fromToken(outputResult.data!.amountOut, TOKEN_DECIMALS.GALA);
       const slippageTolerance = request.slippageTolerance || 0.01;
 
       // Validate slippage tolerance
@@ -411,10 +424,13 @@ export class SwapExecutor {
         throw new Error('Slippage tolerance out of safe bounds (0-50%)');
       }
 
-      const minimumAmountOut = (expectedOutput * (1 - slippageTolerance)).toString();
+      // Calculate minimum amount out using precision math
+      const slippageToleranceFixed = PrecisionMath.fromNumber(slippageTolerance, PrecisionMath.PERCENTAGE_DECIMALS);
+      const minimumAmountOutFixed = PrecisionMath.applySlippage(expectedOutputFixed, slippageToleranceFixed);
+      const minimumAmountOut = PrecisionMath.toToken(minimumAmountOutFixed, TOKEN_DECIMALS.GALA);
 
       // Validate minimum amount is reasonable
-      if (safeParseFloat(minimumAmountOut, 0) <= 0) {
+      if (minimumAmountOutFixed.isZero() || minimumAmountOutFixed.isNegative()) {
         throw new Error('Calculated minimum amount out is invalid');
       }
 
@@ -486,7 +502,11 @@ export class SwapExecutor {
       throw new Error('Invalid minimum amount out in payload request');
     }
 
-    if (safeParseFloat(request.amountIn, 0) < safeParseFloat(request.amountOutMinimum, 0)) {
+    // Compare amounts using precision math to avoid floating point errors
+    const amountInFixed = PrecisionMath.fromToken(request.amountIn, TOKEN_DECIMALS.GALA);
+    const amountOutMinFixed = PrecisionMath.fromToken(request.amountOutMinimum, TOKEN_DECIMALS.GALA);
+
+    if (amountInFixed.lt(amountOutMinFixed)) {
       logger.warn('Amount in is less than minimum amount out - this may indicate an issue');
     }
   }
@@ -526,11 +546,13 @@ export class SwapExecutor {
           throw new Error('Unable to get valid quote for swap');
         }
 
-        // Ensure minimum output is achievable
-        const expectedOutput = safeParseFloat(validateQuote.outTokenAmount.toString(), 0);
-        const minimumOutput = safeParseFloat(request.amountOutMinimum || '0', 0);
+        // Ensure minimum output is achievable using precision math
+        const expectedOutputFixed = PrecisionMath.fromToken(validateQuote.outTokenAmount.toString(), TOKEN_DECIMALS.GALA);
+        const minimumOutputFixed = PrecisionMath.fromToken(request.amountOutMinimum || '0', TOKEN_DECIMALS.GALA);
 
-        if (expectedOutput < minimumOutput) {
+        if (expectedOutputFixed.lt(minimumOutputFixed)) {
+          const expectedOutput = safeFixedToNumber(expectedOutputFixed);
+          const minimumOutput = safeFixedToNumber(minimumOutputFixed);
           throw new Error(`Quote output ${expectedOutput} is less than required minimum ${minimumOutput}`);
         }
 
@@ -559,7 +581,7 @@ export class SwapExecutor {
         logger.debug(`Real swap payload generated on attempt ${attempt}:`, {
           tokenIn: request.tokenIn,
           tokenOut: request.tokenOut,
-          expectedOutput: expectedOutput.toString(),
+          expectedOutput: safeFixedToNumber(expectedOutputFixed).toString(),
           minimumOutput: request.amountOutMinimum,
           poolLiquidity: testQuote.outTokenAmount // Use quote output as liquidity proxy
         });
@@ -1106,9 +1128,10 @@ export class SwapExecutor {
           status: executionData.status
         };
 
-        // Analyze price execution if data is available
+        // Analyze price execution if data is available using precision math
         if ((executionData as any).executedPrice) {
-          const actualPrice = safeParseFloat((executionData as any).executedPrice, 0);
+          const actualPriceFixed = PrecisionMath.fromNumber((executionData as any).executedPrice, PrecisionMath.PRICE_DECIMALS);
+          const actualPrice = safeFixedToNumber(actualPriceFixed);
           analysis.executedPrice = actualPrice;
 
           const slippageCheck = this.slippageProtection.monitorExecutionSlippage(
@@ -1168,7 +1191,11 @@ export class SwapExecutor {
     expectedPrice: number,
     actualPrice: number
   ): Promise<void> {
-    const slippagePercent = Math.abs((actualPrice - expectedPrice) / expectedPrice) * 100;
+    // Calculate slippage percentage using precision math
+    const expectedPriceFixed = PrecisionMath.fromNumber(expectedPrice, PrecisionMath.PRICE_DECIMALS);
+    const actualPriceFixed = PrecisionMath.fromNumber(actualPrice, PrecisionMath.PRICE_DECIMALS);
+    const slippagePercentFixed = PrecisionMath.calculatePercentageChange(expectedPriceFixed, actualPriceFixed);
+    const slippagePercent = Math.abs(safeFixedToNumber(slippagePercentFixed));
 
     logger.warn('Investigating high slippage scenario', {
       transactionId,
@@ -1291,9 +1318,11 @@ export class SwapExecutor {
 
       let poolLiquidity = '0'; // Start with no fallback
       if (quote?.outTokenAmount) {
-        // Use quote output as proxy for liquidity availability
-        const outAmount = safeParseFloat(quote.outTokenAmount.toString(), 0);
-        poolLiquidity = (outAmount * 1000).toString(); // Scale as rough liquidity estimate
+        // Use quote output as proxy for liquidity availability using precision math
+        const outAmountFixed = PrecisionMath.fromToken(quote.outTokenAmount.toString(), TOKEN_DECIMALS.GALA);
+        const scalingFactorFixed = PrecisionMath.fromNumber(1000, PrecisionMath.DEFAULT_DECIMALS);
+        const liquidityFixed = PrecisionMath.multiply(outAmountFixed, scalingFactorFixed);
+        poolLiquidity = PrecisionMath.toToken(liquidityFixed, TOKEN_DECIMALS.GALA);
         logger.debug(`Retrieved quote-based liquidity proxy: ${poolLiquidity} for ${tokenIn}/${tokenOut}`);
       } else {
         // If no quote available, no trading route exists
@@ -1317,33 +1346,44 @@ export class SwapExecutor {
       });
 
       if (historyResult.success && !priceHistory.error) {
-        // Calculate volatility from real price history
-        const prices = historyResult.data!.prices
-          .map(p => safeParseFloat(p.price || '0', 0))
-          .filter(p => p > 0);
-        if (prices.length > 1) {
-          const returns = prices.slice(1).map((price, i) => Math.log(price / prices[i]));
+        // Calculate volatility from real price history using precision math
+        const pricesFixed = historyResult.data!.prices
+          .map(p => PrecisionMath.fromNumber(p.price || '0', PrecisionMath.PRICE_DECIMALS))
+          .filter(p => !p.isZero());
+
+        if (pricesFixed.length > 1) {
+          // Calculate log returns using precision math
+          const returns = pricesFixed.slice(1).map((priceFixed, i) => {
+            const ratio = PrecisionMath.divide(priceFixed, pricesFixed[i]);
+            return Math.log(safeFixedToNumber(ratio)); // Math.log still requires regular numbers
+          });
+
           const avgReturn = returns.reduce((sum, r) => sum + r, 0) / returns.length;
           const variance = returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / returns.length;
           volatility24h = Math.sqrt(variance);
-          logger.debug(`Calculated volatility from ${prices.length} price points: ${(volatility24h * 100).toFixed(2)}%`);
+          logger.debug(`Calculated volatility from ${pricesFixed.length} price points: ${(volatility24h * 100).toFixed(2)}%`);
         }
       }
 
-      // Calculate realistic 24h volume estimate from pool characteristics
+      // Calculate realistic 24h volume estimate from pool characteristics using precision math
       let volume24h = '0'; // Start with zero instead of arbitrary fallback
       if (poolLiquidity) {
         // Use actual liquidity for realistic volume estimation
-        const liquidity = safeParseFloat(poolLiquidity, 0);
+        const liquidityFixed = PrecisionMath.fromToken(poolLiquidity, TOKEN_DECIMALS.GALA);
 
-        if (liquidity > 0) {
+        if (!liquidityFixed.isZero()) {
+          const liquidityNumber = safeFixedToNumber(liquidityFixed);
+
           // Estimate volume based on pool size and typical DeFi turnover rates
           // Larger pools typically have lower turnover rates
-          const turnoverRate = liquidity > 10000000 ? 0.05 : // Large pools: 5% daily turnover
-                              liquidity > 1000000 ? 0.15 :  // Medium pools: 15% daily turnover
+          const turnoverRate = liquidityNumber > 10000000 ? 0.05 : // Large pools: 5% daily turnover
+                              liquidityNumber > 1000000 ? 0.15 :  // Medium pools: 15% daily turnover
                               0.25; // Small pools: 25% daily turnover
 
-          volume24h = (liquidity * turnoverRate).toString();
+          const turnoverRateFixed = PrecisionMath.fromNumber(turnoverRate, PrecisionMath.PERCENTAGE_DECIMALS);
+          const volumeFixed = PrecisionMath.calculatePercentage(liquidityFixed, turnoverRateFixed);
+          volume24h = PrecisionMath.toToken(volumeFixed, TOKEN_DECIMALS.GALA);
+
           logger.debug(`Estimated 24h volume: ${volume24h} (${(turnoverRate * 100).toFixed(1)}% turnover)`);
         } else {
           logger.warn(`Zero liquidity found - cannot estimate volume`);

@@ -4,7 +4,8 @@
  */
 
 import { logger } from './logger';
-// Unused import removed: TRADING_CONSTANTS
+import { TRADING_CONSTANTS } from '../config/constants';
+import { applyGasBuffer } from './slippage-calculator';
 import BigNumber from 'bignumber.js';
 
 export interface GasEstimate {
@@ -187,16 +188,11 @@ export class GasEstimator {
       complex: 1.2
     };
 
-    // Operation-specific buffers
-    const operationBuffers = {
-      swap: 1.0,
-      addLiquidity: 1.1,
-      removeLiquidity: 1.05,
-      collectFees: 1.0,
-      rebalance: 1.2 // Higher buffer for multi-step operations
-    };
+    // Use configured gas buffers with FixedNumber precision
+    const operationBuffer = TRADING_CONSTANTS.GAS_BUFFERS[operation.toUpperCase() as keyof typeof TRADING_CONSTANTS.GAS_BUFFERS] || TRADING_CONSTANTS.GAS_BUFFERS.SWAP;
 
-    return baseBuffer * complexityBuffers[complexity] * operationBuffers[operation];
+    const totalBuffer = baseBuffer * complexityBuffers[complexity];
+    return applyGasBuffer(totalBuffer, operationBuffer);
   }
 
   /**

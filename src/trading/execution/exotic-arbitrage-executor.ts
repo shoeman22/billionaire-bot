@@ -7,12 +7,14 @@ import { GSwap, PrivateKeySigner } from '@gala-chain/gswap-sdk';
 import { validateEnvironment } from '../../config/environment';
 import { logger } from '../../utils/logger';
 import { TRADING_CONSTANTS, STRATEGY_CONSTANTS } from '../../config/constants';
-import { calculateMinOutputAmount } from '../../utils/slippage-calculator';
+import { calculateMinOutputAmount, applySafetyMargin, getTokenDecimals } from '../../utils/slippage-calculator';
 import { SignerService, createSignerService } from '../../security/SignerService';
 import { SwapExecutor, TransactionMonitoringResult } from './swap-executor';
 import { SlippageProtection } from '../risk/slippage';
 import { CircuitBreaker, CircuitBreakerFactory, CircuitBreakerManager, CircuitBreakerError } from '../../utils/circuit-breaker';
 import type { TokenInfo } from '../../types/galaswap';
+import { PrecisionMath, FixedNumber, TOKEN_DECIMALS } from '../../utils/precision-math';
+import { safeParseFixedNumber, safeFixedToNumber } from '../../utils/safe-parse';
 
 /**
  * Dynamic Gas Estimation System
@@ -64,6 +66,14 @@ export interface ExoticRoute {
   netProfit: number;
   confidence: 'high' | 'medium' | 'low';
   feeTiers: number[];
+  // Internal precision values for calculations
+  _precisionValues?: {
+    inputAmountFixed: FixedNumber;
+    expectedOutputFixed: FixedNumber;
+    profitAmountFixed: FixedNumber;
+    estimatedGasFixed: FixedNumber;
+    netProfitFixed: FixedNumber;
+  };
 }
 
 export interface ExoticArbitrageResult {
@@ -302,17 +312,32 @@ export async function discoverTriangularOpportunities(
       if (!quote2) continue;
 
       const finalAmount = quote2.outputAmount;
-      const profit = finalAmount - inputAmount;
-      const profitPercent = (profit / inputAmount) * 100;
 
-      // Estimate gas costs (2 swaps)
-      // Calculate dynamic gas estimation
+      // Use precision math for profit calculations
+      const inputAmountFixed = PrecisionMath.fromToken(inputAmount, TOKEN_DECIMALS.GALA);
+      const finalAmountFixed = PrecisionMath.fromToken(finalAmount, TOKEN_DECIMALS.GALA);
+      const profitFixed = PrecisionMath.subtract(finalAmountFixed, inputAmountFixed);
+      const profitPercentFixed = PrecisionMath.calculatePercentageChange(inputAmountFixed, finalAmountFixed);
+
+      // Convert back to numbers for compatibility
+      const profit = safeFixedToNumber(profitFixed);
+      const profitPercent = safeFixedToNumber(profitPercentFixed);
+
+      // Estimate gas costs (2 swaps) using precision math
       const gasEstimate = calculateDynamicGas(['GALA', token.symbol, 'GALA'], inputAmount);
-      const estimatedGas = gasEstimate.totalGas;
-      const netProfit = profit - estimatedGas;
+      const estimatedGasFixed = PrecisionMath.fromToken(gasEstimate.totalGas, TOKEN_DECIMALS.GALA);
+      const netProfitFixed = PrecisionMath.subtract(profitFixed, estimatedGasFixed);
+
+      // Convert back to numbers for compatibility
+      const estimatedGas = safeFixedToNumber(estimatedGasFixed);
+      const netProfit = safeFixedToNumber(netProfitFixed);
 
       logger.debug(`⛽ Gas estimate for GALA→${token.symbol}→GALA: ${estimatedGas} GALA (base: ${gasEstimate.baseGas}, complexity: ${gasEstimate.complexityMultiplier}x)`);
-      const netProfitPercent = (netProfit / inputAmount) * 100;
+      const netProfitPercentFixed = PrecisionMath.calculatePercentage(
+        PrecisionMath.divide(netProfitFixed, inputAmountFixed),
+        PrecisionMath.fromNumber(100, PrecisionMath.PERCENTAGE_DECIMALS)
+      );
+      const netProfitPercent = safeFixedToNumber(netProfitPercentFixed);
 
       logger.info(`   Profit: ${netProfitPercent.toFixed(2)}% net (${profitPercent.toFixed(2)}% gross)`);
 
@@ -327,7 +352,14 @@ export async function discoverTriangularOpportunities(
           estimatedGas,
           netProfit,
           confidence: netProfitPercent > 3 ? 'high' : netProfitPercent > 2 ? 'medium' : 'low',
-          feeTiers: [quote1.feeTier, quote2.feeTier]
+          feeTiers: [quote1.feeTier, quote2.feeTier],
+          _precisionValues: {
+            inputAmountFixed,
+            expectedOutputFixed: finalAmountFixed,
+            profitAmountFixed: netProfitFixed,
+            estimatedGasFixed,
+            netProfitFixed
+          }
         });
       }
 
@@ -406,18 +438,33 @@ export async function discoverCrossPairOpportunities(
         if (!quote3) continue;
 
         const finalAmount = quote3.outputAmount;
-        const profit = finalAmount - inputAmount;
-        const profitPercent = (profit / inputAmount) * 100;
 
-        // Estimate gas costs (3 swaps)
-        // Calculate dynamic gas estimation for cross-pair route
+        // Use precision math for cross-pair profit calculations
+        const inputAmountFixed = PrecisionMath.fromToken(inputAmount, TOKEN_DECIMALS.GALA);
+        const finalAmountFixed = PrecisionMath.fromToken(finalAmount, TOKEN_DECIMALS.GALA);
+        const profitFixed = PrecisionMath.subtract(finalAmountFixed, inputAmountFixed);
+        const profitPercentFixed = PrecisionMath.calculatePercentageChange(inputAmountFixed, finalAmountFixed);
+
+        // Convert back to numbers for compatibility
+        const profit = safeFixedToNumber(profitFixed);
+        const profitPercent = safeFixedToNumber(profitPercentFixed);
+
+        // Estimate gas costs (3 swaps) using precision math
         const routeSymbols = ['GALA', tokenA.symbol, tokenB.symbol, 'GALA'];
         const gasEstimate = calculateDynamicGas(routeSymbols, inputAmount);
-        const estimatedGas = gasEstimate.totalGas;
-        const netProfit = profit - estimatedGas;
+        const estimatedGasFixed = PrecisionMath.fromToken(gasEstimate.totalGas, TOKEN_DECIMALS.GALA);
+        const netProfitFixed = PrecisionMath.subtract(profitFixed, estimatedGasFixed);
+
+        // Convert back to numbers for compatibility
+        const estimatedGas = safeFixedToNumber(estimatedGasFixed);
+        const netProfit = safeFixedToNumber(netProfitFixed);
 
         logger.debug(`⛽ Gas estimate for ${routeSymbols.join('→')}: ${estimatedGas} GALA (base: ${gasEstimate.baseGas}, complexity: ${gasEstimate.complexityMultiplier}x)`);
-        const netProfitPercent = (netProfit / inputAmount) * 100;
+        const netProfitPercentFixed = PrecisionMath.calculatePercentage(
+          PrecisionMath.divide(netProfitFixed, inputAmountFixed),
+          PrecisionMath.fromNumber(100, PrecisionMath.PERCENTAGE_DECIMALS)
+        );
+        const netProfitPercent = safeFixedToNumber(netProfitPercentFixed);
 
         logger.info(`   Profit: ${netProfitPercent.toFixed(2)}% net (${profitPercent.toFixed(2)}% gross)`);
 
@@ -432,7 +479,14 @@ export async function discoverCrossPairOpportunities(
             estimatedGas,
             netProfit,
             confidence: netProfitPercent > 4 ? 'high' : netProfitPercent > 2.5 ? 'medium' : 'low',
-            feeTiers: [quote1.feeTier, quote2.feeTier, quote3.feeTier]
+            feeTiers: [quote1.feeTier, quote2.feeTier, quote3.feeTier],
+            _precisionValues: {
+              inputAmountFixed,
+              expectedOutputFixed: finalAmountFixed,
+              profitAmountFixed: netProfitFixed,
+              estimatedGasFixed,
+              netProfitFixed
+            }
           });
         }
 
@@ -509,7 +563,13 @@ async function executeExoticRoute(route: ExoticRoute): Promise<ExoticArbitrageRe
         feeTier,
         {
           exactIn: currentAmount,
-          amountOutMinimum: calculateMinOutputAmount(expectedOutput * 0.98), // Extra 2% safety margin
+          amountOutMinimum: calculateMinOutputAmount(
+            applySafetyMargin(
+              expectedOutput,
+              TRADING_CONSTANTS.SAFETY_MARGINS.EXOTIC_ARBITRAGE_EXTRA,
+              getTokenDecimals(toToken)
+            )
+          ), // Apply configured safety margin using FixedNumber precision
         },
         env.wallet.address
       );
@@ -522,10 +582,13 @@ async function executeExoticRoute(route: ExoticRoute): Promise<ExoticArbitrageRe
 
       transactionIds.push(txId);
 
-      // Apply slippage protection: use conservative estimate for next hop
+      // Apply slippage protection using precision math: use conservative estimate for next hop
       // This prevents compounding slippage across multiple hops
       const INTER_HOP_SLIPPAGE_BUFFER = 0.5; // 0.5% additional buffer between hops
-      const conservativeAmount = expectedOutput * (1 - INTER_HOP_SLIPPAGE_BUFFER / 100);
+      const expectedOutputFixed = PrecisionMath.fromToken(expectedOutput, TOKEN_DECIMALS.GALA);
+      const slippageBufferFixed = PrecisionMath.fromNumber(INTER_HOP_SLIPPAGE_BUFFER, PrecisionMath.PERCENTAGE_DECIMALS);
+      const conservativeAmountFixed = PrecisionMath.applySlippage(expectedOutputFixed, slippageBufferFixed);
+      const conservativeAmount = safeFixedToNumber(conservativeAmountFixed);
       currentAmount = conservativeAmount;
 
       logger.debug(`💱 Hop ${i + 1}: Expected ${expectedOutput.toFixed(6)}, using conservative ${conservativeAmount.toFixed(6)} for next hop (${INTER_HOP_SLIPPAGE_BUFFER}% buffer)`);
@@ -533,8 +596,16 @@ async function executeExoticRoute(route: ExoticRoute): Promise<ExoticArbitrageRe
       // Additional safety check: if we're on the last hop, verify profitability
       if (i === route.tokens.length - 2) {
         const projectedFinalAmount = conservativeAmount;
-        const projectedProfit = projectedFinalAmount - route.inputAmount;
-        const projectedProfitPercent = (projectedProfit / route.inputAmount) * 100;
+
+        // Use precision math for projected profit calculations
+        const inputAmountFixed = PrecisionMath.fromToken(route.inputAmount, TOKEN_DECIMALS.GALA);
+        const projectedFinalAmountFixed = PrecisionMath.fromToken(projectedFinalAmount, TOKEN_DECIMALS.GALA);
+        const projectedProfitFixed = PrecisionMath.subtract(projectedFinalAmountFixed, inputAmountFixed);
+        const projectedProfitPercentFixed = PrecisionMath.calculatePercentageChange(inputAmountFixed, projectedFinalAmountFixed);
+
+        // Convert back to numbers for compatibility
+        const projectedProfit = safeFixedToNumber(projectedProfitFixed);
+        const projectedProfitPercent = safeFixedToNumber(projectedProfitPercentFixed);
 
         logger.debug(`🎯 Projected final amount: ${projectedFinalAmount.toFixed(6)} GALA (${projectedProfitPercent.toFixed(2)}% profit)`);
 
@@ -598,8 +669,15 @@ async function executeExoticRoute(route: ExoticRoute): Promise<ExoticArbitrageRe
       }
     }
 
-    const actualProfit = currentAmount - route.inputAmount;
-    const actualProfitPercent = (actualProfit / route.inputAmount) * 100;
+    // Final profit calculation using precision math
+    const inputAmountFixed = PrecisionMath.fromToken(route.inputAmount, TOKEN_DECIMALS.GALA);
+    const currentAmountFixed = PrecisionMath.fromToken(currentAmount, TOKEN_DECIMALS.GALA);
+    const actualProfitFixed = PrecisionMath.subtract(currentAmountFixed, inputAmountFixed);
+    const actualProfitPercentFixed = PrecisionMath.calculatePercentageChange(inputAmountFixed, currentAmountFixed);
+
+    // Convert back to numbers for final reporting
+    const actualProfit = safeFixedToNumber(actualProfitFixed);
+    const actualProfitPercent = safeFixedToNumber(actualProfitPercentFixed);
 
     logger.info(`🎉 EXOTIC ARBITRAGE COMPLETE!`);
     logger.info(`   Route: ${route.symbols.join(' → ')}`);

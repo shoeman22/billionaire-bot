@@ -12,6 +12,8 @@ import { safeParseFloat } from '../../utils/safe-parse';
 import { calculatePriceFromSqrtPriceX96 } from '../../utils/price-math';
 import { createTokenClassKey, FEE_TIERS } from '../../types/galaswap';
 import { createQuoteWrapper } from '../../utils/quote-api';
+import { TRADING_CONSTANTS } from '../../config/constants';
+import { applySafetyMarginWithFloor, getTokenDecimals } from '../../utils/slippage-calculator';
 
 export interface EmergencyState {
   isEmergencyActive: boolean;
@@ -641,7 +643,12 @@ export class EmergencyControls {
 
       // Calculate minimum amount out with high slippage tolerance for emergency
       const estimatedOutput = plan.estimatedValue * (1 - plan.maxSlippage);
-      const amountOutMinimum = Math.max(estimatedOutput * 0.8, 0.01); // 80% of estimated with emergency floor
+      const amountOutMinimum = applySafetyMarginWithFloor(
+        estimatedOutput,
+        TRADING_CONSTANTS.SAFETY_MARGINS.EMERGENCY_LIQUIDITY,
+        TRADING_CONSTANTS.SAFETY_MARGINS.EMERGENCY_MINIMUM_FLOOR,
+        getTokenDecimals(outputToken)
+      ); // Apply configured emergency safety margin with floor using FixedNumber precision
 
       // Execute emergency swap using GSwap SDK
       const swapParams = {
