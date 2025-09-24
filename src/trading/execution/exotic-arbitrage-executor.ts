@@ -269,8 +269,15 @@ export async function discoverTriangularOpportunities(
 
   const opportunities: ExoticRoute[] = [];
 
-  // Ensure cleanup of signer service on function exit
-  const cleanup = () => signerService?.destroy();
+  // Ensure cleanup of signer service and WebSocket connection on function exit
+  const cleanup = () => {
+    signerService?.destroy();
+    try {
+      GSwap.events?.disconnectEventSocket();
+    } catch (error) {
+      // Ignore cleanup errors to avoid masking original errors
+    }
+  };
 
   // Use extended token set for better discovery
   const tokens = [
@@ -359,8 +366,15 @@ export async function discoverCrossPairOpportunities(
 
   const opportunities: ExoticRoute[] = [];
 
-  // Ensure cleanup of signer service on function exit
-  const cleanup = () => signerService?.destroy();
+  // Ensure cleanup of signer service and WebSocket connection on function exit
+  const cleanup = () => {
+    signerService?.destroy();
+    try {
+      GSwap.events?.disconnectEventSocket();
+    } catch (error) {
+      // Ignore cleanup errors to avoid masking original errors
+    }
+  };
 
   const tokens = [
     { symbol: 'GUSDC', tokenClass: 'GUSDC|Unit|none|none' },
@@ -447,8 +461,15 @@ async function executeExoticRoute(route: ExoticRoute): Promise<ExoticArbitrageRe
   const transactionIds: string[] = [];
   let currentAmount = route.inputAmount;
 
-  // Ensure cleanup of signer service on function exit
-  const cleanup = () => signerService?.destroy();
+  // Ensure cleanup of signer service and WebSocket connection on function exit
+  const cleanup = () => {
+    signerService?.destroy();
+    try {
+      GSwap.events?.disconnectEventSocket();
+    } catch (error) {
+      // Ignore cleanup errors to avoid masking original errors
+    }
+  };
 
   try {
     // Pre-execution validation

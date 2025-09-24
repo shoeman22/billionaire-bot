@@ -157,6 +157,9 @@ program
       logger.info(`🏦 Positions: ${portfolio.positions.length}`);
       logger.info(`💳 Token Balances: ${portfolio.balances.length}`);
 
+      // Success - exit gracefully after cleanup
+      logger.debug('✅ Portfolio command completed successfully');
+
     } catch (error) {
       logger.error('Failed to get portfolio:', error);
       process.exit(1);
@@ -174,6 +177,10 @@ program
       // Remove signal handlers
       process.removeListener('SIGINT', handleSignal);
       process.removeListener('SIGTERM', handleSignal);
+
+      // Force process to exit cleanly (portfolio is a one-time command)
+      logger.debug('🚪 Portfolio command exiting cleanly');
+      process.exit(0);
     }
   });
 

@@ -408,11 +408,16 @@ async function main() {
 // Check if this script is run directly
 const isMainModule = process.argv[1]?.includes('exotic-arbitrage.ts') || process.argv[1]?.endsWith('exotic-arbitrage.js');
 if (isMainModule) {
-  main().catch((error) => {
-    console.error('💥 Script execution failed:', error);
-    // Error propagated to CLI - let process exit naturally
-    process.exitCode = 1;
-  });
+  main()
+    .then(() => {
+      // Exit cleanly on successful completion
+      process.exit(0);
+    })
+    .catch((error) => {
+      console.error('💥 Script execution failed:', error);
+      // Exit immediately with error code for CLI
+      process.exit(1);
+    });
 }
 
 export { main as runExoticArbitrageTool };
