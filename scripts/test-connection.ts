@@ -4,6 +4,7 @@
  */
 
 import dotenv from 'dotenv';
+import fs from 'fs';
 import { validateEnvironment } from '../src/config/environment';
 import { GalaSwapClient } from '../src/api/GalaSwapClient';
 import { logger } from '../src/utils/logger';
@@ -116,7 +117,7 @@ async function testConnection(): Promise<void> {
 
     // Check .env file is ignored
     try {
-      const fs = require('fs');
+      // fs is already imported at the top
       const gitignore = fs.readFileSync('.gitignore', 'utf8');
       if (gitignore.includes('.env')) {
         console.log('✅ .env file is in .gitignore');
@@ -160,8 +161,8 @@ async function testConnection(): Promise<void> {
   }
 }
 
-// Run the test if this script is executed directly
-if (require.main === module) {
+// Run the test if this script is executed directly - ES module compatible
+if (import.meta.url === `file://${process.argv[1]}`) {
   testConnection().catch(error => {
     console.error('Unhandled error in connection test:', error);
     process.exit(1);
