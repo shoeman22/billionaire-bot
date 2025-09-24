@@ -251,7 +251,7 @@ async function executeSwapPayload(gSwap: GSwap, swapPayload: any, description: s
  * Discover triangular arbitrage opportunities
  */
 export async function discoverTriangularOpportunities(
-  inputAmount: number = 20,
+  inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
   minProfitThreshold: number = 1.0
 ): Promise<ExoticRoute[]> {
   logger.info(`🔍 Discovering triangular arbitrage opportunities`);
@@ -341,7 +341,7 @@ export async function discoverTriangularOpportunities(
  * Discover cross-pair arbitrage opportunities
  */
 export async function discoverCrossPairOpportunities(
-  inputAmount: number = 20,
+  inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
   minProfitThreshold: number = 1.5
 ): Promise<ExoticRoute[]> {
   logger.info(`🔍 Discovering cross-pair arbitrage opportunities`);
@@ -618,7 +618,7 @@ async function executeExoticRoute(route: ExoticRoute): Promise<ExoticArbitrageRe
  * Execute triangular arbitrage
  */
 export async function executeTriangularArbitrage(
-  inputAmount: number = 20,
+  inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
   minProfitThreshold: number = 1.0
 ): Promise<ExoticArbitrageResult> {
   logger.info('🔄 TRIANGULAR ARBITRAGE EXECUTION');
@@ -643,7 +643,7 @@ export async function executeTriangularArbitrage(
  * Execute cross-pair arbitrage
  */
 export async function executeCrossPairArbitrage(
-  inputAmount: number = 20,
+  inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
   minProfitThreshold: number = 1.5
 ): Promise<ExoticArbitrageResult> {
   logger.info('🌐 CROSS-PAIR ARBITRAGE EXECUTION');
@@ -668,7 +668,7 @@ export async function executeCrossPairArbitrage(
  * Hunt and execute high-confidence opportunities
  */
 export async function huntAndExecuteArbitrage(
-  inputAmount: number = 20,
+  inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
   autoExecuteThreshold: number = 3.0
 ): Promise<ExoticArbitrageResult> {
   logger.info('🎯 HUNT AND EXECUTE MODE');
@@ -731,7 +731,7 @@ export async function executeExoticArbitrage(config: ExoticArbitrageConfig): Pro
     signerService = createSignerService(env.wallet.address);
     logger.debug('🔐 SignerService initialized for exotic arbitrage');
 
-    const inputAmount = config.inputAmount || 20;
+    const inputAmount = config.inputAmount || TRADING_CONSTANTS.DEFAULT_TRADE_SIZE;
 
     switch (config.mode) {
       case 'triangular':

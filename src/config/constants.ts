@@ -9,6 +9,7 @@ export const TRADING_CONSTANTS = {
   MAX_SLIPPAGE_PERCENT: 15, // 15% maximum slippage
   MIN_TRADE_AMOUNT: 0.01, // Minimum trade amount
   DEFAULT_SLIPPAGE_TOLERANCE: 0.01, // 1% default slippage
+  DEFAULT_TRADE_SIZE: 10, // Default arbitrage trade size in GALA (optimized for concentrated liquidity)
 
   // Timing constants
   PRICE_UPDATE_INTERVAL: 1000, // 1 second

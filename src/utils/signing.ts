@@ -4,12 +4,16 @@
  */
 
 import { createHash } from 'crypto';
-import { ec as EC } from 'elliptic';
+import elliptic from 'elliptic';
 import * as sha3 from 'js-sha3';
 import stringify from 'json-stringify-deterministic';
 import { logger } from './logger';
 
+const EC = elliptic.ec;
 const ec = new EC('secp256k1');
+
+// Type definitions for elliptic
+type ECKeyPair = elliptic.ec.KeyPair;
 
 export interface SigningConfig {
   privateKey: string; // Base64 encoded private key
@@ -29,7 +33,7 @@ export interface SignedPayload extends SignablePayload {
 
 export class PayloadSigner {
   private privateKey: string;
-  private keyPair: EC.KeyPair; // EC KeyPair type
+  private keyPair: ECKeyPair; // EC KeyPair type
   private userAddress: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private galaChainSdk: any = null; // Will be dynamically loaded

@@ -7,10 +7,17 @@ import { DataSource, DataSourceOptions } from 'typeorm';
 import { Position } from '../entities/Position';
 import { logger } from '../utils/logger';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
-// ES module dirname replacement
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// Simple path resolution that works in all environments
+const getBasePath = (): string => {
+  // For tests, use the project root
+  if (process.env.NODE_ENV === 'test') {
+    return process.cwd();
+  }
+
+  // For development/production, use relative paths from src root
+  return path.join(process.cwd(), 'src');
+};
 
 // Database configuration based on environment
 export const getDatabaseConfig = (): DataSourceOptions => {
@@ -19,13 +26,14 @@ export const getDatabaseConfig = (): DataSourceOptions => {
 
   // For development and testing, use SQLite for simplicity
   if (isDevelopment || !process.env.DATABASE_URL) {
+    const basePath = getBasePath();
     return {
       type: 'sqlite',
-      database: path.join(__dirname, '../../data/billionaire-bot.db'),
+      database: path.join(basePath, 'data/billionaire-bot.db'),
       entities: [Position],
       synchronize: true, // Auto-create tables in development
       logging: process.env.LOG_LEVEL === 'debug',
-      migrations: [path.join(__dirname, '../migrations/*.ts')],
+      migrations: [path.join(basePath, 'src/migrations/*.ts')],
       migrationsRun: true,
     };
   }
@@ -38,7 +46,7 @@ export const getDatabaseConfig = (): DataSourceOptions => {
       entities: [Position],
       synchronize: false, // Never auto-sync in production
       logging: false,
-      migrations: [path.join(__dirname, '../migrations/*.ts')],
+      migrations: [path.join(process.cwd(), 'src/migrations/*.ts')],
       migrationsRun: true,
       ssl: isProduction ? { rejectUnauthorized: false } : false,
     };
@@ -55,7 +63,7 @@ export const getDatabaseConfig = (): DataSourceOptions => {
     entities: [Position],
     synchronize: false,
     logging: process.env.LOG_LEVEL === 'debug',
-    migrations: [path.join(__dirname, '../migrations/*.ts')],
+    migrations: [path.join(process.cwd(), 'src/migrations/*.ts')],
     migrationsRun: true,
     ssl: isProduction ? { rejectUnauthorized: false } : false,
   };

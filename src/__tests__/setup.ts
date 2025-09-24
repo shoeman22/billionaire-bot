@@ -4,6 +4,7 @@
  */
 
 import { safeParseFloat } from '../utils/safe-parse';
+import { jest } from '@jest/globals';
 // import { logger } from '../utils/logger'; // Unused - commenting out to fix linting
 
 // Mock console for tests to reduce noise
@@ -107,7 +108,24 @@ global.testUtils = {
     Data: null,
     message,
     HttpStatus: status
-  })
+  }),
+
+  // Jest mock helpers
+  createAsyncMock: <T>(value: T) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mockFn = jest.fn() as any;
+    return mockFn.mockResolvedValue(value);
+  },
+  createAsyncErrorMock: (error: Error | string) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mockFn = jest.fn() as any;
+    return mockFn.mockRejectedValue(typeof error === 'string' ? new Error(error) : error);
+  },
+  createSyncMock: <T>(value: T) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mockFn = jest.fn() as any;
+    return mockFn.mockReturnValue(value);
+  }
 };
 
 // Extend Jest matchers
@@ -136,6 +154,13 @@ declare global {
     expectValidTransactionId: (txId: string) => void;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     createMockErrorResponse: (message: string, status?: number) => any;
+    // Jest mock helpers
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    createAsyncMock: <T>(value: T) => any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    createAsyncErrorMock: (error: Error | string) => any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    createSyncMock: <T>(value: T) => any;
   };
 }
 

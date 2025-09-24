@@ -13,6 +13,7 @@
 
 import { config } from 'dotenv';
 import { logger } from '../src/utils/logger';
+import { TRADING_CONSTANTS } from '../src/config/constants';
 import { executeArbitrage, ArbitrageResult } from '../src/trading/execution/arbitrage-executor';
 import { executeExoticArbitrage, ExoticArbitrageResult, ExoticArbitrageConfig } from '../src/trading/execution/exotic-arbitrage-executor';
 
@@ -176,7 +177,7 @@ class ArbitrageLoopController {
 
         const exoticConfig: ExoticArbitrageConfig = {
           mode: this.config.mode === 'exotic-hunt' ? 'hunt-execute' : this.config.mode as 'triangular' | 'cross-pair',
-          inputAmount: 20,
+          inputAmount: TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
           minProfitThreshold: this.config.mode === 'triangular' ? 1.0 : this.config.mode === 'cross-pair' ? 1.5 : 3.0
         };
 

@@ -52,19 +52,21 @@ jest.mock('../../security/SignerService', () => ({
 }));
 
 // Mock GSwap SDK
+const mockGSwap = {
+  quoting: {
+    quoteExactInput: jest.fn()
+  },
+  swaps: {
+    swap: jest.fn()
+  },
+  events: {
+    connectEventSocket: jest.fn(),
+    wait: jest.fn()
+  }
+};
+
 jest.mock('@gala-chain/gswap-sdk', () => ({
-  GSwap: jest.fn(() => ({
-    quoting: {
-      quoteExactInput: jest.fn()
-    },
-    swapping: {
-      getSwapPayload: jest.fn()
-    },
-    events: {
-      connectEventSocket: jest.fn(),
-      wait: jest.fn()
-    }
-  })),
+  GSwap: jest.fn(() => mockGSwap),
   PrivateKeySigner: jest.fn()
 }));
 
@@ -183,7 +185,7 @@ describe('Exotic Arbitrage Security Validation', () => {
     test('should never log or expose private keys', async () => {
       const config: ExoticArbitrageConfig = {
         mode: 'triangular',
-        inputAmount: 20
+        inputAmount: 10
       };
 
       // Force an error scenario to test error logging
@@ -208,7 +210,7 @@ describe('Exotic Arbitrage Security Validation', () => {
     test('should use SignerService instead of direct PrivateKeySigner', async () => {
       const config: ExoticArbitrageConfig = {
         mode: 'cross-pair',
-        inputAmount: 30
+        inputAmount: 10
       };
 
       // Reset mocks to successful state
@@ -234,7 +236,7 @@ describe('Exotic Arbitrage Security Validation', () => {
     test('should clean up SignerService even on critical failures', async () => {
       const config: ExoticArbitrageConfig = {
         mode: 'hunt-execute',
-        inputAmount: 25
+        inputAmount: 10
       };
 
       // Mock critical failure after SignerService creation
@@ -259,7 +261,7 @@ describe('Exotic Arbitrage Security Validation', () => {
     test('should sanitize error messages containing sensitive data', async () => {
       const config: ExoticArbitrageConfig = {
         mode: 'triangular',
-        inputAmount: 15
+        inputAmount: 10
       };
 
       // Mock error that might contain sensitive data
@@ -286,7 +288,7 @@ describe('Exotic Arbitrage Security Validation', () => {
     test('should never call process.exit() during execution', async () => {
       const config: ExoticArbitrageConfig = {
         mode: 'triangular',
-        inputAmount: 40
+        inputAmount: 10
       };
 
       // Force multiple types of failures
@@ -328,7 +330,7 @@ describe('Exotic Arbitrage Security Validation', () => {
     test('should propagate errors up the call stack instead of exiting', async () => {
       const config: ExoticArbitrageConfig = {
         mode: 'hunt-execute',
-        inputAmount: 20
+        inputAmount: 10
       };
 
       // Mock unrecoverable error
@@ -349,7 +351,7 @@ describe('Exotic Arbitrage Security Validation', () => {
     test('should not expose wallet addresses in error messages', async () => {
       const config: ExoticArbitrageConfig = {
         mode: 'triangular',
-        inputAmount: 25
+        inputAmount: 10
       };
 
       // Mock error that might contain wallet address
@@ -371,7 +373,7 @@ describe('Exotic Arbitrage Security Validation', () => {
     test('should handle environment validation failures securely', async () => {
       const config: ExoticArbitrageConfig = {
         mode: 'cross-pair',
-        inputAmount: 30
+        inputAmount: 10
       };
 
       // Mock environment validation failure
@@ -393,7 +395,7 @@ describe('Exotic Arbitrage Security Validation', () => {
     test('should limit error message length to prevent information disclosure', async () => {
       const config: ExoticArbitrageConfig = {
         mode: 'hunt-execute',
-        inputAmount: 20
+        inputAmount: 10
       };
 
       // Mock extremely long error with potentially sensitive data
@@ -419,7 +421,7 @@ describe('Exotic Arbitrage Security Validation', () => {
     test('should clean up SignerService before throwing errors', async () => {
       const config: ExoticArbitrageConfig = {
         mode: 'triangular',
-        inputAmount: 20
+        inputAmount: 10
       };
 
       // Mock SignerService creation success, then failure
@@ -442,7 +444,7 @@ describe('Exotic Arbitrage Security Validation', () => {
     test('should handle SignerService.destroy() failures gracefully', async () => {
       const config: ExoticArbitrageConfig = {
         mode: 'cross-pair',
-        inputAmount: 25
+        inputAmount: 10
       };
 
       // Mock SignerService.destroy() failure

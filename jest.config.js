@@ -51,7 +51,9 @@ export default {
   collectCoverage: false, // Enable only when explicitly requested
   transform: {
     '^.+\\.ts$': ['ts-jest', {
-      useESM: false
+      useESM: true,
+      tsconfig: './tsconfig.test.json'
     }]
-  }
+  },
+  extensionsToTreatAsEsm: ['.ts']
 };

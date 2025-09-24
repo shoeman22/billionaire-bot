@@ -52,7 +52,7 @@ async function executePairArbitrage(
   env: ReturnType<typeof validateEnvironment>,
   tokenA: TokenInfo,
   tokenB: TokenInfo,
-  inputAmount: number = 20
+  inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE
 ): Promise<ArbitrageResult> {
   const route = `${tokenA.symbol} ↔ ${tokenB.symbol}`;
   logger.info(`🔄 Testing arbitrage: ${route}`);
