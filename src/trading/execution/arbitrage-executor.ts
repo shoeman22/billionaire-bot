@@ -38,12 +38,8 @@ async function initializeGSwap(): Promise<{ gSwap: GSwap; env: ReturnType<typeof
     walletAddress: env.wallet.address
   });
 
-  try {
-    GSwap.events?.connectEventSocket();
-    logger.info('📡 Connected to GSwap event socket');
-  } catch (eventError) {
-    logger.warn('⚠️ Event socket connection failed, continuing without events');
-  }
+  // Skip event socket for arbitrage to avoid cleanup issues
+  logger.info('📡 Skipping event socket for arbitrage execution (cleaner process lifecycle)');
 
   return { gSwap, env };
 }
@@ -262,20 +258,10 @@ export async function executeFullArbitrage(): Promise<ArbitrageResult> {
 
   const { gSwap, env } = await initializeGSwap();
 
-  try {
-    const gala = TRADING_CONSTANTS.FALLBACK_TOKENS.find(t => t.symbol === 'GALA')!;
-    const gusdc = TRADING_CONSTANTS.FALLBACK_TOKENS.find(t => t.symbol === 'GUSDC')!;
+  const gala = TRADING_CONSTANTS.FALLBACK_TOKENS.find(t => t.symbol === 'GALA')!;
+  const gusdc = TRADING_CONSTANTS.FALLBACK_TOKENS.find(t => t.symbol === 'GUSDC')!;
 
-    return await executePairArbitrage(gSwap, env, gala, gusdc);
-  } finally {
-    // Cleanup WebSocket connection to allow process to exit
-    try {
-      GSwap.events?.disconnectEventSocket?.();
-      logger.debug('🔌 Disconnected from GSwap event socket');
-    } catch (error) {
-      logger.debug('⚠️ Event socket disconnect failed (may already be closed)');
-    }
-  }
+  return await executePairArbitrage(gSwap, env, gala, gusdc);
 }
 
 /**
@@ -286,37 +272,27 @@ export async function executeMultiArbitrage(): Promise<ArbitrageResult> {
 
   const { gSwap, env } = await initializeGSwap();
 
-  try {
-    const pairs = generateTokenPairs();
+  const pairs = generateTokenPairs();
 
-    logger.info(`🔍 Scanning ${pairs.length} token pairs for arbitrage opportunities...`);
+  logger.info(`🔍 Scanning ${pairs.length} token pairs for arbitrage opportunities...`);
 
-    for (const pair of pairs) {
-      const result = await executePairArbitrage(gSwap, env, pair.tokenA, pair.tokenB);
+  for (const pair of pairs) {
+    const result = await executePairArbitrage(gSwap, env, pair.tokenA, pair.tokenB);
 
-      if (result.success) {
-        logger.info(`🎉 Successful arbitrage completed! Stopping multi-pair scan.`);
-        return result;
-      }
-
-      // Brief delay between pair tests
-      await new Promise(resolve => setTimeout(resolve, 2000));
+    if (result.success) {
+      logger.info(`🎉 Successful arbitrage completed! Stopping multi-pair scan.`);
+      return result;
     }
 
-    return {
-      success: false,
-      error: 'No profitable arbitrage opportunities found across all token pairs',
-      executedTrades: 0
-    };
-  } finally {
-    // Cleanup WebSocket connection to allow process to exit
-    try {
-      GSwap.events?.disconnectEventSocket?.();
-      logger.debug('🔌 Disconnected from GSwap event socket');
-    } catch (error) {
-      logger.debug('⚠️ Event socket disconnect failed (may already be closed)');
-    }
+    // Brief delay between pair tests
+    await new Promise(resolve => setTimeout(resolve, 2000));
   }
+
+  return {
+    success: false,
+    error: 'No profitable arbitrage opportunities found across all token pairs',
+    executedTrades: 0
+  };
 }
 
 /**

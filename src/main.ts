@@ -124,11 +124,30 @@ program
   .command('portfolio')
   .description('Show current portfolio')
   .action(async () => {
+    let tradingEngine: TradingEngine | null = null;
+    let signalCount = 0;
+
+    // Setup double Ctrl+C handler
+    const handleSignal = () => {
+      signalCount++;
+      if (signalCount === 1) {
+        logger.info('🛑 Received shutdown signal, stopping gracefully...');
+        logger.info('💡 Press Ctrl+C again to force exit');
+        setTimeout(() => { signalCount = 0; }, 3000);
+      } else if (signalCount >= 2) {
+        logger.info('🚨 Force exit requested');
+        process.exit(0);
+      }
+    };
+
+    process.on('SIGINT', handleSignal);
+    process.on('SIGTERM', handleSignal);
+
     try {
       logger.info('📊 Getting portfolio...');
 
       const config = validateEnvironment();
-      const tradingEngine = new TradingEngine(config);
+      tradingEngine = new TradingEngine(config);
 
       const portfolio = await tradingEngine.getPortfolio();
 
@@ -141,6 +160,20 @@ program
     } catch (error) {
       logger.error('Failed to get portfolio:', error);
       process.exit(1);
+    } finally {
+      // Cleanup TradingEngine connections to allow process to exit
+      if (tradingEngine) {
+        try {
+          await tradingEngine.stop();
+          logger.debug('🔌 Trading Engine stopped for portfolio command');
+        } catch (error) {
+          logger.debug('⚠️ Error stopping Trading Engine (may already be stopped):', error);
+        }
+      }
+
+      // Remove signal handlers
+      process.removeListener('SIGINT', handleSignal);
+      process.removeListener('SIGTERM', handleSignal);
     }
   });
 
