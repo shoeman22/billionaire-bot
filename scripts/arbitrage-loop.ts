@@ -11,8 +11,11 @@
  * - Support for both single-pair and multi-pair modes
  */
 
+import { config } from 'dotenv';
 import { logger } from '../src/utils/logger';
 import { executeArbitrage, ArbitrageResult } from '../src/trading/execution/arbitrage-executor';
+
+config();
 
 interface LoopConfig {
   mode: 'full' | 'multi';
