@@ -3,7 +3,7 @@
  */
 
 import dotenv from 'dotenv';
-import { GSwap, PrivateKeySigner } from './src/services/gswap-simple';
+import { GSwap, PrivateKeySigner } from '../../src/services/gswap-simple';
 
 // Load environment variables
 dotenv.config();

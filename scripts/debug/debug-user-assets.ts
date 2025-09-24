@@ -1,5 +1,5 @@
-import { GSwap, PrivateKeySigner } from './src/services/gswap-simple.js';
-import { validateEnvironment } from './src/config/environment.js';
+import { GSwap, PrivateKeySigner } from '../../src/services/gswap-simple.js';
+import { validateEnvironment } from '../../src/config/environment.js';
 import 'dotenv/config';
 
 async function debugUserAssets() {

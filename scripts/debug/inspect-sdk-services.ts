@@ -2,7 +2,7 @@ import { config } from 'dotenv';
 config();
 
 import { GSwap, PrivateKeySigner } from '@gala-chain/gswap-sdk';
-import { getConfig } from './src/config/environment';
+import { getConfig } from '../../src/config/environment';
 
 async function inspectSDKServices() {
   try {

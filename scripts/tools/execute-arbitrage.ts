@@ -8,10 +8,10 @@
 
 import { config } from 'dotenv';
 import { GSwap, PrivateKeySigner } from '@gala-chain/gswap-sdk';
-import { validateEnvironment } from './src/config/environment';
-import { logger } from './src/utils/logger';
-import { SwapExecutor } from './src/trading/execution/swap-executor';
-import { SlippageProtection } from './src/trading/risk/slippage';
+import { validateEnvironment } from '../../src/config/environment';
+import { logger } from '../../src/utils/logger';
+import { SwapExecutor } from '../../src/trading/execution/swap-executor';
+import { SlippageProtection } from '../../src/trading/risk/slippage';
 
 config();
 

@@ -8,8 +8,8 @@
 
 import { config } from 'dotenv';
 import { GSwap, PrivateKeySigner } from '@gala-chain/gswap-sdk';
-import { validateEnvironment } from './src/config/environment';
-import { logger } from './src/utils/logger';
+import { validateEnvironment } from '../../src/config/environment';
+import { logger } from '../../src/utils/logger';
 
 config();
 
@@ -40,6 +40,19 @@ async function setupGSwap() {
   }
 
   return { gSwap, env };
+}
+
+async function cleanup(gSwap: any) {
+  try {
+    if (gSwap?.disconnectSocket) {
+      await gSwap.disconnectSocket();
+    }
+    if (GSwap.events?.disconnectEventSocket) {
+      GSwap.events.disconnectEventSocket();
+    }
+  } catch (error) {
+    // Ignore cleanup errors
+  }
 }
 
 async function step1_getQuote() {
@@ -332,57 +345,69 @@ async function fullArbitrage() {
 
 // Main execution based on command line argument
 async function main() {
-  if (!step) {
-    logger.info('📋 MANUAL ARBITRAGE CONTROL');
-    logger.info('Usage: tsx manual-arbitrage-steps.ts [step]');
-    logger.info('');
-    logger.info('Available steps:');
-    logger.info('  quote1          - Get GALA → GUSDC quote');
-    logger.info('  trade1 [amount] [minOut] [fee] - Execute GALA → GUSDC trade');
-    logger.info('  quote2 [amount] - Get GUSDC → GALA quote');
-    logger.info('  trade2 [amount] [minOut] [fee] - Execute GUSDC → GALA trade');
-    logger.info('  full            - Execute complete arbitrage');
-    logger.info('');
-    logger.info('Example workflow:');
-    logger.info('  1. tsx manual-arbitrage-steps.ts quote1');
-    logger.info('  2. tsx manual-arbitrage-steps.ts trade1 1 0.016 500');
-    logger.info('  3. tsx manual-arbitrage-steps.ts quote2 0.016');
-    logger.info('  4. tsx manual-arbitrage-steps.ts trade2 0.016 0.98 500');
-    return;
-  }
+  let gSwapInstance: any = null;
 
-  switch (step) {
-    case 'quote1':
-      await step1_getQuote();
-      break;
+  try {
+    if (!step) {
+      logger.info('📋 MANUAL ARBITRAGE CONTROL');
+      logger.info('Usage: tsx manual-arbitrage-steps.ts [step]');
+      logger.info('');
+      logger.info('Available steps:');
+      logger.info('  quote1          - Get GALA → GUSDC quote');
+      logger.info('  trade1 [amount] [minOut] [fee] - Execute GALA → GUSDC trade');
+      logger.info('  quote2 [amount] - Get GUSDC → GALA quote');
+      logger.info('  trade2 [amount] [minOut] [fee] - Execute GUSDC → GALA trade');
+      logger.info('  full            - Execute complete arbitrage');
+      logger.info('');
+      logger.info('Example workflow:');
+      logger.info('  1. tsx manual-arbitrage-steps.ts quote1');
+      logger.info('  2. tsx manual-arbitrage-steps.ts trade1 1 0.016 500');
+      logger.info('  3. tsx manual-arbitrage-steps.ts quote2 0.016');
+      logger.info('  4. tsx manual-arbitrage-steps.ts trade2 0.016 0.98 500');
+      return;
+    }
 
-    case 'trade1':
-      const amount1 = parseFloat(process.argv[3] || '1');
-      const minOut1 = parseFloat(process.argv[4] || '0.016');
-      const fee1 = parseInt(process.argv[5] || '500');
-      await step2_executeFirstTrade(amount1, minOut1, fee1);
-      break;
+    switch (step) {
+      case 'quote1':
+        await step1_getQuote();
+        break;
 
-    case 'quote2':
-      const amount2 = parseFloat(process.argv[3] || '0.016');
-      await step3_getReturnQuote(amount2);
-      break;
+      case 'trade1':
+        const amount1 = parseFloat(process.argv[3] || '1');
+        const minOut1 = parseFloat(process.argv[4] || '0.016');
+        const fee1 = parseInt(process.argv[5] || '500');
+        await step2_executeFirstTrade(amount1, minOut1, fee1);
+        break;
 
-    case 'trade2':
-      const amountIn2 = parseFloat(process.argv[3] || '0.016');
-      const minOut2 = parseFloat(process.argv[4] || '0.98');
-      const fee2 = parseInt(process.argv[5] || '500');
-      await step4_executeReturnTrade(amountIn2, minOut2, fee2);
-      break;
+      case 'quote2':
+        const amount2 = parseFloat(process.argv[3] || '0.016');
+        await step3_getReturnQuote(amount2);
+        break;
 
-    case 'full':
-      await fullArbitrage();
-      break;
+      case 'trade2':
+        const amountIn2 = parseFloat(process.argv[3] || '0.016');
+        const minOut2 = parseFloat(process.argv[4] || '0.98');
+        const fee2 = parseInt(process.argv[5] || '500');
+        await step4_executeReturnTrade(amountIn2, minOut2, fee2);
+        break;
 
-    default:
-      logger.error(`Unknown step: ${step}`);
-      logger.info('Run without arguments to see usage help');
+      case 'full':
+        await fullArbitrage();
+        break;
+
+      default:
+        logger.error(`Unknown step: ${step}`);
+        logger.info('Run without arguments to see usage help');
+    }
+  } finally {
+    // Force cleanup and exit
+    setTimeout(() => {
+      process.exit(0);
+    }, 1000);
   }
 }
 
-main().catch(console.error);
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

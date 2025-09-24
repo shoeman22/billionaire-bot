@@ -7,8 +7,8 @@
 
 import { config } from 'dotenv';
 import { GSwap, PrivateKeySigner } from '@gala-chain/gswap-sdk';
-import { validateEnvironment } from './src/config/environment';
-import { logger } from './src/utils/logger';
+import { validateEnvironment } from '../../src/config/environment';
+import { logger } from '../../src/utils/logger';
 
 config();
 
