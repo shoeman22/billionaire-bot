@@ -1,0 +1,324 @@
+#!/usr/bin/env tsx
+
+/**
+ * SMART ARBITRAGE LOOP CONTROLLER 🔄
+ *
+ * Controlled looping execution of arbitrage strategies with:
+ * - Rate limit detection and exponential backoff
+ * - Configurable delays between runs
+ * - Clean shutdown handling
+ * - Basic profit tracking
+ * - Support for both single-pair and multi-pair modes
+ */
+
+import { logger } from '../src/utils/logger';
+import { executeArbitrage, ArbitrageResult } from '../src/trading/execution/arbitrage-executor';
+
+interface LoopConfig {
+  mode: 'full' | 'multi';
+  delayBetweenRuns: number; // seconds
+  maxConsecutiveErrors: number;
+  exponentialBackoffBase: number; // seconds
+  maxBackoffDelay: number; // seconds
+  maxRunDuration?: number; // minutes, undefined for infinite
+}
+
+interface LoopStats {
+  totalRuns: number;
+  successfulRuns: number;
+  errorRuns: number;
+  consecutiveErrors: number;
+  totalProfit: number;
+  startTime: number;
+  lastSuccessTime: number;
+}
+
+class ArbitrageLoopController {
+  private config: LoopConfig;
+  private stats: LoopStats;
+  private isRunning: boolean = false;
+  private shouldStop: boolean = false;
+
+  constructor(config: Partial<LoopConfig> = {}) {
+    this.config = {
+      mode: 'full',
+      delayBetweenRuns: 45, // 45 seconds default
+      maxConsecutiveErrors: 5,
+      exponentialBackoffBase: 30, // 30 seconds
+      maxBackoffDelay: 300, // 5 minutes max
+      ...config
+    };
+
+    this.stats = {
+      totalRuns: 0,
+      successfulRuns: 0,
+      errorRuns: 0,
+      consecutiveErrors: 0,
+      totalProfit: 0,
+      startTime: Date.now(),
+      lastSuccessTime: 0
+    };
+
+    this.setupSignalHandlers();
+  }
+
+  private setupSignalHandlers(): void {
+    // Handle Ctrl+C gracefully
+    process.on('SIGINT', () => {
+      logger.info('🛑 Received shutdown signal, stopping loop gracefully...');
+      this.shouldStop = true;
+    });
+
+    // Handle other termination signals
+    process.on('SIGTERM', () => {
+      logger.info('🛑 Received SIGTERM, stopping loop...');
+      this.shouldStop = true;
+    });
+  }
+
+  async start(): Promise<void> {
+    if (this.isRunning) {
+      logger.warn('⚠️ Arbitrage loop is already running');
+      return;
+    }
+
+    this.isRunning = true;
+    logger.info('🚀 Starting Smart Arbitrage Loop Controller');
+    logger.info(`⚙️ Configuration:`);
+    logger.info(`   Mode: ${this.config.mode}`);
+    logger.info(`   Delay between runs: ${this.config.delayBetweenRuns}s`);
+    logger.info(`   Max consecutive errors: ${this.config.maxConsecutiveErrors}`);
+    logger.info(`   Max run duration: ${this.config.maxRunDuration ? this.config.maxRunDuration + 'm' : 'infinite'}`);
+
+    // Start stats reporting
+    const statsInterval = setInterval(() => {
+      this.logStats();
+    }, 60000); // Every minute
+
+    // Main loop
+    try {
+      while (this.isRunning && !this.shouldStop) {
+        // Check duration limit
+        if (this.config.maxRunDuration) {
+          const elapsed = (Date.now() - this.stats.startTime) / (1000 * 60);
+          if (elapsed >= this.config.maxRunDuration) {
+            logger.info(`⏰ Maximum run duration (${this.config.maxRunDuration}m) reached, stopping...`);
+            break;
+          }
+        }
+
+        await this.executeArbitrageRun();
+
+        // Apply delay with potential exponential backoff
+        const delay = this.calculateDelay();
+        if (delay > 0 && !this.shouldStop) {
+          logger.info(`⏳ Waiting ${delay}s before next run...`);
+          await this.sleep(delay * 1000);
+        }
+      }
+    } finally {
+      clearInterval(statsInterval);
+      this.isRunning = false;
+      this.logFinalStats();
+      logger.info('✅ Arbitrage loop stopped');
+    }
+  }
+
+  private async executeArbitrageRun(): Promise<void> {
+    this.stats.totalRuns++;
+    logger.info(`\n🔄 Arbitrage Run #${this.stats.totalRuns} (${this.config.mode} mode)`);
+
+    try {
+      // Execute arbitrage using shared library
+      logger.info(`📋 Executing ${this.config.mode} arbitrage...`);
+
+      const result: ArbitrageResult = await executeArbitrage({
+        mode: this.config.mode
+      });
+
+      if (result.success) {
+        this.stats.successfulRuns++;
+        this.stats.consecutiveErrors = 0;
+        this.stats.lastSuccessTime = Date.now();
+
+        // Track profit
+        if (result.profitAmount) {
+          this.stats.totalProfit += result.profitAmount;
+        }
+
+        logger.info(`✅ Run #${this.stats.totalRuns} completed successfully`);
+        if (result.profitPercent) {
+          logger.info(`💰 Profit: ${result.profitPercent.toFixed(2)}%`);
+        }
+        if (result.route) {
+          logger.info(`🔄 Route: ${result.route}`);
+        }
+      } else {
+        this.stats.errorRuns++;
+        this.stats.consecutiveErrors++;
+        logger.info(`📭 Run #${this.stats.totalRuns} found no profitable opportunities`);
+        if (result.error) {
+          logger.debug(`Details: ${result.error}`);
+        }
+      }
+
+    } catch (error) {
+      this.stats.errorRuns++;
+      this.stats.consecutiveErrors++;
+
+      // Check if it's a rate limiting error
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (this.isRateLimitError(errorMessage)) {
+        logger.warn(`🚫 Rate limiting detected in run #${this.stats.totalRuns}`);
+      } else {
+        logger.error(`❌ Error in run #${this.stats.totalRuns}:`, error);
+      }
+
+      // Stop if too many consecutive errors
+      if (this.stats.consecutiveErrors >= this.config.maxConsecutiveErrors) {
+        logger.error(`💥 Too many consecutive errors (${this.stats.consecutiveErrors}), stopping loop`);
+        this.shouldStop = true;
+      }
+    }
+  }
+
+  // parseArbitrageOutput method removed - now using typed result objects instead of string parsing
+
+  private isRateLimitError(errorMessage: string): boolean {
+    const rateLimitIndicators = [
+      '429',
+      'rate limit',
+      'too many requests',
+      'API rate limit exceeded'
+    ];
+
+    return rateLimitIndicators.some(indicator =>
+      errorMessage.toLowerCase().includes(indicator.toLowerCase())
+    );
+  }
+
+  private calculateDelay(): number {
+    // Base delay
+    let delay = this.config.delayBetweenRuns;
+
+    // Apply exponential backoff for consecutive errors
+    if (this.stats.consecutiveErrors > 0) {
+      const backoffMultiplier = Math.pow(2, this.stats.consecutiveErrors - 1);
+      const backoffDelay = this.config.exponentialBackoffBase * backoffMultiplier;
+      delay = Math.min(backoffDelay, this.config.maxBackoffDelay);
+
+      logger.info(`⚠️ Applying exponential backoff: ${delay}s (${this.stats.consecutiveErrors} consecutive errors)`);
+    }
+
+    return delay;
+  }
+
+  private logStats(): void {
+    const elapsed = (Date.now() - this.stats.startTime) / (1000 * 60);
+    const successRate = this.stats.totalRuns > 0 ? (this.stats.successfulRuns / this.stats.totalRuns * 100) : 0;
+
+    logger.info(`\n📊 Loop Statistics (${elapsed.toFixed(1)}m elapsed):`);
+    logger.info(`   Total runs: ${this.stats.totalRuns}`);
+    logger.info(`   Successful: ${this.stats.successfulRuns} (${successRate.toFixed(1)}%)`);
+    logger.info(`   Errors: ${this.stats.errorRuns}`);
+    logger.info(`   Consecutive errors: ${this.stats.consecutiveErrors}`);
+
+    if (this.stats.lastSuccessTime > 0) {
+      const timeSinceSuccess = (Date.now() - this.stats.lastSuccessTime) / (1000 * 60);
+      logger.info(`   Last success: ${timeSinceSuccess.toFixed(1)}m ago`);
+    }
+  }
+
+  private logFinalStats(): void {
+    const totalTime = (Date.now() - this.stats.startTime) / (1000 * 60);
+    const successRate = this.stats.totalRuns > 0 ? (this.stats.successfulRuns / this.stats.totalRuns * 100) : 0;
+
+    logger.info(`\n📋 Final Statistics:`);
+    logger.info(`   Total runtime: ${totalTime.toFixed(1)} minutes`);
+    logger.info(`   Total runs: ${this.stats.totalRuns}`);
+    logger.info(`   Successful runs: ${this.stats.successfulRuns}`);
+    logger.info(`   Success rate: ${successRate.toFixed(1)}%`);
+    logger.info(`   Total errors: ${this.stats.errorRuns}`);
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  stop(): void {
+    logger.info('🛑 Stopping arbitrage loop...');
+    this.shouldStop = true;
+  }
+}
+
+// Command line interface
+async function main() {
+  const args = process.argv.slice(2);
+  const config: Partial<LoopConfig> = {};
+
+  // Parse command line arguments
+  for (let i = 0; i < args.length; i++) {
+    switch (args[i]) {
+      case '--mode':
+        config.mode = args[++i] as 'full' | 'multi';
+        break;
+      case '--delay':
+        config.delayBetweenRuns = parseInt(args[++i]);
+        break;
+      case '--duration':
+        config.maxRunDuration = parseInt(args[++i]);
+        break;
+      case '--max-errors':
+        config.maxConsecutiveErrors = parseInt(args[++i]);
+        break;
+      case '--help':
+        printHelp();
+        return;
+    }
+  }
+
+  const controller = new ArbitrageLoopController(config);
+  await controller.start();
+}
+
+function printHelp() {
+  console.log(`
+🔄 Smart Arbitrage Loop Controller
+
+Usage: tsx scripts/arbitrage-loop.ts [options]
+
+Options:
+  --mode <full|multi>     Arbitrage mode (default: full)
+                         full: GALA ↔ GUSDC only
+                         multi: All fallback token pairs
+
+  --delay <seconds>       Delay between runs (default: 45)
+  --duration <minutes>    Max run duration (default: infinite)
+  --max-errors <number>   Max consecutive errors before stop (default: 5)
+  --help                  Show this help
+
+Examples:
+  tsx scripts/arbitrage-loop.ts                    # Default full mode
+  tsx scripts/arbitrage-loop.ts --mode multi       # Multi-pair mode
+  tsx scripts/arbitrage-loop.ts --delay 60         # 60s between runs
+  tsx scripts/arbitrage-loop.ts --duration 120     # Run for 2 hours
+  tsx scripts/arbitrage-loop.ts --mode multi --delay 30 --duration 60
+
+Features:
+  ✅ Rate limit detection and exponential backoff
+  ✅ Clean shutdown handling (Ctrl+C)
+  ✅ Progress statistics and monitoring
+  ✅ Configurable delays and timeouts
+  ✅ Support for both single and multi-pair modes
+`);
+}
+
+// Run if this file is executed directly
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((error) => {
+    console.error('💥 Loop controller failed:', error);
+    process.exit(1);
+  });
+}
+
+export { ArbitrageLoopController };

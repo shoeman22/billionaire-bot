@@ -30,7 +30,7 @@ async function huntDeals(): Promise<void> {
     logger.info('💰 Live trading mode - hunting real profit opportunities');
 
     const env = validateEnvironment();
-    const signer = new PrivateKeySigner(process.env.WALLET_PRIVATE_KEY || '');
+    const signer = new PrivateKeySigner(env.wallet.privateKey);
     const gSwap = new GSwap({
       signer: signer,
       walletAddress: env.wallet.address

@@ -10,6 +10,7 @@ import { config } from 'dotenv';
 import { GSwap, PrivateKeySigner } from '@gala-chain/gswap-sdk';
 import { validateEnvironment } from '../../src/config/environment';
 import { logger } from '../../src/utils/logger';
+import { calculateMinOutputAmount } from '../../src/utils/slippage-calculator';
 
 config();
 
@@ -19,7 +20,7 @@ async function executeSimpleArbitrage(): Promise<void> {
     logger.info('💰 Route: GALA → GUSDC → GALA');
 
     const env = validateEnvironment();
-    const signer = new PrivateKeySigner(process.env.WALLET_PRIVATE_KEY || '');
+    const signer = new PrivateKeySigner(env.wallet.privateKey);
     const gSwap = new GSwap({
       signer: signer,
       walletAddress: env.wallet.address
@@ -58,7 +59,7 @@ async function executeSimpleArbitrage(): Promise<void> {
         recipient: env.wallet.address,
         deadline: Math.floor(Date.now() / 1000) + 1200, // 20 minutes
         amountIn: parseFloat(startAmount.toString()), // Ensure number
-        amountOutMinimum: parseFloat((expectedGusdc * 0.95).toString()), // 5% slippage tolerance
+        amountOutMinimum: parseFloat(calculateMinOutputAmount(expectedGusdc).toString()), // Centralized slippage protection
         sqrtPriceLimitX96: 0
       });
 
@@ -96,7 +97,7 @@ async function executeSimpleArbitrage(): Promise<void> {
             recipient: env.wallet.address,
             deadline: Math.floor(Date.now() / 1000) + 1200, // 20 minutes
             amountIn: parseFloat(expectedGusdc.toString()), // Ensure number
-            amountOutMinimum: parseFloat((expectedGalaReturn * 0.95).toString()), // 5% slippage tolerance
+            amountOutMinimum: parseFloat(calculateMinOutputAmount(expectedGalaReturn).toString()), // Centralized slippage protection
             sqrtPriceLimitX96: 0
           });
 

@@ -33,7 +33,7 @@ async function executeArbitrage(): Promise<void> {
     logger.info('💰 Route: GALA → GUSDC → GALA (Expected: 5.86% profit)');
 
     const env = validateEnvironment();
-    const signer = new PrivateKeySigner(process.env.WALLET_PRIVATE_KEY || '');
+    const signer = new PrivateKeySigner(env.wallet.privateKey);
     const gSwap = new GSwap({
       signer: signer,
       walletAddress: env.wallet.address

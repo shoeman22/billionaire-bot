@@ -10,6 +10,10 @@ import { config } from 'dotenv';
 import { GSwap, PrivateKeySigner } from '@gala-chain/gswap-sdk';
 import { validateEnvironment } from '../../src/config/environment';
 import { logger } from '../../src/utils/logger';
+import { TRADING_CONSTANTS } from '../../src/config/constants';
+import { calculateMinOutputAmount } from '../../src/utils/slippage-calculator';
+import { executeFullArbitrage, executeMultiArbitrage } from '../../src/trading/execution/arbitrage-executor';
+import type { TokenInfo } from '../../src/types/galaswap';
 
 config();
 
@@ -18,7 +22,7 @@ const step = process.argv[2];
 
 async function setupGSwap() {
   const env = validateEnvironment();
-  const signer = new PrivateKeySigner(process.env.WALLET_PRIVATE_KEY || '');
+  const signer = new PrivateKeySigner(env.wallet.privateKey);
 
   const gSwap = new GSwap({
     signer,
@@ -105,7 +109,7 @@ async function step2_executeFirstTrade(inputAmount: number, minOutput: number, f
       tokenOut: 'GUSDC|Unit|none|none',
       feeTier: feeTier,
       exactIn: inputAmount,
-      amountOutMinimum: minOutput * 0.95,
+      amountOutMinimum: calculateMinOutputAmount(minOutput),
       recipient: env.wallet.address
     });
 
@@ -116,7 +120,7 @@ async function step2_executeFirstTrade(inputAmount: number, minOutput: number, f
       feeTier, // Use the fee tier from the quote
       {
         exactIn: inputAmount,
-        amountOutMinimum: minOutput * 0.95, // 5% slippage - let SDK handle negative values
+        amountOutMinimum: calculateMinOutputAmount(minOutput), // 5% slippage - let SDK handle negative values
       },
       env.wallet.address, // your wallet address
     );
@@ -173,15 +177,6 @@ async function step2_executeFirstTrade(inputAmount: number, minOutput: number, f
     logger.info(`❓ Unknown payload format`);
     return 'unknown-transaction-format';
 
-    if (result.hash) {
-      logger.info(`✅ Trade Executed!`);
-      logger.info(`   Transaction Hash: ${result.hash}`);
-      logger.info(`   View on GalaScan: https://galascan.io/tx/${result.hash}`);
-      return result.hash;
-    } else {
-      throw new Error('No transaction hash returned');
-    }
-
   } catch (error) {
     logger.error('❌ Trade execution failed:', error);
     throw error;
@@ -230,7 +225,7 @@ async function step4_executeReturnTrade(inputAmount: number, minOutput: number, 
       tokenOut: 'GALA|Unit|none|none',
       feeTier: feeTier,
       exactIn: inputAmount,
-      amountOutMinimum: minOutput * 0.95,
+      amountOutMinimum: calculateMinOutputAmount(minOutput),
       recipient: env.wallet.address
     });
 
@@ -241,7 +236,7 @@ async function step4_executeReturnTrade(inputAmount: number, minOutput: number, 
       feeTier, // Use the fee tier from the quote
       {
         exactIn: inputAmount,
-        amountOutMinimum: minOutput * 0.95, // 5% slippage - let SDK handle negative values
+        amountOutMinimum: calculateMinOutputAmount(minOutput), // 5% slippage - let SDK handle negative values
       },
       env.wallet.address, // your wallet address
     );
@@ -343,6 +338,206 @@ async function fullArbitrage() {
   }
 }
 
+// Generate all possible token pairs from fallback tokens
+function generateTokenPairs(): Array<{tokenA: TokenInfo, tokenB: TokenInfo}> {
+  const tokens = TRADING_CONSTANTS.FALLBACK_TOKENS;
+  const pairs: Array<{tokenA: TokenInfo, tokenB: TokenInfo}> = [];
+
+  for (let i = 0; i < tokens.length; i++) {
+    for (let j = i + 1; j < tokens.length; j++) {
+      pairs.push({
+        tokenA: tokens[i],
+        tokenB: tokens[j]
+      });
+    }
+  }
+
+  logger.info(`🔢 Generated ${pairs.length} token pairs for arbitrage testing`);
+  return pairs;
+}
+
+// Execute arbitrage for a specific token pair
+async function executePairArbitrage(tokenA: TokenInfo, tokenB: TokenInfo): Promise<boolean> {
+  logger.info(`🎯 Testing arbitrage: ${tokenA.symbol} ↔ ${tokenB.symbol}`);
+
+  try {
+    const { gSwap } = await setupGSwap();
+    const amount = 1; // Test with 1 unit
+
+    // Step 1: Get quote A → B
+    const quote1 = await gSwap.quoting.quoteExactInput(
+      tokenA.tokenClass,
+      tokenB.tokenClass,
+      amount
+    );
+
+    if (!quote1?.outTokenAmount) {
+      logger.debug(`❌ No liquidity for ${tokenA.symbol} → ${tokenB.symbol}`);
+      return false;
+    }
+
+    const outputAmount = quote1.outTokenAmount.toNumber();
+    logger.info(`   ${tokenA.symbol} → ${tokenB.symbol}: ${amount} → ${outputAmount.toFixed(6)}`);
+
+    // Wait a moment
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Step 2: Get return quote B → A
+    const quote2 = await gSwap.quoting.quoteExactInput(
+      tokenB.tokenClass,
+      tokenA.tokenClass,
+      outputAmount
+    );
+
+    if (!quote2?.outTokenAmount) {
+      logger.debug(`❌ No return liquidity for ${tokenB.symbol} → ${tokenA.symbol}`);
+      return false;
+    }
+
+    const finalAmount = quote2.outTokenAmount.toNumber();
+    logger.info(`   ${tokenB.symbol} → ${tokenA.symbol}: ${outputAmount.toFixed(6)} → ${finalAmount.toFixed(6)}`);
+
+    // Calculate profit
+    const profit = finalAmount - amount;
+    const profitPercent = (profit / amount) * 100;
+
+    logger.info(`💰 Profit potential: ${profit.toFixed(6)} ${tokenA.symbol} (${profitPercent.toFixed(4)}%)`);
+
+    // Check if profitable (minimum 0.1% after fees)
+    if (profitPercent > 0.1) {
+      logger.info(`🚀 PROFITABLE OPPORTUNITY FOUND! Executing trades...`);
+
+      // Execute the actual trades using generic trade function
+      const tx1 = await executeTrade(tokenA.tokenClass, tokenB.tokenClass, amount, outputAmount, quote1.feeTier);
+
+      logger.info('⏳ Waiting 10 seconds for transaction to settle...');
+      await new Promise(resolve => setTimeout(resolve, 10000));
+
+      const tx2 = await executeTrade(tokenB.tokenClass, tokenA.tokenClass, outputAmount, finalAmount, quote2.feeTier);
+
+      logger.info(`✅ Arbitrage executed successfully!`);
+      logger.info(`📊 Transactions: ${tx1} | ${tx2}`);
+
+      return true; // Successful arbitrage
+    } else {
+      logger.info(`📉 Not profitable enough (${profitPercent.toFixed(4)}% < 0.1% minimum)`);
+      return false;
+    }
+
+  } catch (error) {
+    logger.debug(`❌ Error testing ${tokenA.symbol}/${tokenB.symbol}:`, error);
+    return false;
+  }
+}
+
+// Generic trade execution for any token pair
+async function executeTrade(
+  tokenIn: string,
+  tokenOut: string,
+  inputAmount: number,
+  minOutputAmount: number,
+  feeTier: number
+): Promise<string> {
+  logger.info(`🔄 Executing trade: ${inputAmount} ${tokenIn.split('|')[0]} → ${tokenOut.split('|')[0]}`);
+
+  const { gSwap, env } = await setupGSwap();
+
+  try {
+    // Generate swap payload using official docs signature
+    const swapPayload = await gSwap.swaps.swap(
+      tokenIn, // Token to sell
+      tokenOut, // Token to buy
+      feeTier, // Fee tier from quote
+      {
+        exactIn: inputAmount,
+        amountOutMinimum: calculateMinOutputAmount(minOutputAmount), // Centralized slippage protection
+      },
+      env.wallet.address, // Recipient address
+    );
+
+    logger.info(`📝 Generated swap payload for ${tokenIn.split('|')[0]} → ${tokenOut.split('|')[0]}`);
+
+    // Handle payload response
+    if (swapPayload && typeof swapPayload === 'object') {
+      const payload = swapPayload as any;
+
+      // Check if there's a transaction ID
+      if (payload.transactionId) {
+        logger.info(`✅ Transaction submitted: ${payload.transactionId}`);
+
+        // If there's a waitDelegate, await confirmation
+        if (payload.waitDelegate && typeof payload.waitDelegate === 'function') {
+          logger.info(`🔄 Waiting for transaction confirmation...`);
+          try {
+            const result = await payload.waitDelegate();
+            logger.info(`✅ Transaction confirmed:`, result);
+            return result.hash || payload.transactionId;
+          } catch (error: any) {
+            logger.error(`❌ Transaction failed:`, error);
+
+            // Extract transaction hash if available in error details
+            if (error.details?.transactionHash) {
+              logger.info(`✅ Transaction executed: ${error.details.transactionHash}`);
+              logger.info(`❌ But failed with: ${error.details.Message}`);
+              return error.details.transactionHash;
+            }
+
+            throw error;
+          }
+        }
+
+        return payload.transactionId;
+      }
+
+      // Check for errors
+      if (payload.error) {
+        logger.error(`❌ Transaction error: ${payload.error}`);
+        throw new Error(payload.error);
+      }
+    }
+
+    logger.info(`❓ Unknown payload format`);
+    return 'unknown-transaction-format';
+
+  } catch (error) {
+    logger.error(`❌ Trade execution failed for ${tokenIn.split('|')[0]} → ${tokenOut.split('|')[0]}:`, error);
+    throw error;
+  }
+}
+
+// Multi-pair arbitrage execution
+async function multiArbitrage(): Promise<void> {
+  logger.info('🌟 MULTI-PAIR ARBITRAGE EXECUTION');
+
+  const pairs = generateTokenPairs();
+  let successfulTrades = 0;
+
+  for (const pair of pairs) {
+    try {
+      const success = await executePairArbitrage(pair.tokenA, pair.tokenB);
+      if (success) {
+        successfulTrades++;
+        logger.info(`🎉 Successful arbitrage completed! Stopping multi-pair scan.`);
+        break; // Stop after first successful arbitrage
+      }
+
+      // Small delay between pair tests
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+    } catch (error) {
+      logger.error(`❌ Error with pair ${pair.tokenA.symbol}/${pair.tokenB.symbol}:`, error);
+    }
+  }
+
+  logger.info(`\n📊 Multi-pair arbitrage summary:`);
+  logger.info(`   Pairs tested: ${pairs.length}`);
+  logger.info(`   Successful trades: ${successfulTrades}`);
+
+  if (successfulTrades === 0) {
+    logger.info(`📭 No profitable arbitrage opportunities found in current market conditions`);
+  }
+}
+
 // Main execution based on command line argument
 async function main() {
   let gSwapInstance: any = null;
@@ -357,13 +552,21 @@ async function main() {
       logger.info('  trade1 [amount] [minOut] [fee] - Execute GALA → GUSDC trade');
       logger.info('  quote2 [amount] - Get GUSDC → GALA quote');
       logger.info('  trade2 [amount] [minOut] [fee] - Execute GUSDC → GALA trade');
-      logger.info('  full            - Execute complete arbitrage');
+      logger.info('  full            - Execute complete GALA ↔ GUSDC arbitrage');
+      logger.info('  multi           - Test all fallback token pairs for arbitrage');
+      logger.info('');
+      logger.info('Enhanced commands:');
+      logger.info('  multi           - Scans all 10 fallback token pairs, executes first profitable opportunity');
       logger.info('');
       logger.info('Example workflow:');
       logger.info('  1. tsx manual-arbitrage-steps.ts quote1');
       logger.info('  2. tsx manual-arbitrage-steps.ts trade1 1 0.016 500');
       logger.info('  3. tsx manual-arbitrage-steps.ts quote2 0.016');
       logger.info('  4. tsx manual-arbitrage-steps.ts trade2 0.016 0.98 500');
+      logger.info('');
+      logger.info('Quick execution:');
+      logger.info('  tsx manual-arbitrage-steps.ts full   - Single GALA/GUSDC cycle');
+      logger.info('  tsx manual-arbitrage-steps.ts multi  - Multi-pair opportunity scan');
       return;
     }
 
@@ -392,7 +595,23 @@ async function main() {
         break;
 
       case 'full':
-        await fullArbitrage();
+        logger.info('🚀 Using shared arbitrage execution library');
+        const fullResult = await executeFullArbitrage();
+        if (fullResult.success) {
+          logger.info(`✅ ARBITRAGE COMPLETE! Profit: ${fullResult.profitPercent?.toFixed(2)}%`);
+        } else {
+          logger.info(`📭 No profitable opportunities found: ${fullResult.error}`);
+        }
+        break;
+
+      case 'multi':
+        logger.info('🚀 Using shared arbitrage execution library');
+        const multiResult = await executeMultiArbitrage();
+        if (multiResult.success) {
+          logger.info(`✅ ARBITRAGE COMPLETE! Profit: ${multiResult.profitPercent?.toFixed(2)}%`);
+        } else {
+          logger.info(`📭 No profitable opportunities found: ${multiResult.error}`);
+        }
         break;
 
       default:
@@ -400,10 +619,8 @@ async function main() {
         logger.info('Run without arguments to see usage help');
     }
   } finally {
-    // Force cleanup and exit
-    setTimeout(() => {
-      process.exit(0);
-    }, 1000);
+    // Natural cleanup - let Node.js process exit naturally
+    logger.debug('Manual arbitrage steps completed');
   }
 }
 

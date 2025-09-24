@@ -67,7 +67,13 @@
     "arbitrage:trade1": "tsx scripts/tools/manual-arbitrage-steps.ts trade1",
     "arbitrage:trade2": "tsx scripts/tools/manual-arbitrage-steps.ts trade2",
     "arbitrage:full": "tsx scripts/tools/manual-arbitrage-steps.ts full",
+    "arbitrage:multi": "tsx scripts/tools/manual-arbitrage-steps.ts multi",
+    "arbitrage:loop": "tsx scripts/arbitrage-loop.ts",
+    "arbitrage:loop:multi": "tsx scripts/arbitrage-loop.ts --mode multi",
+    "arbitrage:loop:fast": "tsx scripts/arbitrage-loop.ts --delay 30",
+    "arbitrage:loop:duration": "tsx scripts/arbitrage-loop.ts --duration 60",
     "arbitrage:full:continuous": "tsx src/cli/trading-cli.ts auto-trade --strategies arbitrage",
+    "arbitrage:smart": "tsx src/cli/trading-cli.ts auto-trade --strategies smart-arbitrage",
     "arbitrage:help": "tsx scripts/tools/manual-arbitrage-steps.ts"
   },
   "dependencies": {

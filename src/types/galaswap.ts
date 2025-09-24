@@ -11,6 +11,16 @@ export interface TokenClassKey {
   additionalKey: string;
 }
 
+// Token information for arbitrage operations
+export interface TokenInfo {
+  symbol: string;
+  name: string;
+  decimals: number;
+  tokenClass: string; // Pipe format: Collection|Category|Type|AdditionalKey
+  price: number;
+  priceChange24h: number;
+}
+
 // Base response structure for all API calls
 export interface BaseResponse {
   status: number;

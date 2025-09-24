@@ -37,7 +37,20 @@ export const TRADING_CONSTANTS = {
     ETIME: 'ETIME|Unit|none|none',
     SILK: 'SILK|Unit|none|none',
     GTON: 'GTON|Unit|none|none',
+    // Major wrapped tokens
+    GUSDT: 'GUSDT|Unit|none|none',
+    GWETH: 'GWETH|Unit|none|none',
+    GWBTC: 'GWBTC|Unit|none|none',
   },
+
+  // Fallback token set for arbitrage operations
+  FALLBACK_TOKENS: [
+    { symbol: 'GALA', name: 'Gala', decimals: 8, tokenClass: 'GALA|Unit|none|none', price: 0, priceChange24h: 0 },
+    { symbol: 'GUSDC', name: 'Gala USD Coin', decimals: 6, tokenClass: 'GUSDC|Unit|none|none', price: 0, priceChange24h: 0 },
+    { symbol: 'GUSDT', name: 'Gala Tether', decimals: 6, tokenClass: 'GUSDT|Unit|none|none', price: 0, priceChange24h: 0 },
+    { symbol: 'GWETH', name: 'Gala Wrapped Ethereum', decimals: 18, tokenClass: 'GWETH|Unit|none|none', price: 0, priceChange24h: 0 },
+    { symbol: 'GWBTC', name: 'Gala Wrapped Bitcoin', decimals: 8, tokenClass: 'GWBTC|Unit|none|none', price: 0, priceChange24h: 0 }
+  ] as const,
 
   // Position management
   TICK_RANGES: {
