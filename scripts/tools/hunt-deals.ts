@@ -25,6 +25,7 @@ interface ArbitrageOpportunity {
 }
 
 async function huntDeals(): Promise<void> {
+  let eventSocketConnected = false;
   try {
     logger.info('🎯 DEAL HUNTER ACTIVATED - Scanning for arbitrage opportunities!');
     logger.info('💰 Live trading mode - hunting real profit opportunities');
@@ -39,6 +40,7 @@ async function huntDeals(): Promise<void> {
     // Connect to event socket for real-time updates
     try {
       GSwap.events?.connectEventSocket();
+      eventSocketConnected = true;
       logger.info('📡 Connected to real-time price feeds');
     } catch (error) {
       logger.warn('⚠️ Event socket not available, using polling mode');
@@ -234,6 +236,16 @@ async function huntDeals(): Promise<void> {
 
   } catch (error) {
     logger.error('💥 Deal hunting failed:', error);
+  } finally {
+    // Clean up event socket to allow process to exit
+    if (eventSocketConnected) {
+      try {
+        GSwap.events?.disconnect?.();
+        logger.info('📡 Disconnected from event socket');
+      } catch (error) {
+        logger.warn('⚠️ Failed to disconnect event socket:', error);
+      }
+    }
   }
 }
 
@@ -253,4 +265,16 @@ async function getQuote(gSwap: GSwap, inputToken: string, outputToken: string, i
   }
 }
 
-huntDeals().catch(console.error);
+huntDeals()
+  .then(() => {
+    logger.info('🏁 Hunt complete, exiting...');
+    // Force exit if event loops are still active
+    setTimeout(() => {
+      logger.warn('⚠️ Force closing process...');
+      process.exit(0);
+    }, 1000);
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });

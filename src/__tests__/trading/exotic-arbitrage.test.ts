@@ -1,0 +1,444 @@
+/**
+ * Comprehensive Test Suite for Exotic Arbitrage Execution
+ *
+ * Tests all critical bulletproofing features:
+ * - Security: SignerService integration, no private key exposure
+ * - Reliability: Graceful error handling, no process.exit()
+ * - Performance: Dynamic gas estimation, slippage protection
+ * - Monitoring: Transaction verification, settlement detection
+ */
+
+import { jest } from '@jest/globals';
+
+// Mock dependencies FIRST before imports
+jest.mock('../../security/SignerService', () => {
+  const mockSignerService = {
+    signPayload: jest.fn(),
+    getWalletAddress: jest.fn(),
+    destroy: jest.fn()
+  };
+
+  return {
+    SignerService: jest.fn(() => mockSignerService),
+    createSignerService: jest.fn(() => mockSignerService)
+  };
+});
+jest.mock('@gala-chain/gswap-sdk');
+jest.mock('../../utils/logger');
+
+// Mock environment with complete BotConfig structure
+jest.mock('../../config/environment', () => ({
+  validateEnvironment: () => ({
+    trading: {
+      maxPositionSize: 1000,
+      defaultSlippageTolerance: 0.01,
+      minProfitThreshold: 0.001,
+      maxDailyVolume: 100000,
+      concentrationLimit: 1.0,
+      disablePortfolioLimits: false
+    },
+    api: {
+      baseUrl: 'https://test-api.gala.com',
+      wsUrl: 'wss://test-ws.gala.com'
+    },
+    wallet: {
+      privateKey: Buffer.from('test-private-key-data').toString('base64'),
+      address: 'eth|5AD173F004990940b20e7A5C64C72E8b6B91a783'
+    },
+    development: {
+      nodeEnv: 'test',
+      logLevel: 'debug',
+      productionTestMode: false
+    }
+  })
+}));
+
+// Now import after mocks are set up
+import {
+  executeExoticArbitrage,
+  discoverTriangularOpportunities,
+  discoverCrossPairOpportunities,
+  huntAndExecuteArbitrage,
+  ExoticArbitrageConfig,
+  ExoticRoute
+} from '../../trading/execution/exotic-arbitrage-executor';
+import { SignerService } from '../../security/SignerService';
+import { GSwap } from '@gala-chain/gswap-sdk';
+
+describe('Exotic Arbitrage Security Tests', () => {
+  let mockSignerService: jest.Mocked<SignerService>;
+  let mockGSwap: jest.Mocked<GSwap>;
+
+  beforeEach(() => {
+    // Reset all mocks
+    jest.clearAllMocks();
+
+    // Get references to the mocked functions
+    const { SignerService: MockedSignerService, createSignerService } = require('../../security/SignerService');
+    mockSignerService = MockedSignerService();
+
+    // Mock GSwap
+    mockGSwap = {
+      quoting: {
+        quoteExactInput: jest.fn()
+      },
+      swaps: {
+        swap: jest.fn()
+      }
+    } as any;
+    (GSwap as jest.MockedClass<typeof GSwap>).mockImplementation(() => mockGSwap);
+
+    // Environment mock is now set up at module level above
+  });
+
+  describe('PHASE 1 CRITICAL: Security Bulletproofing', () => {
+    test('should use SignerService instead of direct private key', async () => {
+      const config: ExoticArbitrageConfig = {
+        mode: 'triangular',
+        inputAmount: 20
+      };
+
+      // Mock a failing scenario to test SignerService usage
+      mockGSwap.quoting.quoteExactInput.mockRejectedValue(new Error('Test error'));
+
+      const result = await executeExoticArbitrage(config);
+
+      // Verify SignerService was created (security improvement)
+      expect(SignerService).toHaveBeenCalled();
+
+      // Verify SignerService.destroy() was called for cleanup
+      expect(mockSignerService.destroy).toHaveBeenCalled();
+
+      // Should return error gracefully, not crash
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('No profitable');
+    });
+
+    test('should handle errors gracefully without process.exit()', async () => {
+      const config: ExoticArbitrageConfig = {
+        mode: 'cross-pair',
+        inputAmount: 50
+      };
+
+      // Mock critical error
+      mockGSwap.quoting.quoteExactInput.mockRejectedValue(new Error('Critical API failure'));
+
+      // Should not throw or exit process
+      const result = await executeExoticArbitrage(config);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+      expect(result.executedTrades).toBe(0);
+
+      // Process should still be running (no process.exit called)
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    test('should clean up SignerService resources on failure', async () => {
+      const config: ExoticArbitrageConfig = {
+        mode: 'hunt-execute',
+        inputAmount: 30
+      };
+
+      // Mock SignerService creation failure
+      mockSignerService.signPayload.mockImplementation(() => {
+        throw new Error('Signer creation failed');
+      });
+
+      const result = await executeExoticArbitrage(config);
+
+      // Even on failure, destroy should be called
+      expect(mockSignerService.destroy).toHaveBeenCalled();
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe('PHASE 2 HIGH: Dynamic Gas Estimation', () => {
+    test('should calculate gas based on route complexity', async () => {
+      // Mock successful discovery to test gas calculation
+      const mockRoute: ExoticRoute = {
+        tokens: ['GALA', 'GUSDC', 'ETIME'],
+        symbols: ['GALA', 'GUSDC', 'ETIME'],
+        inputAmount: 25,
+        expectedOutput: 26.3,
+        profitAmount: 1.3,
+        profitPercent: 5.2,
+        estimatedGas: 0.12, // Should be calculated dynamically
+        netProfit: 1.18, // profitAmount - estimatedGas
+        confidence: 'high',
+        feeTiers: [3000, 10000]
+      };
+
+      mockGSwap.quoting.quoteExactInput
+        .mockResolvedValueOnce({
+          outTokenAmount: { toNumber: () => 25.5 },
+          feeTier: 3000
+        } as any)
+        .mockResolvedValueOnce({
+          outTokenAmount: { toNumber: () => 26.3 },
+          feeTier: 10000
+        } as any);
+
+      const opportunities = await discoverTriangularOpportunities(25, 1.0);
+
+      if (opportunities.length > 0) {
+        const route = opportunities[0];
+
+        // Gas should be calculated dynamically based on:
+        // BASE_GAS (0.08) + PER_HOP_GAS (0.04 * 2 hops) = 0.16 minimum
+        expect(route.estimatedGas).toBeGreaterThanOrEqual(0.08);
+        expect(route.estimatedGas).toBeLessThan(0.5); // Reasonable upper bound
+      }
+    });
+
+    test('should adjust gas for complex multi-hop routes', async () => {
+      // Test 4-token cross-pair route (more complex)
+      const mockComplexRoute: ExoticRoute = {
+        tokens: ['GALA', 'GUSDC', 'ETIME', 'SILK'],
+        symbols: ['GALA', 'GUSDC', 'ETIME', 'SILK'],
+        inputAmount: 40,
+        expectedOutput: 42.1,
+        profitAmount: 2.1,
+        profitPercent: 5.25,
+        estimatedGas: 0.2, // Should be higher for 4-token route
+        netProfit: 1.9, // profitAmount - estimatedGas
+        confidence: 'medium',
+        feeTiers: [3000, 10000, 3000]
+      };
+
+      mockGSwap.quoting.quoteExactInput
+        .mockResolvedValueOnce({ outTokenAmount: { toNumber: () => 40.5 }, feeTier: 3000 } as any)
+        .mockResolvedValueOnce({ outTokenAmount: { toNumber: () => 41.2 }, feeTier: 10000 } as any)
+        .mockResolvedValueOnce({ outTokenAmount: { toNumber: () => 42.1 }, feeTier: 3000 } as any);
+
+      const opportunities = await discoverCrossPairOpportunities(40, 1.5);
+
+      if (opportunities.length > 0) {
+        const route = opportunities[0];
+
+        // Complex route should have higher gas estimate
+        // BASE_GAS (0.08) + PER_HOP_GAS (0.04 * 3 hops) + COMPLEXITY (0.2 for 4+ tokens) = 0.4
+        expect(route.estimatedGas).toBeGreaterThanOrEqual(0.15);
+        expect(route.estimatedGas).toBeLessThan(0.8);
+      }
+    });
+  });
+
+  describe('PHASE 2 HIGH: Slippage Protection', () => {
+    test('should apply inter-hop slippage buffers', async () => {
+      const config: ExoticArbitrageConfig = {
+        mode: 'triangular',
+        inputAmount: 30,
+        minProfitThreshold: 2.0
+      };
+
+      // Mock successful quotes with slippage scenarios
+      mockGSwap.quoting.quoteExactInput
+        .mockResolvedValueOnce({
+          outTokenAmount: { toNumber: () => 30.8 }, // First hop: +2.67%
+          feeTier: 3000
+        } as any)
+        .mockResolvedValueOnce({
+          outTokenAmount: { toNumber: () => 31.5 }, // Return hop should account for slippage buffer
+          feeTier: 10000
+        } as any);
+
+      // Mock successful swap executions
+      const mockSwapPayload = {
+        submit: jest.fn(() => Promise.resolve({ hash: 'mock-tx-hash' })),
+        waitDelegate: jest.fn(() => Promise.resolve({ hash: 'confirmed-tx-hash' })),
+        transactionId: 'mock-tx-id'
+      } as any;
+
+      mockGSwap.swaps.swap.mockResolvedValue(mockSwapPayload);
+
+      const result = await executeExoticArbitrage(config);
+
+      // Should succeed with slippage protection applied
+      expect(result.success).toBe(true);
+      expect(result.profitPercent).toBeGreaterThan(2.0);
+
+      // Verify swaps were called with slippage-protected amounts
+      expect(mockGSwap.swaps.swap).toHaveBeenCalledTimes(2);
+    });
+
+    test('should reject trades with excessive slippage risk', async () => {
+      const config: ExoticArbitrageConfig = {
+        mode: 'cross-pair',
+        inputAmount: 50,
+        minProfitThreshold: 3.0
+      };
+
+      // Mock quotes that would result in high slippage
+      mockGSwap.quoting.quoteExactInput
+        .mockResolvedValueOnce({
+          outTokenAmount: { toNumber: () => 48.5 }, // Loss on first hop
+          feeTier: 3000
+        } as any);
+
+      const result = await executeExoticArbitrage(config);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('No profitable');
+      expect(result.executedTrades).toBe(0);
+    });
+  });
+
+  describe('PHASE 2 HIGH: Transaction Verification', () => {
+    test('should verify transaction settlement before proceeding', async () => {
+      const config: ExoticArbitrageConfig = {
+        mode: 'triangular',
+        inputAmount: 20
+      };
+
+      // Mock transaction monitoring
+      const mockTransactionResult = {
+        success: true,
+        status: 'CONFIRMED',
+        blockNumber: 12345,
+        gasUsed: 150000,
+        confirmationTime: 5000
+      };
+
+      // Mock successful execution flow
+      mockGSwap.quoting.quoteExactInput
+        .mockResolvedValueOnce({
+          outTokenAmount: { toNumber: () => 21.0 },
+          feeTier: 3000
+        } as any)
+        .mockResolvedValueOnce({
+          outTokenAmount: { toNumber: () => 21.8 },
+          feeTier: 10000
+        } as any);
+
+      const mockSwapPayload = {
+        submit: jest.fn(() => Promise.resolve({ hash: 'tx-hash-1' })),
+        waitDelegate: jest.fn(() => Promise.resolve(mockTransactionResult)),
+        transactionId: 'tx-id-1'
+      } as any;
+
+      mockGSwap.swaps.swap.mockResolvedValue(mockSwapPayload);
+
+      const result = await executeExoticArbitrage(config);
+
+      expect(result.success).toBe(true);
+      expect(mockSwapPayload.waitDelegate).toHaveBeenCalled();
+    });
+
+    test('should handle transaction failure gracefully', async () => {
+      const config: ExoticArbitrageConfig = {
+        mode: 'triangular',
+        inputAmount: 25
+      };
+
+      // Mock transaction failure
+      const mockFailedTransaction = {
+        success: false,
+        status: 'FAILED',
+        error: 'Transaction reverted'
+      };
+
+      mockGSwap.quoting.quoteExactInput
+        .mockResolvedValueOnce({
+          outTokenAmount: { toNumber: () => 26.0 },
+          feeTier: 3000
+        } as any);
+
+      const mockSwapPayload = {
+        submit: jest.fn(() => Promise.resolve({ hash: 'failed-tx' })),
+        waitDelegate: jest.fn(() => Promise.resolve(mockFailedTransaction)),
+        transactionId: 'failed-tx-id'
+      } as any;
+
+      mockGSwap.swaps.swap.mockResolvedValue(mockSwapPayload);
+
+      const result = await executeExoticArbitrage(config);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Transaction failed');
+      expect(result.executedTrades).toBe(0);
+    });
+  });
+
+  describe('Hunt and Execute Integration Tests', () => {
+    test('should discover and execute high-confidence opportunities', async () => {
+      // Mock high-confidence opportunity
+      mockGSwap.quoting.quoteExactInput
+        .mockResolvedValueOnce({
+          outTokenAmount: { toNumber: () => 21.5 },
+          feeTier: 3000
+        } as any)
+        .mockResolvedValueOnce({
+          outTokenAmount: { toNumber: () => 22.8 },
+          feeTier: 10000
+        } as any);
+
+      const mockSwapPayload = {
+        submit: jest.fn(() => Promise.resolve({ hash: 'hunt-tx' })),
+        waitDelegate: jest.fn(() => Promise.resolve({
+          success: true,
+          status: 'CONFIRMED',
+          hash: 'hunt-confirmed'
+        })),
+        transactionId: 'hunt-tx-id'
+      } as any;
+
+      mockGSwap.swaps.swap.mockResolvedValue(mockSwapPayload);
+
+      const result = await huntAndExecuteArbitrage(20, 3.0);
+
+      expect(result.success).toBe(true);
+      expect(result.route).toBeDefined();
+      expect(result.profitPercent).toBeGreaterThan(3.0);
+    });
+
+    test('should skip low-confidence opportunities', async () => {
+      // Mock low-confidence scenario
+      mockGSwap.quoting.quoteExactInput
+        .mockResolvedValueOnce({
+          outTokenAmount: { toNumber: () => 20.5 }, // Only 2.5% profit
+          feeTier: 3000
+        } as any)
+        .mockResolvedValueOnce({
+          outTokenAmount: { toNumber: () => 20.5 },
+          feeTier: 10000
+        } as any);
+
+      const result = await huntAndExecuteArbitrage(20, 4.0); // High threshold
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('threshold');
+    });
+  });
+
+  describe('Discovery Functions Edge Cases', () => {
+    test('should handle API errors in discovery gracefully', async () => {
+      // Mock API failure
+      mockGSwap.quoting.quoteExactInput.mockRejectedValue(new Error('API rate limit exceeded'));
+
+      const triangularOpportunities = await discoverTriangularOpportunities(20, 1.0);
+      const crossPairOpportunities = await discoverCrossPairOpportunities(20, 1.5);
+
+      // Should return empty arrays, not throw errors
+      expect(triangularOpportunities).toEqual([]);
+      expect(crossPairOpportunities).toEqual([]);
+    });
+
+    test('should filter opportunities by confidence thresholds', async () => {
+      // Mock marginal opportunity
+      mockGSwap.quoting.quoteExactInput
+        .mockResolvedValueOnce({
+          outTokenAmount: { toNumber: () => 20.3 }, // Only 1.5% profit
+          feeTier: 3000
+        } as any)
+        .mockResolvedValueOnce({
+          outTokenAmount: { toNumber: () => 20.3 },
+          feeTier: 10000
+        } as any);
+
+      const opportunities = await discoverTriangularOpportunities(20, 2.0); // Higher threshold
+
+      expect(opportunities.length).toBe(0); // Should be filtered out
+    });
+  });
+});

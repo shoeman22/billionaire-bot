@@ -14,11 +14,12 @@
 import { config } from 'dotenv';
 import { logger } from '../src/utils/logger';
 import { executeArbitrage, ArbitrageResult } from '../src/trading/execution/arbitrage-executor';
+import { executeExoticArbitrage, ExoticArbitrageResult, ExoticArbitrageConfig } from '../src/trading/execution/exotic-arbitrage-executor';
 
 config();
 
 interface LoopConfig {
-  mode: 'full' | 'multi';
+  mode: 'full' | 'multi' | 'triangular' | 'cross-pair' | 'exotic-hunt';
   delayBetweenRuns: number; // seconds
   maxConsecutiveErrors: number;
   exponentialBackoffBase: number; // seconds
@@ -168,36 +169,77 @@ class ArbitrageLoopController {
     logger.info(`\n🔄 Arbitrage Run #${this.stats.totalRuns} (${this.config.mode} mode)`);
 
     try {
-      // Execute arbitrage using shared library
-      logger.info(`📋 Executing ${this.config.mode} arbitrage...`);
+      // Execute based on mode type
+      if (this.config.mode === 'triangular' || this.config.mode === 'cross-pair' || this.config.mode === 'exotic-hunt') {
+        // Execute exotic arbitrage
+        logger.info(`🌟 Executing ${this.config.mode} exotic arbitrage...`);
 
-      const result: ArbitrageResult = await executeArbitrage({
-        mode: this.config.mode
-      });
+        const exoticConfig: ExoticArbitrageConfig = {
+          mode: this.config.mode === 'exotic-hunt' ? 'hunt-execute' : this.config.mode as 'triangular' | 'cross-pair',
+          inputAmount: 20,
+          minProfitThreshold: this.config.mode === 'triangular' ? 1.0 : this.config.mode === 'cross-pair' ? 1.5 : 3.0
+        };
 
-      if (result.success) {
-        this.stats.successfulRuns++;
-        this.stats.consecutiveErrors = 0;
-        this.stats.lastSuccessTime = Date.now();
+        const result: ExoticArbitrageResult = await executeExoticArbitrage(exoticConfig);
 
-        // Track profit
-        if (result.profitAmount) {
-          this.stats.totalProfit += result.profitAmount;
+        if (result.success) {
+          this.stats.successfulRuns++;
+          this.stats.consecutiveErrors = 0;
+          this.stats.lastSuccessTime = Date.now();
+
+          // Track profit
+          if (result.profitAmount) {
+            this.stats.totalProfit += result.profitAmount;
+          }
+
+          logger.info(`✅ Run #${this.stats.totalRuns} completed successfully`);
+          if (result.profitPercent) {
+            logger.info(`💰 Profit: ${result.profitPercent.toFixed(2)}%`);
+          }
+          if (result.route) {
+            logger.info(`🔄 Route: ${result.route.symbols.join(' → ')}`);
+          }
+        } else {
+          this.stats.errorRuns++;
+          this.stats.consecutiveErrors++;
+          logger.info(`📭 Run #${this.stats.totalRuns} found no profitable exotic opportunities`);
+          if (result.error) {
+            logger.debug(`Details: ${result.error}`);
+          }
         }
 
-        logger.info(`✅ Run #${this.stats.totalRuns} completed successfully`);
-        if (result.profitPercent) {
-          logger.info(`💰 Profit: ${result.profitPercent.toFixed(2)}%`);
-        }
-        if (result.route) {
-          logger.info(`🔄 Route: ${result.route}`);
-        }
       } else {
-        this.stats.errorRuns++;
-        this.stats.consecutiveErrors++;
-        logger.info(`📭 Run #${this.stats.totalRuns} found no profitable opportunities`);
-        if (result.error) {
-          logger.debug(`Details: ${result.error}`);
+        // Execute standard arbitrage
+        logger.info(`📋 Executing ${this.config.mode} arbitrage...`);
+
+        const result: ArbitrageResult = await executeArbitrage({
+          mode: this.config.mode as 'full' | 'multi'
+        });
+
+        if (result.success) {
+          this.stats.successfulRuns++;
+          this.stats.consecutiveErrors = 0;
+          this.stats.lastSuccessTime = Date.now();
+
+          // Track profit
+          if (result.profitAmount) {
+            this.stats.totalProfit += result.profitAmount;
+          }
+
+          logger.info(`✅ Run #${this.stats.totalRuns} completed successfully`);
+          if (result.profitPercent) {
+            logger.info(`💰 Profit: ${result.profitPercent.toFixed(2)}%`);
+          }
+          if (result.route) {
+            logger.info(`🔄 Route: ${result.route}`);
+          }
+        } else {
+          this.stats.errorRuns++;
+          this.stats.consecutiveErrors++;
+          logger.info(`📭 Run #${this.stats.totalRuns} found no profitable opportunities`);
+          if (result.error) {
+            logger.debug(`Details: ${result.error}`);
+          }
         }
       }
 
@@ -338,7 +380,7 @@ async function main() {
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
       case '--mode':
-        config.mode = args[++i] as 'full' | 'multi';
+        config.mode = args[++i] as 'full' | 'multi' | 'triangular' | 'cross-pair' | 'exotic-hunt';
         break;
       case '--delay':
         config.delayBetweenRuns = parseInt(args[++i]);
@@ -366,9 +408,16 @@ function printHelp() {
 Usage: tsx scripts/arbitrage-loop.ts [options]
 
 Options:
-  --mode <full|multi>     Arbitrage mode (default: full)
+  --mode <mode>           Arbitrage mode (default: full)
+
+                         STANDARD MODES:
                          full: GALA ↔ GUSDC only
                          multi: All fallback token pairs
+
+                         EXOTIC MODES:
+                         triangular: GALA → TOKEN → GALA loops
+                         cross-pair: GALA → A → B → GALA routes
+                         exotic-hunt: Auto-hunt & execute best exotic opportunities
 
   --delay <seconds>       Delay between runs (default: 45)
   --duration <minutes>    Max run duration (default: infinite)
@@ -376,23 +425,32 @@ Options:
   --help                  Show this help
 
 Examples:
-  tsx scripts/arbitrage-loop.ts                    # Default full mode
-  tsx scripts/arbitrage-loop.ts --mode multi       # Multi-pair mode
-  tsx scripts/arbitrage-loop.ts --delay 60         # 60s between runs
-  tsx scripts/arbitrage-loop.ts --duration 120     # Run for 2 hours
-  tsx scripts/arbitrage-loop.ts --mode multi --delay 30 --duration 60
+  # Standard arbitrage
+  tsx scripts/arbitrage-loop.ts                              # Default GALA/GUSDC
+  tsx scripts/arbitrage-loop.ts --mode multi                 # Multi-pair scan
+
+  # Exotic arbitrage
+  tsx scripts/arbitrage-loop.ts --mode triangular            # Triangular loops
+  tsx scripts/arbitrage-loop.ts --mode cross-pair            # Cross-pair routes
+  tsx scripts/arbitrage-loop.ts --mode exotic-hunt           # Hunt best opportunities
+
+  # Configuration
+  tsx scripts/arbitrage-loop.ts --delay 30 --duration 60     # 30s delay, 60m duration
+  tsx scripts/arbitrage-loop.ts --mode triangular --delay 60 # Triangular with 1m delay
 
 Features:
+  ✅ Standard & exotic arbitrage modes
+  ✅ Triangular & cross-pair route discovery
+  ✅ Auto-execution of high-confidence opportunities
   ✅ Rate limit detection and exponential backoff
   ✅ Clean shutdown handling (Ctrl+C)
   ✅ Progress statistics and monitoring
   ✅ Configurable delays and timeouts
-  ✅ Support for both single and multi-pair modes
 `);
 }
 
-// Run if this file is executed directly
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Run if this file is executed directly - Jest compatible
+if (require.main === module) {
   main().catch((error) => {
     console.error('💥 Loop controller failed:', error);
     process.exit(1);

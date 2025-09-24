@@ -30,6 +30,15 @@ export const TRADING_CONSTANTS = {
     VOLATILE: 10000 // 1.00% for exotic/volatile pairs
   },
 
+  // Gas cost estimation constants (in GALA)
+  // Values aligned with hunt-deals.ts for consistent profit calculations
+  GAS_COSTS: {
+    TRIANGULAR_ARBITRAGE: 0.1,  // GALA → TOKEN → GALA (2 swaps)
+    CROSS_PAIR_ARBITRAGE: 0.15, // GALA → TokenA → TokenB → GALA (3 swaps)
+    BASE_GAS: 0.08,             // Base gas cost for any transaction
+    PER_HOP_GAS: 0.04           // Additional gas per hop for complex routes
+  },
+
   // Common GalaChain token identifiers (SDK pipe format)
   TOKENS: {
     GALA: 'GALA|Unit|none|none',
