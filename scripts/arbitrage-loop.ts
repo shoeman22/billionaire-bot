@@ -41,6 +41,7 @@ class ArbitrageLoopController {
   private stats: LoopStats;
   private isRunning: boolean = false;
   private shouldStop: boolean = false;
+  private signalCount: number = 0;
 
   constructor(config: Partial<LoopConfig> = {}) {
     this.config = {
@@ -66,16 +67,36 @@ class ArbitrageLoopController {
   }
 
   private setupSignalHandlers(): void {
-    // Handle Ctrl+C gracefully
+    // Handle Ctrl+C gracefully with debouncing
     process.on('SIGINT', () => {
-      logger.info('🛑 Received shutdown signal, stopping loop gracefully...');
-      this.shouldStop = true;
+      this.signalCount++;
+
+      if (this.signalCount === 1) {
+        logger.info('🛑 Received shutdown signal, stopping loop gracefully...');
+        logger.info('💡 Press Ctrl+C again within 3 seconds to force exit');
+        this.shouldStop = true;
+
+        // Reset signal count after 3 seconds
+        setTimeout(() => {
+          this.signalCount = 0;
+        }, 3000);
+
+      } else if (this.signalCount >= 2) {
+        logger.info('🚨 Force exit requested, stopping immediately...');
+        process.exit(0);
+      }
     });
 
     // Handle other termination signals
     process.on('SIGTERM', () => {
       logger.info('🛑 Received SIGTERM, stopping loop...');
       this.shouldStop = true;
+
+      // Force exit after 5 seconds if process doesn't stop gracefully
+      setTimeout(() => {
+        logger.info('🚨 Force exit after timeout...');
+        process.exit(0);
+      }, 5000);
     });
   }
 
@@ -110,7 +131,19 @@ class ArbitrageLoopController {
           }
         }
 
+        // Check if we should stop before executing
+        if (this.shouldStop) {
+          logger.info('🛑 Stopping before arbitrage execution...');
+          break;
+        }
+
         await this.executeArbitrageRun();
+
+        // Check if we should stop after execution
+        if (this.shouldStop) {
+          logger.info('🛑 Stopping after arbitrage execution...');
+          break;
+        }
 
         // Apply delay with potential exponential backoff
         const delay = this.calculateDelay();
@@ -272,7 +305,14 @@ class ArbitrageLoopController {
           return;
         }
 
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Check shouldStop more frequently during the 1-second wait
+        for (let j = 0; j < 10; j++) {
+          if (this.shouldStop) {
+            process.stdout.write('\r🛑 Stopping countdown...\n');
+            return;
+          }
+          await new Promise(resolve => setTimeout(resolve, 100)); // 100ms checks
+        }
       }
 
       // Clear the countdown line and add newline
