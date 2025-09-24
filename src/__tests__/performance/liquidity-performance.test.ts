@@ -12,7 +12,7 @@ import { GasEstimator } from '../../utils/gas-estimator';
 import { performance } from 'perf_hooks';
 
 // Mock dependencies
-jest.mock('../../services/gswap-wrapper');
+jest.mock('../../services/gswap-simple');
 jest.mock('../../utils/retry-helper');
 jest.mock('../../utils/gas-estimator');
 

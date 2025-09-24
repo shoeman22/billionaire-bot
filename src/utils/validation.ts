@@ -194,11 +194,11 @@ export class InputValidator {
    * Check if token follows GalaChain format
    */
   private static isGalaChainTokenFormat(token: string): boolean {
-    return /^[A-Za-z0-9]+\$[A-Za-z0-9]+\$[A-Za-z0-9]+\$[A-Za-z0-9]+$/.test(token);
+    return /^[A-Za-z0-9]+\|[A-Za-z0-9]+(?:\|[A-Za-z0-9:$]+){1,2}$/.test(token);
   }
 
   /**
-   * Validate GalaChain token format: Collection$Category$Type$AdditionalKey
+   * Validate GalaChain token format: Collection|Category|Type|AdditionalKey
    * HIGH PRIORITY FIX: Enhanced validation to prevent edge cases and malformed API calls
    */
   static validateTokenFormat(token: string): ValidationResult {
@@ -217,16 +217,16 @@ export class InputValidator {
       return { isValid: false, errors, warnings };
     }
 
-    // CRITICAL: Check for dangerous characters before parsing
-    if (/[<>"'`&|;\n\r\t]/.test(trimmedToken)) {
+    // CRITICAL: Check for dangerous characters before parsing (note: | is allowed as delimiter)
+    if (/[<>"'`&;\n\r\t]/.test(trimmedToken)) {
       errors.push('Token contains unsafe characters that could cause injection attacks');
       return { isValid: false, errors, warnings };
     }
 
     // CRITICAL: Split validation
-    const parts = trimmedToken.split('$');
-    if (parts.length !== 4) {
-      errors.push(`Invalid format: expected 4 parts separated by '$', got ${parts.length} parts. Format: Collection$Category$Type$AdditionalKey`);
+    const parts = trimmedToken.split('|');
+    if (parts.length < 3 || parts.length > 4) {
+      errors.push(`Invalid format: expected 3-4 parts separated by '|', got ${parts.length} parts. Format: Collection|Category|Type|AdditionalKey`);
       return { isValid: false, errors, warnings };
     }
 
@@ -299,7 +299,7 @@ export class InputValidator {
     // CRITICAL: Reserved word validation
     const reservedWords = ['null', 'undefined', 'NaN', 'Infinity', 'constructor', 'prototype', '__proto__', 'toString', 'valueOf'];
     for (let i = 0; i < components.length; i++) {
-      if (reservedWords.includes(components[i].toLowerCase())) {
+      if (components[i] && reservedWords.includes(components[i].toLowerCase())) {
         errors.push(`${componentNames[i]} cannot be a reserved word: ${components[i]}`);
       }
     }

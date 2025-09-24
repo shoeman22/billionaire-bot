@@ -11,15 +11,22 @@
 
 import { config } from 'dotenv';
 import { validateEnvironment } from '../config/environment';
-import { GSwapWrapper } from '../../services/gswap-simple';
+import { GSwapWrapper } from '../services/gswap-simple';
 import { Logger } from '../utils/logger';
-import { PrivateKeySigner } from '../../services/gswap-simple';
+import { PrivateKeySigner } from '../services/gswap-simple';
 import { performance } from 'perf_hooks';
 import { checkDatabaseHealth, initializeDatabase } from '../config/database';
 
 config();
 
-const logger = new Logger('DevPerformanceBenchmark');
+const logger = new Logger();
+
+interface _RiskConfig {
+  maxPositionSize: number;
+  maxTotalExposure?: number;
+  maxPositionsPerToken?: number;
+  concentrationLimit?: number;
+}
 
 interface BenchmarkResult {
   name: string;
@@ -49,7 +56,7 @@ interface SystemMetrics {
 
 class DevPerformanceBenchmark {
   private gswap!: GSwapWrapper;
-  private env: any;
+  private env!: { api: { baseUrl: string }; wallet: { address: string; privateKey: string } };
   private results: BenchmarkResult[] = [];
   private systemMetrics: SystemMetrics[] = [];
   private metricsInterval?: NodeJS.Timeout;
@@ -155,15 +162,17 @@ class DevPerformanceBenchmark {
       const { PositionLimits } = await import('../trading/risk/position-limits');
       const { RiskMonitor } = await import('../trading/risk/risk-monitor');
 
-      const alertSystem = new AlertSystem(false);
-      const emergencyControls = new EmergencyControls(alertSystem);
-      const positionLimits = new PositionLimits({
-        maxPositionSize: 100,
-        maxTotalExposure: 500,
-        maxPositionsPerToken: 5,
-        concentrationLimit: 0.2
-      });
-      const riskMonitor = new RiskMonitor(alertSystem, emergencyControls);
+      const _alertSystem = new AlertSystem();
+
+      // Create stub dependencies for EmergencyControls
+      const stubConfig = { maxPositionSize: 1000 } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      const stubGSwap = {} as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      const stubSwapExecutor = {} as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      const stubWalletAddress = 'test-wallet-address';
+
+      const _emergencyControls = new EmergencyControls(stubConfig, stubGSwap, stubSwapExecutor, stubWalletAddress);
+      const _positionLimits = new PositionLimits(stubConfig, stubGSwap);
+      const _riskMonitor = new RiskMonitor(stubConfig, stubGSwap);
 
       const endTime = performance.now();
       times.push(endTime - startTime);
@@ -400,11 +409,11 @@ class DevPerformanceBenchmark {
 
       // Simulate slippage calculation
       const slippageTolerance = 0.005;
-      const minPrice = mockPrice1 * (1 - slippageTolerance);
-      const maxPrice = mockPrice1 * (1 + slippageTolerance);
+      const _minPrice =mockPrice1 * (1 - slippageTolerance);
+      const _maxPrice =mockPrice1 * (1 + slippageTolerance);
 
       // Simulate profit/loss calculation
-      const expectedProfit = positionSize * (profitPercentage / 100);
+      const _expectedProfit =positionSize * (profitPercentage / 100);
 
       const endTime = performance.now();
       times.push(endTime - startTime);
@@ -464,17 +473,17 @@ class DevPerformanceBenchmark {
       const leverageRatio = totalExposure / portfolioValue;
 
       // Risk scoring
-      let riskScore = 0;
-      if (Math.abs(dailyReturnPercent) > 5) riskScore += 3;
-      if (portfolioConcentration > 0.3) riskScore += 2;
-      if (leverageRatio > 2) riskScore += 3;
+      let _riskScore = 0;
+      if (Math.abs(dailyReturnPercent) > 5) _riskScore += 3;
+      if (portfolioConcentration > 0.3) _riskScore += 2;
+      if (leverageRatio > 2) _riskScore += 3;
 
       // Volatility calculation
       const priceHistory = Array.from({ length: 20 }, () => 0.025 + (Math.random() - 0.5) * 0.005);
       const returns = priceHistory.slice(1).map((price, i) => (price - priceHistory[i]) / priceHistory[i]);
       const avgReturn = returns.reduce((sum, ret) => sum + ret, 0) / returns.length;
       const variance = returns.reduce((sum, ret) => sum + Math.pow(ret - avgReturn, 2), 0) / returns.length;
-      const volatility = Math.sqrt(variance);
+      const _volatility =Math.sqrt(variance);
 
       const endTime = performance.now();
       times.push(endTime - startTime);
@@ -527,6 +536,7 @@ class DevPerformanceBenchmark {
         id: index,
         timestamp: Date.now(),
         data: new Array(100).fill(Math.random()),
+        processed: false,
         metadata: {
           created: new Date(),
           processed: false

@@ -12,6 +12,8 @@ import { GasEstimator } from '../../utils/gas-estimator';
 // Mock environment variables
 process.env.WALLET_PRIVATE_KEY = 'test-private-key-base64';
 process.env.WALLET_ADDRESS = 'eth|test-wallet-address';
+process.env.GALASWAP_API_URL = 'https://dex-backend-prod1.defi.gala.com';
+process.env.GALASWAP_WS_URL = 'wss://bundle-backend-prod1.defi.gala.com';
 
 // Mock external dependencies
 jest.mock('../../config/database', () => ({
@@ -280,7 +282,7 @@ jest.mock('../../trading/strategies/arbitrage', () => ({
   }))
 }));
 
-jest.mock('../../services/gswap-wrapper', () => ({
+jest.mock('../../services/gswap-simple', () => ({
   GSwap: Object.assign(
     jest.fn().mockImplementation(() => ({
       assets: {
@@ -362,6 +364,7 @@ describe('TradingEngine Liquidity Integration', () => {
     mockConfig = {
       wallet: {
         address: 'eth|test-wallet-address',
+        privateKey: 'test-private-key',
         maxPositionSize: 10000
       },
       api: {
@@ -381,7 +384,8 @@ describe('TradingEngine Liquidity Integration', () => {
       },
       development: {
         nodeEnv: 'test',
-        logLevel: 'error'
+        logLevel: 'error',
+        productionTestMode: false
       }
     };
 

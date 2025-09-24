@@ -9,9 +9,9 @@ describe('Enhanced Input Validation', () => {
   describe('Token Format Validation', () => {
     test('should validate proper GalaChain token format', () => {
       const validTokens = [
-        'GALA$Unit$none$none',
-        'GUSDC$Unit$none$none',
-        'TEST$Category$Type$Key'
+        'GALA|Unit|none|none',
+        'GUSDC|Unit|none|none',
+        'TEST|Category|Type|Key'
       ];
 
       validTokens.forEach(token => {
@@ -24,13 +24,13 @@ describe('Enhanced Input Validation', () => {
     test('should reject invalid token formats', () => {
       const invalidTokens = [
         'INVALID',
-        'GALA$Unit$none', // Too few parts
-        'GALA$Unit$none$none$extra', // Too many parts
-        'GALA$$none$none', // Empty component
-        'GALA$Unit$none$', // Empty last component
-        'GALA$Unit/Type$none$none', // Invalid character
-        'GALA$Unit$<script>$none', // Script injection
-        'GALA$Unit$../path$none', // Path traversal
+        'GALA|Unit|none', // Too few parts
+        'GALA|Unit|none|none|extra', // Too many parts
+        'GALA||none|none', // Empty component
+        'GALA|Unit|none|', // Empty last component
+        'GALA|Unit/Type|none|none', // Invalid character
+        'GALA|Unit|<script>|none', // Script injection
+        'GALA|Unit|../path|none', // Path traversal
       ];
 
       invalidTokens.forEach(token => {
@@ -42,11 +42,11 @@ describe('Enhanced Input Validation', () => {
 
     test('should prevent injection attacks in token format', () => {
       const maliciousTokens = [
-        'GALA$Unit$javascript:alert(1)$none',
-        'GALA$Unit$<script>alert(1)</script>$none',
-        'GALA$Unit$eval(malicious)$none',
-        'GALA$Unit$..\\..\\path$none',
-        'GALA$Unit$|rm -rf /$none'
+        'GALA|Unit|javascript:alert(1)|none',
+        'GALA|Unit|<script>alert(1)</script>|none',
+        'GALA|Unit|eval(malicious)|none',
+        'GALA|Unit|..\\..\\path|none',
+        'GALA|Unit|$rm -rf /|none'
       ];
 
       maliciousTokens.forEach(token => {
@@ -61,7 +61,7 @@ describe('Enhanced Input Validation', () => {
     });
 
     test('should enforce length limits', () => {
-      const longToken = 'A'.repeat(30) + '$' + 'B'.repeat(30) + '$' + 'C'.repeat(30) + '$' + 'D'.repeat(30);
+      const longToken = 'A'.repeat(30) + '|' + 'B'.repeat(30) + '|' + 'C'.repeat(30) + '|' + 'D'.repeat(30);
       const result = InputValidator.validateTokenFormat(longToken);
       expect(result.isValid).toBe(false);
       expect(result.errors.some(e => e.includes('too long'))).toBe(true);
@@ -333,7 +333,7 @@ describe('Enhanced Input Validation', () => {
     test('should identify safe strings', () => {
       const safeStrings = [
         'validtoken123',
-        'GALA$Unit$none$none',
+        'GALA|Unit|none|none',
         '123.456',
         'eth|0x1234567890123456789012345678901234567890'
       ];
@@ -396,8 +396,8 @@ describe('Enhanced Input Validation', () => {
   describe('Integration Tests', () => {
     test('should validate complete trade request', () => {
       const validTradeRequest = {
-        tokenIn: 'GALA$Unit$none$none',
-        tokenOut: 'GUSDC$Unit$none$none',
+        tokenIn: 'GALA|Unit|none|none',
+        tokenOut: 'GUSDC|Unit|none|none',
         amountIn: '100.5',
         slippageTolerance: 0.01,
         userAddress: 'eth|0x1234567890123456789012345678901234567890'
@@ -410,8 +410,8 @@ describe('Enhanced Input Validation', () => {
 
     test('should reject trade request with injection attempts', () => {
       const maliciousTradeRequest = {
-        tokenIn: 'GALA$Unit$<script>alert(1)</script>$none',
-        tokenOut: 'GUSDC$Unit$none$none',
+        tokenIn: 'GALA|Unit|<script>alert(1)</script>|none',
+        tokenOut: 'GUSDC|Unit|none|none',
         amountIn: '100<script>',
         slippageTolerance: 0.01,
         userAddress: 'eth|0x1234567890123456789012345678901234567890<script>'
@@ -424,8 +424,8 @@ describe('Enhanced Input Validation', () => {
 
     test('should validate complete liquidity request', () => {
       const validLiquidityRequest = {
-        token0: 'GALA$Unit$none$none',
-        token1: 'GUSDC$Unit$none$none',
+        token0: 'GALA|Unit|none|none',
+        token1: 'GUSDC|Unit|none|none',
         amount0: '100',
         amount1: '200',
         fee: 3000,

@@ -7,9 +7,11 @@
 import { LiquidityManager, AddLiquidityParams } from '../services/liquidity-manager';
 import { Position } from '../entities/Position';
 import { logger } from '../utils/logger';
+import { QuoteResult } from '../utils/quote-api';
 // Unused imports removed
 // import { TRADING_CONSTANTS, STRATEGY_CONSTANTS } from '../config/constants';
 import { safeParseFloat } from '../utils/safe-parse';
+import { createQuoteWrapper } from '../utils/quote-api';
 // import BigNumber from 'bignumber.js';
 
 export interface MarketMakingConfig {
@@ -77,6 +79,7 @@ export class MarketMakingStrategy {
   private lastRebalance: number = 0;
   private priceHistory: Array<{ price: number; timestamp: number }> = [];
   private performanceHistory: Array<{ timestamp: number; value: number; fees: number }> = [];
+  private quoteWrapper: { quoteExactInput: (tokenIn: string, tokenOut: string, amountIn: number | string) => Promise<QuoteResult> }; // Working quote API wrapper
 
   private readonly maxPriceHistory = 1000;
   private readonly maxPerformanceHistory = 10000;
@@ -85,6 +88,10 @@ export class MarketMakingStrategy {
   constructor(liquidityManager: LiquidityManager, config: MarketMakingConfig) {
     this.liquidityManager = liquidityManager;
     this.config = config;
+
+    // Initialize working quote wrapper
+    this.quoteWrapper = createQuoteWrapper(process.env.GALASWAP_API_URL || 'https://dex-backend-prod1.defi.gala.com');
+
     logger.info('MarketMakingStrategy initialized', {
       tokenPair: `${config.token0}/${config.token1}`,
       rangeWidth: `${config.rangeWidth * 100}%`,
@@ -192,7 +199,7 @@ export class MarketMakingStrategy {
 
     const totalValue = activePositions.reduce((sum, p) => sum + p.position.currentValueUSD, 0);
     const totalFeesEarned = activePositions.reduce((sum, p) =>
-      sum + parseFloat(p.position.totalFeesCollected0) + parseFloat(p.position.totalFeesCollected1), 0);
+      sum + safeParseFloat(p.position.totalFeesCollected0, 0) + safeParseFloat(p.position.totalFeesCollected1, 0), 0);
 
     const avgUtilization = activePositions.length > 0
       ? activePositions.reduce((sum, p) => sum + p.performance.utilization, 0) / activePositions.length
@@ -330,21 +337,24 @@ export class MarketMakingStrategy {
    */
   private async getCurrentPrice(): Promise<number | null> {
     try {
-      const poolData = await this.liquidityManager['gswap'].pools.getPoolData(
+      const quote = await this.quoteWrapper.quoteExactInput(
         this.config.token0,
         this.config.token1,
-        this.config.fee
+        1
       );
 
-      if (!poolData) return null;
+      if (!quote || !quote.currentPoolSqrtPrice) {
+        logger.error('No quote or price data available');
+        return null;
+      }
 
-      const price = this.liquidityManager['gswap'].pools.calculateSpotPrice(
+      const price = this.liquidityManager.calculateSpotPrice(
         this.config.token0,
         this.config.token1,
-        poolData.sqrtPrice
+        quote.currentPoolSqrtPrice
       );
 
-      return safeParseFloat(price.toString(), 0);
+      return price;
 
     } catch (error) {
       logger.error('Failed to get current price:', error);
@@ -367,7 +377,7 @@ export class MarketMakingStrategy {
    * Calculate capital allocation based on position type
    */
   private calculateCapitalAllocation(type: 'main' | 'hedge' | 'range_extension'): number {
-    const totalCapital = parseFloat(this.config.totalCapital);
+    const totalCapital = safeParseFloat(this.config.totalCapital, 0);
 
     switch (type) {
       case 'main':
@@ -438,7 +448,7 @@ export class MarketMakingStrategy {
         mmPosition.position.inRange = inRange;
 
         // Calculate performance metrics
-        const feesEarned = parseFloat(mmPosition.position.totalFeesCollected0) + parseFloat(mmPosition.position.totalFeesCollected1);
+        const feesEarned = safeParseFloat(mmPosition.position.totalFeesCollected0, 0) + safeParseFloat(mmPosition.position.totalFeesCollected1, 0);
         mmPosition.performance.feesEarned = feesEarned;
         mmPosition.performance.impermanentLoss = mmPosition.position.impermanentLoss;
         mmPosition.performance.apr = mmPosition.position.calculateCurrentAPR();
@@ -496,7 +506,7 @@ export class MarketMakingStrategy {
           type: 'create',
           reason: 'Low range utilization, extending range',
           priority: 'low',
-          estimatedCost: parseFloat(this.config.totalCapital) * 0.05,
+          estimatedCost: safeParseFloat(this.config.totalCapital, 0) * 0.05,
           expectedBenefit: this.estimateExtensionBenefit(currentPrice)
         });
       }
@@ -611,7 +621,7 @@ export class MarketMakingStrategy {
     const activePositions = this.getActivePositions();
 
     for (const mmPosition of activePositions) {
-      const totalFees = parseFloat(mmPosition.position.uncollectedFees0) + parseFloat(mmPosition.position.uncollectedFees1);
+      const totalFees = safeParseFloat(mmPosition.position.uncollectedFees0, 0) + safeParseFloat(mmPosition.position.uncollectedFees1, 0);
       const positionValue = mmPosition.position.currentValueUSD;
 
       if (positionValue > 0 && (totalFees / positionValue) > this.config.feeCollectionThreshold) {
@@ -635,7 +645,7 @@ export class MarketMakingStrategy {
   private updatePerformanceHistory(): void {
     const totalValue = this.getActivePositions().reduce((sum, p) => sum + p.position.currentValueUSD, 0);
     const totalFees = this.getActivePositions().reduce((sum, p) =>
-      sum + parseFloat(p.position.totalFeesCollected0) + parseFloat(p.position.totalFeesCollected1), 0);
+      sum + safeParseFloat(p.position.totalFeesCollected0, 0) + safeParseFloat(p.position.totalFeesCollected1, 0), 0);
 
     this.performanceHistory.push({
       timestamp: Date.now(),
@@ -745,7 +755,7 @@ export class MarketMakingStrategy {
       throw new Error('Range width must be between 0 and 100%');
     }
 
-    if (parseFloat(this.config.totalCapital) <= 0) {
+    if (safeParseFloat(this.config.totalCapital, 0) <= 0) {
       throw new Error('Total capital must be positive');
     }
 

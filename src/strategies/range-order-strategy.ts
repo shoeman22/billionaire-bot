@@ -7,8 +7,10 @@
 import { LiquidityManager, AddLiquidityParams } from '../services/liquidity-manager';
 import { Position } from '../entities/Position';
 import { logger } from '../utils/logger';
+import { QuoteResult } from '../utils/quote-api';
 import { TRADING_CONSTANTS } from '../config/constants';
 import { safeParseFloat } from '../utils/safe-parse';
+import { createQuoteWrapper } from '../utils/quote-api';
 // Unused import removed: BigNumber
 
 export interface RangeOrderConfig {
@@ -51,9 +53,14 @@ export class RangeOrderStrategy {
   private readonly defaultRangeWidth = 0.05; // 0.05% default range
   private readonly maxOrders = 50; // Prevent memory leaks
   private orderCounter = 0; // Counter for unique order IDs
+  private quoteWrapper: { quoteExactInput: (tokenIn: string, tokenOut: string, amountIn: number | string) => Promise<QuoteResult> }; // Working quote API wrapper
 
   constructor(liquidityManager: LiquidityManager) {
     this.liquidityManager = liquidityManager;
+
+    // Initialize working quote wrapper
+    this.quoteWrapper = createQuoteWrapper(process.env.GALASWAP_API_URL || 'https://dex-backend-prod1.defi.gala.com');
+
     logger.info('RangeOrderStrategy initialized');
   }
 
@@ -252,7 +259,7 @@ export class RangeOrderStrategy {
     const cancelled = orders.filter(o => o.status === 'cancelled');
 
     const totalVolume = orders.reduce((sum, order) => {
-      return sum + parseFloat(order.config.amount);
+      return sum + safeParseFloat(order.config.amount, 0);
     }, 0);
 
     const successRate = orders.length > 0 ? (filled.length / orders.length) * 100 : 0;
@@ -287,7 +294,7 @@ export class RangeOrderStrategy {
       return { valid: false, error: 'Target price must be positive' };
     }
 
-    if (parseFloat(config.amount) <= 0) {
+    if (safeParseFloat(config.amount, 0) <= 0) {
       return { valid: false, error: 'Amount must be positive' };
     }
 
@@ -306,18 +313,21 @@ export class RangeOrderStrategy {
   /**
    * Get current price for token pair
    */
-  private async getCurrentPrice(token0: string, token1: string, fee: number): Promise<number | null> {
+  private async getCurrentPrice(token0: string, token1: string, _fee: number): Promise<number | null> {
     try {
-      const poolData = await this.liquidityManager['gswap'].pools.getPoolData(token0, token1, fee);
-      if (!poolData) return null;
+      const quote = await this.quoteWrapper.quoteExactInput(token0, token1, 1);
 
-      const price = this.liquidityManager['gswap'].pools.calculateSpotPrice(
+      if (!quote || !quote.currentPoolSqrtPrice) {
+        return null;
+      }
+
+      const price = this.liquidityManager.calculateSpotPrice(
         token0,
         token1,
-        poolData.sqrtPrice
+        quote.currentPoolSqrtPrice
       );
 
-      return safeParseFloat(price.toString(), 0);
+      return price;
 
     } catch (error) {
       logger.error('Failed to get current price:', error);
@@ -406,7 +416,7 @@ export class RangeOrderStrategy {
    * Generate unique order ID
    */
   private generateOrderId(config: RangeOrderConfig): string {
-    const timestamp = Date.now();
+    const _timestamp = Date.now();
     const counter = ++this.orderCounter; // Increment counter for uniqueness
     const direction = config.direction;
     const random = Math.random().toString(36).substring(2, 8); // Add random component

@@ -10,11 +10,13 @@ import { FeeCalculator } from './fee-calculator';
 // Unused import removed: FeeOptimization
 import { getPositionRepository } from '../config/database';
 import { logger } from '../utils/logger';
+import { QuoteResult } from '../utils/quote-api';
 // Unused imports removed
 // import { TRADING_CONSTANTS, STRATEGY_CONSTANTS } from '../config/constants';
 import { safeParseFloat } from '../utils/safe-parse';
 // import BigNumber from 'bignumber.js';
 import { Repository } from 'typeorm';
+import { createQuoteWrapper } from '../utils/quote-api';
 
 export interface RebalanceSignal {
   positionId: string;
@@ -109,6 +111,7 @@ export interface MarketCondition {
 export class RebalanceEngine {
   private liquidityManager: LiquidityManager;
   private feeCalculator: FeeCalculator;
+  private quoteWrapper: { quoteExactInput: (tokenIn: string, tokenOut: string, amountIn: number | string) => Promise<QuoteResult> }; // Working quote API wrapper
   private positionRepo: Repository<Position> | null = null;
   private isRunning: boolean = false;
   private strategies: Map<string, RebalanceStrategy> = new Map();
@@ -126,6 +129,10 @@ export class RebalanceEngine {
   constructor(liquidityManager: LiquidityManager, feeCalculator: FeeCalculator) {
     this.liquidityManager = liquidityManager;
     this.feeCalculator = feeCalculator;
+
+    // Initialize working quote wrapper
+    this.quoteWrapper = createQuoteWrapper(process.env.GALASWAP_API_URL || 'https://dex-backend-prod1.defi.gala.com');
+
     this.initializeDefaultStrategies();
     logger.info('RebalanceEngine initialized');
   }
@@ -493,7 +500,7 @@ export class RebalanceEngine {
         }
 
         // Analyze uncollected fees
-        const uncollectedFeesUSD = parseFloat(position.uncollectedFees0) + parseFloat(position.uncollectedFees1);
+        const uncollectedFeesUSD = safeParseFloat(position.uncollectedFees0, 0) + safeParseFloat(position.uncollectedFees1, 0);
         if (uncollectedFeesUSD >= strategy.parameters.feeThreshold) {
           signals.push({
             positionId: position.id,
@@ -526,13 +533,13 @@ export class RebalanceEngine {
   /**
    * Get current price for token pair
    */
-  private async getCurrentPrice(token0: string, token1: string, fee: number): Promise<number | null> {
+  private async getCurrentPrice(token0: string, token1: string, _fee: number): Promise<number | null> {
     try {
-      const poolData = await this.liquidityManager['gswap'].pools.getPoolData(token0, token1, fee);
-      if (!poolData) return null;
+      const quote = await this.quoteWrapper.quoteExactInput(token0, token1, 1);
+      if (!quote || !quote.currentPoolSqrtPrice) return null;
 
-      const price = this.liquidityManager['gswap'].pools.calculateSpotPrice(token0, token1, poolData.sqrtPrice);
-      return safeParseFloat(price.toString(), 0);
+      const price = this.liquidityManager.calculateSpotPrice(token0, token1, quote.currentPoolSqrtPrice);
+      return price;
 
     } catch (error) {
       logger.error('Failed to get current price:', error);

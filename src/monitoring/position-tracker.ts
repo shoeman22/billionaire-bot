@@ -7,10 +7,12 @@ import { GSwap } from '../services/gswap-simple';
 import { Position } from '../entities/Position';
 import { getPositionRepository } from '../config/database';
 import { logger } from '../utils/logger';
+import { QuoteResult } from '../utils/quote-api';
 import { TRADING_CONSTANTS } from '../config/constants';
 import { safeParseFloat } from '../utils/safe-parse';
 import BigNumber from 'bignumber.js';
 import { Repository } from 'typeorm';
+import { createQuoteWrapper } from '../utils/quote-api';
 
 export interface PositionUpdate {
   positionId: string;
@@ -49,6 +51,7 @@ export interface PositionMetrics {
 
 export class PositionTracker {
   private gswap: GSwap;
+  private quoteWrapper: { quoteExactInput: (tokenIn: string, tokenOut: string, amountIn: number | string) => Promise<QuoteResult> }; // Working quote API wrapper
   private positionRepo: Repository<Position> | null = null;
   private isRunning: boolean = false;
   private updateInterval: NodeJS.Timeout | null = null;
@@ -61,6 +64,10 @@ export class PositionTracker {
 
   constructor(gswap: GSwap) {
     this.gswap = gswap;
+
+    // Initialize working quote wrapper
+    this.quoteWrapper = createQuoteWrapper(process.env.GALASWAP_API_URL || 'https://dex-backend-prod1.defi.gala.com');
+
     logger.info('PositionTracker initialized');
   }
 
@@ -343,23 +350,23 @@ export class PositionTracker {
     if (!this.positionRepo) return;
 
     try {
-      // Get current pool data
-      const poolData = await this.gswap.pools.getPoolData(
+      // Check position validity using quote method
+      const quote = await this.quoteWrapper.quoteExactInput(
         position.token0,
         position.token1,
-        position.fee
+        1
       );
 
-      if (!poolData) {
-        logger.warn(`No pool data for position ${position.id}`);
+      if (!quote) {
+        logger.warn(`No quote available for position ${position.id}`);
         return;
       }
 
-      // Calculate current price
+      // Calculate current price using quote data
       const currentPrice = this.gswap.pools.calculateSpotPrice(
         position.token0,
         position.token1,
-        poolData.sqrtPrice
+        (quote.currentPoolSqrtPrice?.toString() || '0') as unknown as import('@gala-chain/gswap-sdk').SqrtPriceIn
       );
 
       const currentPriceNum = safeParseFloat(currentPrice.toString(), 0);
@@ -375,10 +382,10 @@ export class PositionTracker {
       );
 
       if (blockchainPosition) {
-        // Update position data
-        position.liquidity = blockchainPosition.liquidity || position.liquidity;
-        position.uncollectedFees0 = blockchainPosition.tokensOwed0 || '0';
-        position.uncollectedFees1 = blockchainPosition.tokensOwed1 || '0';
+        // Update position data (convert BigNumber to string)
+        position.liquidity = blockchainPosition.liquidity?.toString() || position.liquidity;
+        position.uncollectedFees0 = blockchainPosition.tokensOwed0?.toString() || '0';
+        position.uncollectedFees1 = blockchainPosition.tokensOwed1?.toString() || '0';
       }
 
       // Update metrics

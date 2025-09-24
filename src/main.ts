@@ -159,7 +159,7 @@ program
 
       // Test API health by checking if we can get pool data
       try {
-        await client.pools.getPoolData('GUSDC$Unit$none$none', 'TOWN|Unit|none|none', 3000);
+        await client.quoting.quoteExactInput('GUSDC|Unit|none|none', 'TOWN|Unit|none|none', 1);
         logger.info('✅ GalaSwap API connection healthy');
       } catch (error) {
         logger.warn('⚠️ Could not test API connection:', error);

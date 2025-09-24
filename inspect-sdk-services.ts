@@ -65,6 +65,13 @@ async function inspectSDKServices() {
           }
         });
       }
+
+      // Try to inspect the swap method signature
+      if (swapsService.swap) {
+        console.log('\n🔍 SWAP METHOD DETAILS:');
+        console.log('  • Method exists:', typeof swapsService.swap);
+        console.log('  • Method toString:', swapsService.swap.toString().substring(0, 200) + '...');
+      }
     } else {
       console.log('\n❌ No swaps service found');
     }

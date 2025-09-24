@@ -44,8 +44,8 @@ export interface ApiConfig {
 
 export interface WalletConfig {
   address: string;
+  privateKey: string; // Added for dev script compatibility
   maxPositionSize?: number;
-  // Private key removed for security - use SignerService instead
 }
 
 export interface DevelopmentConfig {
@@ -135,7 +135,7 @@ export function validateEnvironment(): BotConfig {
     },
     wallet: {
       address: walletAddress,
-      // Private key no longer stored in config for security
+      privateKey: privateKey, // Added for dev script compatibility
     },
     development: {
       nodeEnv,

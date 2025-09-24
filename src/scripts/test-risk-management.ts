@@ -11,12 +11,13 @@ import { validateEnvironment } from '../config/environment';
 
 // Load environment variables
 config();
-import { GSwap, PrivateKeySigner } from '../../services/gswap-simple';
+import { GSwap, PrivateKeySigner } from '../services/gswap-simple';
 import { PositionLimits } from '../trading/risk/position-limits';
 import { SlippageProtection } from '../trading/risk/slippage';
 import { RiskMonitor } from '../trading/risk/risk-monitor';
 import { EmergencyControls } from '../trading/risk/emergency-controls';
 import { SwapExecutor } from '../trading/execution/swap-executor';
+import { TradingMode } from '../types/trading';
 
 async function testRiskManagementSystem(): Promise<void> {
   logger.info('🔒 Starting Risk Management System Tests...');
@@ -104,6 +105,8 @@ async function testRiskManagementSystem(): Promise<void> {
       tokenIn: 'GALA',
       tokenOut: 'USDC',
       amountIn: 500,
+      userAddress: config.wallet.address,
+      tradingMode: TradingMode.ARBITRAGE,
       currentPortfolio: {
         timestamp: Date.now(),
         totalValue: 1000,

@@ -11,14 +11,21 @@
 
 import { config } from 'dotenv';
 import { validateEnvironment } from '../config/environment';
-import { GSwapWrapper } from '../../services/gswap-simple';
+import { GSwapWrapper } from '../services/gswap-simple';
 import { Logger } from '../utils/logger';
-import { PrivateKeySigner } from '../../services/gswap-simple';
+import { PrivateKeySigner } from '../services/gswap-simple';
 import { performance } from 'perf_hooks';
 
 config();
 
-const logger = new Logger('DevFailureSimulator');
+const logger = new Logger();
+
+interface _RiskConfig {
+  maxPositionSize: number;
+  maxTotalExposure?: number;
+  maxPositionsPerToken?: number;
+  concentrationLimit?: number;
+}
 
 interface FailureTest {
   name: string;
@@ -40,7 +47,7 @@ interface FailureResult {
 
 class DevFailureSimulator {
   private gswap!: GSwapWrapper;
-  private env: any;
+  private env!: { api: { baseUrl: string }; wallet: { address: string; privateKey: string } };
   private results: FailureResult[] = [];
 
   private readonly failureTests: FailureTest[] = [
@@ -227,9 +234,8 @@ class DevFailureSimulator {
 
       try {
         await fetch(this.env.api.baseUrl + '/slow-endpoint', {
-          signal: controller.signal,
-          timeout: 1000
-        } as any);
+          signal: controller.signal
+        });
 
         clearTimeout(timeoutId);
         return {
@@ -395,14 +401,13 @@ class DevFailureSimulator {
 
     try {
       const initialMemory = this.getMemoryUsageMB();
-      const memoryConsumers: any[] = [];
+      const memoryConsumers: Array<{ data: number[]; metadata: Record<string, unknown> }> = [];
 
       // Create memory pressure
       for (let i = 0; i < 1000; i++) {
         memoryConsumers.push({
-          id: i,
           data: new Array(1000).fill(Math.random()),
-          timestamp: Date.now()
+          metadata: { id: i, timestamp: Date.now() }
         });
 
         // Check if memory usage is getting high
@@ -544,7 +549,7 @@ class DevFailureSimulator {
 
     try {
       // Simulate concurrent operations that might conflict
-      const operations = Array.from({ length: 10 }, async (_, i) => {
+      const operations = Array.from({ length: 10 }, async (_, _i) => {
         // Simulate reading and writing shared state
         await this.delay(Math.random() * 50);
 
@@ -588,14 +593,21 @@ class DevFailureSimulator {
       const { AlertSystem } = await import('../monitoring/alerts');
       const { EmergencyControls } = await import('../trading/risk/emergency-controls');
 
-      const alertSystem = new AlertSystem(false);
-      const emergencyControls = new EmergencyControls(alertSystem);
+      const _alertSystem = new AlertSystem();
+
+      // Create stub dependencies for dev testing
+      const stubConfig = { maxPositionSize: 1000 } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      const stubGSwap = {} as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      const stubSwapExecutor = {} as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      const stubWalletAddress = 'test-wallet-address';
+
+      const emergencyControls = new EmergencyControls(stubConfig, stubGSwap, stubSwapExecutor, stubWalletAddress);
 
       // Test emergency stop activation
-      await emergencyControls.activateEmergencyStop('Test emergency stop');
+      await emergencyControls.activateEmergencyStop('SYSTEM_ERROR', 'Test emergency stop');
 
       const status = emergencyControls.getEmergencyStatus();
-      if (!status.active) {
+      if (!status.isActive) {
         return {
           passed: false,
           details: 'Emergency stop failed to activate',
@@ -605,13 +617,13 @@ class DevFailureSimulator {
       }
 
       // Test recovery
-      await emergencyControls.deactivateEmergencyStop();
+      await emergencyControls.deactivateEmergencyStop('Test recovery');
 
       const recoveredStatus = emergencyControls.getEmergencyStatus();
       const recoveryTime = performance.now() - startTime;
 
       return {
-        passed: !recoveredStatus.active,
+        passed: !recoveredStatus.isActive,
         details: 'Emergency stop and recovery functional',
         errorHandled: true,
         recoveryTime
@@ -634,7 +646,7 @@ class DevFailureSimulator {
 
     try {
       // Test configuration validation with corrupted data
-      const corruptConfigs = [
+      const corruptConfigs: Array<Record<string, unknown>> = [
         { api: { baseUrl: '' } },
         { wallet: { address: 'invalid-address' } },
         { trading: { maxPositionSize: -1 } },
@@ -646,9 +658,13 @@ class DevFailureSimulator {
       for (const config of corruptConfigs) {
         try {
           // Simulate configuration validation
-          if (!config.api?.baseUrl ||
-              !config.wallet?.address?.includes('eth|') ||
-              (config.trading?.maxPositionSize && config.trading.maxPositionSize <= 0)) {
+          const apiConfig = config as { api?: { baseUrl?: string } };
+          const walletConfig = config as { wallet?: { address?: string } };
+          const tradingConfig = config as { trading?: { maxPositionSize?: number } };
+
+          if (!apiConfig.api?.baseUrl ||
+              !walletConfig.wallet?.address?.includes('eth|') ||
+              (tradingConfig.trading?.maxPositionSize && tradingConfig.trading.maxPositionSize <= 0)) {
             throw new Error('Invalid configuration');
           }
         } catch (error) {
@@ -686,7 +702,7 @@ class DevFailureSimulator {
       }
 
       // Check if main components can still initialize
-      const testLogger = new Logger('StabilityCheck');
+      const testLogger = new Logger();
       testLogger.info('System stability check');
 
       return true;

@@ -4,13 +4,13 @@
  */
 
 import { LiquidityManager } from '../../services/liquidity-manager';
-import { GSwap } from '../../services/gswap-simple';
+import { GSwap, GSwapWrapper } from '../../services/gswap-simple';
 import { TRADING_CONSTANTS } from '../../config/constants';
 import { RetryHelper } from '../../utils/retry-helper';
 import { GasEstimator } from '../../utils/gas-estimator';
 
 // Mock dependencies
-jest.mock('../../services/gswap-wrapper');
+jest.mock('../../services/gswap-simple');
 jest.mock('../../utils/retry-helper', () => ({
   RetryHelper: {
     withRetry: jest.fn(),

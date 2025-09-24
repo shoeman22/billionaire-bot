@@ -36,9 +36,9 @@ export class TokenValidation {
     }
 
     // CRITICAL: Split validation
-    const parts = trimmedToken.split('$');
+    const parts = trimmedToken.split('|');
     if (parts.length !== 4) {
-      errors.push(`Invalid format: expected 4 parts separated by '$', got ${parts.length} parts. Format: Collection$Category$Type$AdditionalKey`);
+      errors.push(`Invalid format: expected 4 parts separated by '|', got ${parts.length} parts. Format: Collection|Category|Type|AdditionalKey`);
       return { isValid: false, errors, warnings };
     }
 
@@ -89,7 +89,7 @@ export class TokenValidation {
     const errors: string[] = [];
     const warnings: string[] = [];
 
-    const parts = token.split('$');
+    const parts = token.split('|');
     const [collection, category, type, additionalKey] = parts;
     const componentNames = ['Collection', 'Category', 'Type', 'AdditionalKey'];
     const components = [collection, category, type, additionalKey];
@@ -146,7 +146,7 @@ export class TokenValidation {
     }
 
     // Validate character set for each component
-    const parts = token.split('$');
+    const parts = token.split('|');
     const componentNames = ['Collection', 'Category', 'Type', 'AdditionalKey'];
 
     for (let i = 0; i < parts.length; i++) {

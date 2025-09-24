@@ -68,14 +68,14 @@ This repository uses a comprehensive set of MCP servers for enhanced Claude Code
 
 GalaSwap uses composite token keys in the format:
 ```
-Collection$Category$Type$AdditionalKey
+Collection|Category|Type|AdditionalKey
 ```
 
 **Common Tokens**:
-- `GALA$Unit$none$none` - GALA token
-- `GUSDC$Unit$none$none` - Gala USDC
-- `ETIME$Unit$none$none` - Eternal Time token
-- `SILK$Unit$none$none` - SILK token
+- `GALA|Unit|none|none` - GALA token
+- `GUSDC|Unit|none|none` - Gala USDC
+- `ETIME|Unit|none|none` - Eternal Time token
+- `SILK|Unit|none|none` - SILK token
 
 ### Core Concepts
 

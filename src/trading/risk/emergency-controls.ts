@@ -11,6 +11,7 @@ import { SwapExecutor } from '../execution/swap-executor';
 import { safeParseFloat } from '../../utils/safe-parse';
 import { calculatePriceFromSqrtPriceX96 } from '../../utils/price-math';
 import { createTokenClassKey, FEE_TIERS } from '../../types/galaswap';
+import { createQuoteWrapper } from '../../utils/quote-api';
 
 export interface EmergencyState {
   isEmergencyActive: boolean;
@@ -69,6 +70,7 @@ export class EmergencyControls {
   private triggers: EmergencyTriggers;
   private isEmergencyStopActive: boolean = false;
   private walletAddress: string; // CRITICAL FIX: Store actual wallet address
+  private quoteWrapper: any; // Working quote API wrapper
 
   // Circuit breaker counters
   private systemErrorCount: number = 0;
@@ -86,6 +88,9 @@ export class EmergencyControls {
     this.swapExecutor = swapExecutor;
     this.walletAddress = walletAddress; // CRITICAL FIX: Store wallet address
     this.alertSystem = new AlertSystem(false); // Disable cleanup timer for tests
+
+    // Initialize working quote wrapper
+    this.quoteWrapper = createQuoteWrapper(process.env.GALASWAP_API_URL || 'https://dex-backend-prod1.defi.gala.com');
 
     // Initialize emergency state
     this.emergencyState = {
@@ -691,63 +696,67 @@ export class EmergencyControls {
   }
 
   /**
-   * Get current positions
+   * Get current positions (wallet tokens for arbitrage trading)
    */
   private async getCurrentPositions(): Promise<any[]> {
     try {
-      logger.debug('Fetching current positions for emergency liquidation');
+      logger.debug('Fetching current wallet tokens for emergency liquidation');
 
       const userAddress = this.walletAddress; // CRITICAL FIX: Use actual wallet address
-      const positionsResponse = await this.gswap.positions.getUserPositions(userAddress);
 
-      if (!positionsResponse?.positions) {
-        logger.warn('Failed to fetch user positions for emergency liquidation');
+      // Get user assets directly from wallet (not liquidity positions)
+      const assetsResponse = await this.gswap.assets.getUserAssets(userAddress, 1, 20);
+
+      if (!assetsResponse?.tokens) {
+        logger.debug('No tokens found in wallet for emergency liquidation');
         return [];
       }
 
-      // Convert GalaSwap positions to emergency liquidation format
+      // Convert wallet tokens to emergency liquidation format
       const positions: any[] = [];
 
-      for (const position of positionsResponse.positions) {
-          const liquidityAmount = safeParseFloat(position.liquidity?.toString() || '0', 0);
+      for (const token of assetsResponse.tokens) {
+        const amount = safeParseFloat(token.quantity || '0', 0);
 
-        // Extract token symbols from class keys
-        const token0 = this.extractTokenSymbol(position.token0ClassKey);
-        const token1 = this.extractTokenSymbol(position.token1ClassKey);
-
-        // Add token0 position if exists
-        if (token0 && liquidityAmount > 0) {
-          const amount = liquidityAmount / 2; // Approximate split for liquidity position
+        if (amount > 0) {
           positions.push({
-            token: token0,
+            token: token.symbol || token.name,
             amount: amount,
-            valueUSD: await this.calculateRealPositionValue(token0, amount),
-            percentOfPortfolio: await this.calculatePortfolioPercentage(token0, amount),
-            age: this.calculatePositionAge(position),
-            positionId: `${position.fee}-${position.tickLower}-${position.tickUpper}`,
-            isLiquidityPosition: true
-          });
-        }
-
-        // Add token1 position if exists
-        if (token1 && liquidityAmount > 0) {
-          const amount = liquidityAmount / 2; // Approximate split for liquidity position
-          positions.push({
-            token: token1,
-            amount: amount,
-            valueUSD: await this.calculateRealPositionValue(token1, amount),
-            percentOfPortfolio: await this.calculatePortfolioPercentage(token1, amount),
-            age: this.calculatePositionAge(position),
-            positionId: `${position.fee}-${position.tickLower}-${position.tickUpper}`,
-            isLiquidityPosition: true
+            valueUSD: await this.calculateRealPositionValue(token.symbol || token.name, amount),
+            percentOfPortfolio: await this.calculatePortfolioPercentage(token.symbol || token.name, amount),
+            age: 0, // Wallet tokens don't have position age
+            positionId: `wallet-${token.symbol || token.name}`,
+            isLiquidityPosition: false // These are wallet tokens, not liquidity positions
           });
         }
       }
 
-      logger.debug(`Found ${positions.length} positions for emergency liquidation`);
+      logger.debug(`Found ${positions.length} wallet token positions for emergency liquidation`);
       return positions;
 
     } catch (error) {
+      // Handle API limit errors gracefully
+      if (error && typeof error === 'object' && 'message' in error &&
+          (error.message as string).includes('400') && (error.message as string).includes('limit')) {
+        logger.warn('getUserAssets API limit exceeded during emergency position fetch, retrying');
+        try {
+          const assetsResponse = await this.gswap.assets.getUserAssets(this.walletAddress, 1, 10);
+          const positions = assetsResponse?.tokens?.map(token => ({
+            token: token.symbol || token.name,
+            amount: safeParseFloat(token.quantity || '0', 0),
+            valueUSD: 0, // Simplified for emergency
+            percentOfPortfolio: 0,
+            age: 0,
+            positionId: `wallet-${token.symbol || token.name}`,
+            isLiquidityPosition: false
+          })).filter(pos => pos.amount > 0) || [];
+          return positions;
+        } catch (retryError) {
+          logger.error('Error fetching positions on retry:', retryError);
+          return [];
+        }
+      }
+
       logger.error('Error fetching current positions:', error);
       return [];
     }
@@ -1019,12 +1028,17 @@ export class EmergencyControls {
    */
   private async calculateRealPositionValue(token: string, amount: number): Promise<number> {
     try {
-      // Get current price from GalaSwap SDK
-      const poolData = await this.gswap.pools.getPoolData(token, 'GUSDC$Unit$none$none', 3000);
+      // Special case for GUSDC
+      if (token === 'GUSDC|Unit|none|none') {
+        return amount * 1.0; // GUSDC = $1
+      }
 
-      if (poolData?.sqrtPrice) {
-        // Calculate price using safe BigInt mathematics
-        const actualPrice = calculatePriceFromSqrtPriceX96(BigInt(poolData.sqrtPrice.toString()));
+      // Use working quote method to get current price
+      const quote = await this.quoteWrapper.quoteExactInput('GUSDC|Unit|none|none', token, 1);
+
+      if (quote?.outTokenAmount) {
+        // Price = 1 USDC / tokens received for 1 USDC
+        const actualPrice = 1 / safeParseFloat(quote.outTokenAmount.toString(), 0);
         return amount * (actualPrice > 0 ? actualPrice : 1.0);
       }
 

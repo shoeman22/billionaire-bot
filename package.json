@@ -67,6 +67,7 @@
     "arbitrage:trade1": "tsx manual-arbitrage-steps.ts trade1",
     "arbitrage:trade2": "tsx manual-arbitrage-steps.ts trade2",
     "arbitrage:full": "tsx manual-arbitrage-steps.ts full",
+    "arbitrage:full:continuous": "tsx src/cli/trading-cli.ts auto-trade --strategies arbitrage",
     "arbitrage:help": "tsx manual-arbitrage-steps.ts"
   },
   "dependencies": {

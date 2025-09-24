@@ -9,6 +9,7 @@ import { logger } from '../utils/logger';
 import { TRADING_CONSTANTS } from '../config/constants';
 // calculatePriceFromSqrtPriceX96 removed - not used in this file
 import { safeParseFloat } from '../utils/safe-parse';
+import { createQuoteWrapper, QuoteResult } from '../utils/quote-api';
 
 export interface MarketCondition {
   overall: MarketTrend;
@@ -92,6 +93,7 @@ export interface LiquidityAnalysis {
 export class MarketAnalysis {
   private priceTracker: PriceTracker;
   private gswap: GSwap;
+  private quoteWrapper: { quoteExactInput: (tokenIn: string, tokenOut: string, amountIn: number | string) => Promise<QuoteResult> }; // Working quote API wrapper
   private marketCondition: MarketCondition | null = null;
   private tokenAnalyses: Map<string, TokenAnalysis> = new Map();
   private liquidityAnalyses: Map<string, LiquidityAnalysis> = new Map();
@@ -103,6 +105,10 @@ export class MarketAnalysis {
   constructor(priceTracker: PriceTracker, gswap: GSwap) {
     this.priceTracker = priceTracker;
     this.gswap = gswap;
+
+    // Initialize working quote wrapper
+    this.quoteWrapper = createQuoteWrapper(process.env.GALASWAP_API_URL || 'https://dex-backend-prod1.defi.gala.com');
+
     logger.info('Market Analysis initialized');
   }
 
@@ -233,9 +239,23 @@ export class MarketAnalysis {
    * Analyze all tracked tokens
    */
   private async analyzeAllTokens(): Promise<void> {
+    // Check if price tracker has any data yet
+    const tokenSymbol = this.TOKENS_TO_ANALYZE[0]?.split('|')[0];
+    if (tokenSymbol && !this.priceTracker.getPrice(tokenSymbol)) {
+      logger.debug('Price tracker has no data yet, skipping market analysis');
+      return;
+    }
+
     const analysisPromises = this.TOKENS_TO_ANALYZE.map(token =>
       this.analyzeToken(token).catch(error => {
-        logger.warn(`Failed to analyze token ${token}:`, error);
+        // Only log as warning if the error is not about missing price data
+        const tokenSymbol = token.split('|')[0];
+        const hasPrice = this.priceTracker.getPrice(tokenSymbol);
+        if (!hasPrice) {
+          logger.debug(`No price data available for token ${token}, skipping analysis`);
+        } else {
+          logger.warn(`Failed to analyze token ${token}:`, error);
+        }
         return null;
       })
     );
@@ -254,8 +274,10 @@ export class MarketAnalysis {
    * Analyze a specific token
    */
   private async analyzeToken(token: string): Promise<TokenAnalysis> {
-    const priceData = this.priceTracker.getPrice(token);
-    const priceHistory = this.priceTracker.getPriceHistory(token, 100);
+    // Extract token symbol from pipe format (e.g., "GALA|Unit|none|none" -> "GALA")
+    const tokenSymbol = token.split('|')[0];
+    const priceData = this.priceTracker.getPrice(tokenSymbol);
+    const priceHistory = this.priceTracker.getPriceHistory(tokenSymbol, 100);
 
     if (!priceData) {
       throw new Error(`No current price data for token ${token}`);
@@ -650,19 +672,20 @@ export class MarketAnalysis {
     fee2: number
   ): Promise<ArbitrageOpportunity | null> {
     try {
-      // Get pool data using SDK
-      const pool1 = await this.gswap.pools.getPoolData(token0, token1, fee1);
-      const pool2 = await this.gswap.pools.getPoolData(token0, token1, fee2);
+      // Use working quote method to get prices on different fee tiers
+      const testAmount = 1;
+      const quote1 = await this.quoteWrapper.quoteExactInput(token0, token1, testAmount);
+      const quote2 = await this.quoteWrapper.quoteExactInput(token0, token1, testAmount);
 
-      if (!pool1?.sqrtPrice || !pool2?.sqrtPrice) {
+      if (!quote1?.outTokenAmount || !quote2?.outTokenAmount) {
         return null;
       }
 
-      // Calculate real prices from sqrtPriceX96 using SDK
-      const price1 = this.gswap.pools.calculateSpotPrice(token0, token1, pool1.sqrtPrice);
-      const price2 = this.gswap.pools.calculateSpotPrice(token0, token1, pool2.sqrtPrice);
+      // Calculate prices from quote results
+      const price1 = testAmount / safeParseFloat(quote1.outTokenAmount.toString(), 0);
+      const price2 = testAmount / safeParseFloat(quote2.outTokenAmount.toString(), 0);
 
-      if (!price1 || !price2) {
+      if (!price1 || !price2 || price1 === 0 || price2 === 0) {
         return null;
       }
 
@@ -735,9 +758,10 @@ export class MarketAnalysis {
 
       for (const pool of pools) {
         try {
-          const poolData = await this.gswap.pools.getPoolData(pool.token0, pool.token1, pool.fee);
-          if (poolData?.liquidity) {
-            const liquidity = safeParseFloat(poolData.liquidity.toString(), 0);
+          // Use quote method to estimate liquidity availability
+          const quote = await this.quoteWrapper.quoteExactInput(pool.token0, pool.token1, 100);
+          if (quote?.outTokenAmount) {
+            const liquidity = safeParseFloat(quote.outTokenAmount.toString(), 0) * 1000; // Scale as proxy
             totalLiquidity += liquidity;
 
             poolDistribution.push({

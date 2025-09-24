@@ -11,20 +11,28 @@
 
 import { config } from 'dotenv';
 import { validateEnvironment } from '../config/environment';
-import { GSwapWrapper } from '../../services/gswap-simple';
+import { GSwapWrapper } from '../services/gswap-simple';
 import { TradingEngine } from '../trading/TradingEngine';
 import { Logger } from '../utils/logger';
-import { PrivateKeySigner } from '../../services/gswap-simple';
+import { PrivateKeySigner } from '../services/gswap-simple';
 import { RiskMonitor } from '../trading/risk/risk-monitor';
 import { EmergencyControls } from '../trading/risk/emergency-controls';
 import { PositionLimits } from '../trading/risk/position-limits';
 import { AlertSystem } from '../monitoring/alerts';
-import { SwapExecutor } from '../trading/execution/swap-executor';
+// import { SwapExecutor } from '../trading/execution/swap-executor';
 import { initializeDatabase, checkDatabaseHealth } from '../config/database';
+
 
 config();
 
-const logger = new Logger('DevTestSuite');
+interface _RiskConfig {
+  maxPositionSize: number;
+  maxTotalExposure?: number;
+  maxPositionsPerToken?: number;
+  concentrationLimit?: number;
+}
+
+const logger = new Logger();
 
 interface TestResult {
   testName: string;
@@ -48,7 +56,7 @@ class DevTestSuite {
   private startTime: number = 0;
   private gswap!: GSwapWrapper;
   private tradingEngine!: TradingEngine;
-  private env: any;
+  private env!: { api: { baseUrl: string }; wallet: { address: string; privateKey: string } };
 
   async runComprehensiveTests(): Promise<TestSuiteResults> {
     this.startTime = Date.now();
@@ -102,15 +110,17 @@ class DevTestSuite {
 
     // Test 3: Component Initialization
     await this.runTest('Component Initialization', 'infrastructure', async () => {
-      const alertSystem = new AlertSystem(false);
-      const emergencyControls = new EmergencyControls(alertSystem);
-      const positionLimits = new PositionLimits({
-        maxPositionSize: 100,
-        maxTotalExposure: 500,
-        maxPositionsPerToken: 5,
-        concentrationLimit: 0.2
-      });
-      const riskMonitor = new RiskMonitor(alertSystem, emergencyControls);
+      const _alertSystem = new AlertSystem();
+
+      // Create stub dependencies for dev testing
+      const stubConfig = { maxPositionSize: 1000 } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      const stubGSwap = {} as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      const stubSwapExecutor = {} as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      const stubWalletAddress = 'test-wallet-address';
+
+      const _emergencyControls = new EmergencyControls(stubConfig, stubGSwap, stubSwapExecutor, stubWalletAddress);
+      const _positionLimits = new PositionLimits(stubConfig, stubGSwap);
+      const _riskMonitor = new RiskMonitor(stubConfig, stubGSwap);
 
       this.gswap = new GSwapWrapper({
         signer: new PrivateKeySigner(process.env.WALLET_PRIVATE_KEY || '0x'),
@@ -125,7 +135,7 @@ class DevTestSuite {
 
     // Test 4: Logging System
     await this.runTest('Logging System', 'infrastructure', async () => {
-      const testLogger = new Logger('TestLogger');
+      const testLogger = new Logger();
       testLogger.info('Test log message');
       testLogger.warn('Test warning');
       testLogger.error('Test error');
@@ -140,7 +150,7 @@ class DevTestSuite {
     await this.runTest('API Connectivity', 'api', async () => {
       try {
         // Test basic API endpoint
-        const response = await fetch(this.env.api.baseUrl + '/health', {
+        const _response =await fetch(this.env.api.baseUrl + '/health', {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' }
         });
@@ -218,7 +228,16 @@ class DevTestSuite {
     // Test 9: Trading Engine Initialization
     await this.runTest('Trading Engine Initialization', 'trading', async () => {
       try {
-        this.tradingEngine = new TradingEngine(this.env);
+        const fullConfig = {
+          ...this.env,
+          api: {
+            ...this.env.api,
+            wsUrl: this.env.api.baseUrl.replace('http', 'ws') + '/ws'
+          },
+          trading: { maxPositionSize: 1000 },
+          development: { nodeEnv: 'test', logLevel: 'info', productionTestMode: false }
+        };
+        this.tradingEngine = new TradingEngine(fullConfig);
         await this.tradingEngine.start();
 
         // Give systems time to initialize in DEV environment
@@ -319,15 +338,22 @@ class DevTestSuite {
 
     // Test 13: Emergency Stop Triggers
     await this.runTest('Emergency Stop Triggers', 'risk', async () => {
-      const alertSystem = new AlertSystem(false);
-      const emergencyControls = new EmergencyControls(alertSystem);
+      const _alertSystem = new AlertSystem();
+
+      // Create stub dependencies for dev testing
+      const stubConfig = { maxPositionSize: 1000 } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      const stubGSwap = {} as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      const stubSwapExecutor = {} as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      const stubWalletAddress = 'test-wallet-address';
+
+      const _emergencyControls = new EmergencyControls(stubConfig, stubGSwap, stubSwapExecutor, stubWalletAddress);
 
       // Test emergency stop activation
-      await emergencyControls.activateEmergencyStop('Test activation');
+      await _emergencyControls.activateEmergencyStop('SYSTEM_ERROR', 'Test activation');
 
-      const status = emergencyControls.getEmergencyStatus();
+      const status = _emergencyControls.getEmergencyStatus();
       if (status.isActive) {
-        await emergencyControls.deactivateEmergencyStop();
+        await _emergencyControls.deactivateEmergencyStop('Test deactivation');
         return { passed: true, details: 'Emergency stop system functional' };
       }
 
@@ -336,12 +362,12 @@ class DevTestSuite {
 
     // Test 14: Position Limits Enforcement
     await this.runTest('Position Limits Enforcement', 'risk', async () => {
-      const positionLimits = new PositionLimits({
+      const _positionLimits = new PositionLimits({
         maxPositionSize: 100,
         maxTotalExposure: 500,
         maxPositionsPerToken: 3,
         concentrationLimit: 0.25
-      });
+      } as any, {} as any); // eslint-disable-line @typescript-eslint/no-explicit-any
 
       // Test position limit validation
       const testPosition = {
@@ -363,9 +389,16 @@ class DevTestSuite {
 
     // Test 15: Risk Monitoring
     await this.runTest('Risk Monitoring', 'risk', async () => {
-      const alertSystem = new AlertSystem(false);
-      const emergencyControls = new EmergencyControls(alertSystem);
-      const riskMonitor = new RiskMonitor(alertSystem, emergencyControls);
+      const _alertSystem = new AlertSystem();
+
+      // Create stub dependencies for dev testing
+      const stubConfig = { maxPositionSize: 1000 } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      const stubGSwap = {} as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      const stubSwapExecutor = {} as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      const stubWalletAddress = 'test-wallet-address';
+
+      const _emergencyControls = new EmergencyControls(stubConfig, stubGSwap, stubSwapExecutor, stubWalletAddress);
+      const _riskMonitor = new RiskMonitor(stubConfig, stubGSwap);
 
       // Test risk assessment
       const mockPortfolio = {
@@ -388,7 +421,7 @@ class DevTestSuite {
 
     // Test 16: Alert System
     await this.runTest('Alert System', 'risk', async () => {
-      const alertSystem = new AlertSystem(false);
+      const alertSystem = new AlertSystem();
 
       const alertId = await alertSystem.createAlert(
         'system_error',

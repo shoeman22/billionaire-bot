@@ -10,7 +10,7 @@ import { RetryHelper } from '../../utils/retry-helper';
 import { GasEstimator } from '../../utils/gas-estimator';
 
 // Mock the GSwap service and utilities
-jest.mock('../../services/gswap-wrapper');
+jest.mock('../../services/gswap-simple');
 jest.mock('../../utils/retry-helper');
 jest.mock('../../utils/gas-estimator');
 const MockGSwap = GSwap as jest.MockedClass<typeof GSwap>;

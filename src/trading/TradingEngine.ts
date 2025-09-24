@@ -5,7 +5,7 @@
 
 import { GSwap, PrivateKeySigner } from '../services/gswap-simple';
 import { BotConfig } from '../config/environment';
-import { TRADING_CONSTANTS } from '../config/constants';
+import { CONSTANTS } from '../config/constants';
 import { logger } from '../utils/logger';
 import { PriceTracker } from '../monitoring/price-tracker';
 import { PositionTracker } from '../monitoring/position-tracker';
@@ -22,6 +22,8 @@ import { EmergencyControls } from './risk/emergency-controls';
 import { SwapExecutor } from './execution/swap-executor';
 import { MarketAnalysis } from '../monitoring/market-analysis';
 import { AlertSystem } from '../monitoring/alerts';
+import { TradingMode } from '../types/trading';
+import { detectTradingMode, getTradingModeConfig } from './risk/risk-profiles';
 import { initializeDatabase } from '../config/database';
 import { safeParseFloat } from '../utils/safe-parse';
 import { BlockchainPosition, PortfolioBalance, MarketCondition, RiskValidationResult, RangeOrder, MarketMakingPosition } from '../types/galaswap';
@@ -48,6 +50,8 @@ export class TradingEngine {
   private rangeOrderStrategy: RangeOrderStrategy;
   private marketMakingStrategy: MarketMakingStrategy;
   private isRunning: boolean = false;
+  private tradingMode: TradingMode = TradingMode.MIXED; // Default to mixed
+  private enabledStrategies: string[] = [];
   private tradingStats = {
     totalTrades: 0,
     successfulTrades: 0,
@@ -79,7 +83,7 @@ export class TradingEngine {
     this.priceTracker = new PriceTracker(this.gswap);
     this.positionLimits = new PositionLimits(config.trading, this.gswap);
     this.slippageProtection = new SlippageProtection(config.trading);
-    this.riskMonitor = new RiskMonitor(config.trading, this.gswap);
+    this.riskMonitor = new RiskMonitor(config.trading, this.gswap, this.priceTracker);
 
     // Initialize execution systems
     this.swapExecutor = new SwapExecutor(this.gswap, this.slippageProtection);
@@ -110,23 +114,24 @@ export class TradingEngine {
     this.feeCalculator = new FeeCalculator();
     this.rebalanceEngine = new RebalanceEngine(this.liquidityManager, this.feeCalculator);
     this.rangeOrderStrategy = new RangeOrderStrategy(this.liquidityManager);
-    const mockMarketMakingConfig = {
-      token0: 'GALA$Unit$none$none',
-      token1: 'GUSDC$Unit$none$none',
-      fee: 3000,
-      totalCapital: '1000',
-      rangeWidth: 0.1,
-      spread: 0.002,
-      rebalanceThreshold: 0.05,
-      autoRebalance: true,
-      feeCollectionThreshold: 0.01,
+    // Market making configuration from constants
+    const marketMakingConfig = {
+      token0: CONSTANTS.STRATEGY.MARKET_MAKING.DEFAULT_TOKEN0,
+      token1: CONSTANTS.STRATEGY.MARKET_MAKING.DEFAULT_TOKEN1,
+      fee: CONSTANTS.STRATEGY.MARKET_MAKING.DEFAULT_FEE_TIER,
+      totalCapital: CONSTANTS.STRATEGY.MARKET_MAKING.DEFAULT_CAPITAL,
+      rangeWidth: CONSTANTS.STRATEGY.MARKET_MAKING.RANGE_WIDTH_PERCENTAGE,
+      spread: CONSTANTS.STRATEGY.MARKET_MAKING.TARGET_SPREAD,
+      rebalanceThreshold: CONSTANTS.STRATEGY.MARKET_MAKING.REBALANCE_THRESHOLD,
+      autoRebalance: CONSTANTS.STRATEGY.MARKET_MAKING.AUTO_REBALANCE,
+      feeCollectionThreshold: CONSTANTS.STRATEGY.MARKET_MAKING.FEE_COLLECTION_THRESHOLD,
       riskParameters: {
-        maxPositionValue: 10000,
-        maxDrawdown: 0.2,
-        utilizationTarget: 0.8
+        maxPositionValue: CONSTANTS.STRATEGY.MARKET_MAKING.MAX_POSITION_USD,
+        maxDrawdown: CONSTANTS.STRATEGY.RISK.MAX_DRAWDOWN,
+        utilizationTarget: CONSTANTS.STRATEGY.MARKET_MAKING.UTILIZATION_TARGET
       }
     };
-    this.marketMakingStrategy = new MarketMakingStrategy(this.liquidityManager, mockMarketMakingConfig);
+    this.marketMakingStrategy = new MarketMakingStrategy(this.liquidityManager, marketMakingConfig);
 
     logger.info('Trading Engine initialized with all components including liquidity infrastructure');
   }
@@ -143,13 +148,24 @@ export class TradingEngine {
     try {
       logger.info('Starting Trading Engine...');
 
-      // Health check API connection (SDK doesn't have healthCheck, implement basic check)
+      // Health check API connection using simple HTTP check
       try {
-        // Test SDK connectivity by attempting to get a basic asset query
-        await this.gswap.assets.getUserAssets(this.config.wallet.address, 1, 1);
-        logger.info('GSwap SDK connectivity verified');
+        // Use fetch to test basic API connectivity without authentication
+        const response = await fetch(`${this.config.api.baseUrl}/health`);
+        if (!response.ok) {
+          throw new Error(`Health check failed: ${response.status} ${response.statusText}`);
+        }
+        logger.info('GSwap API connectivity verified');
       } catch (error) {
-        throw new Error('GSwap SDK connection failed: ' + (error instanceof Error ? error.message : 'Unknown error'));
+        logger.warn('Health endpoint check failed, attempting SDK verification...', error);
+
+        // Fallback: Test SDK connectivity by attempting to get a basic asset query
+        try {
+          await this.gswap.assets.getUserAssets(this.config.wallet.address, 1, 1);
+          logger.info('GSwap SDK connectivity verified via fallback');
+        } catch (sdkError) {
+          throw new Error('GSwap API connection failed: ' + (sdkError instanceof Error ? sdkError.message : 'Unknown error'));
+        }
       }
 
       // Initialize database for position tracking
@@ -167,10 +183,22 @@ export class TradingEngine {
       // Start position tracking
       await this.positionTracker.start();
 
-      // Initialize strategies
+      // Initialize strategies conditionally based on enabled strategies
       await this.arbitrageStrategy.initialize();
-      await this.marketMakingStrategy.initialize();
-      await this.rebalanceEngine.initialize();
+
+      // Only initialize market making if it's going to be used
+      // For arbitrage-only mode, skip market making initialization
+      try {
+        await this.marketMakingStrategy.initialize();
+      } catch (error) {
+        logger.warn('Market making strategy initialization failed, continuing with arbitrage-only:', error);
+      }
+
+      try {
+        await this.rebalanceEngine.initialize();
+      } catch (error) {
+        logger.warn('Rebalance engine initialization failed, continuing without rebalancing:', error);
+      }
     
       // Start trading loops
       this.startTradingLoop();
@@ -196,10 +224,20 @@ export class TradingEngine {
     try {
       logger.info('Stopping Trading Engine...');
 
-      // Stop strategies
+      // Stop strategies gracefully
       await this.arbitrageStrategy.stop();
-      await this.marketMakingStrategy.stop();
-      await this.rebalanceEngine.stop();
+
+      try {
+        await this.marketMakingStrategy.stop();
+      } catch (error) {
+        logger.warn('Error stopping market making strategy:', error);
+      }
+
+      try {
+        await this.rebalanceEngine.stop();
+      } catch (error) {
+        logger.warn('Error stopping rebalance engine:', error);
+      }
     
       // Stop risk monitoring
       this.riskMonitor.stopMonitoring();
@@ -288,30 +326,36 @@ export class TradingEngine {
    * Execute a single trading cycle
    */
   private async executeTradingCycle(): Promise<void> {
-    logger.debug('Executing trading cycle...');
+    const cycleStart = Date.now();
+    logger.info('🔄 Starting trading cycle...');
 
     try {
       // 1. Check emergency stop
       if (this.emergencyControls.isEmergencyStopEnabled()) {
-        logger.warn('Emergency stop active - skipping trading cycle');
+        logger.warn('🚨 Emergency stop active - skipping trading cycle');
         return;
       }
+      logger.debug('✅ Emergency controls check passed');
 
       // 2. Check system health (basic connectivity test)
+      logger.debug('🔍 Checking GSwap API connectivity...');
       try {
         await this.gswap.assets.getUserAssets(this.config.wallet.address, 1, 1);
         this.emergencyControls.recordSuccess();
+        logger.debug('✅ GSwap API connectivity confirmed');
       } catch (error) {
         this.emergencyControls.recordApiFailure('SDK connectivity check failed');
-        logger.warn('GSwap SDK unhealthy, skipping cycle');
+        logger.warn('❌ GSwap SDK unhealthy, skipping cycle:', error);
         return;
       }
 
       // 3. Comprehensive risk assessment
-      const riskCheck = await this.riskMonitor.performRiskCheck(this.config.wallet.address);
+      logger.debug('🛡️  Performing comprehensive risk assessment...');
+      const riskCheck = await this.riskMonitor.performRiskCheck(this.config.wallet.address, this.tradingMode);
+      logger.info(`🛡️  Risk level: ${riskCheck.riskLevel.toUpperCase()} | Continue trading: ${riskCheck.shouldContinueTrading ? '✅' : '❌'}`);
 
       if (!riskCheck.shouldContinueTrading) {
-        logger.warn('Risk assessment failed - stopping trading:', riskCheck.alerts);
+        logger.warn('⚠️  Risk assessment failed - stopping trading:', riskCheck.alerts);
 
         // Check if emergency action is needed
         if (riskCheck.emergencyActions.length > 0) {
@@ -334,19 +378,23 @@ export class TradingEngine {
       }
 
       // 4. Check position limits
+      logger.debug('📏 Checking position limits...');
       const withinLimits = await this.positionLimits.checkLimits(this.config.wallet.address);
       if (!withinLimits) {
-        logger.warn('Position limits exceeded, skipping cycle');
+        logger.warn('⚠️  Position limits exceeded, skipping cycle');
         await this.alertSystem.riskAlert('position_limits_exceeded', {
           wallet: this.config.wallet.address,
           limits: this.positionLimits.getCurrentLimits()
         });
         return;
       }
+      logger.debug('✅ Position limits check passed');
 
       // 5. Update market analysis
+      logger.debug('📊 Analyzing market conditions...');
       const rawMarketCondition = await this.marketAnalysis.analyzeMarket();
       const marketCondition = this.convertMarketCondition(rawMarketCondition);
+      logger.info(`📊 Market: ${marketCondition.overall.toUpperCase()} (${marketCondition.confidence}% confidence) | Volatility: ${marketCondition.volatility} | Liquidity: ${marketCondition.liquidity}`);
 
       // 6. Check for critical market conditions and emergency triggers
       const portfolioSnapshot = await this.getPortfolioSnapshot();
@@ -384,11 +432,13 @@ export class TradingEngine {
       }
 
       // 8. Check if market conditions are favorable for trading
+      logger.debug('🎯 Evaluating trading favorability...');
       const isFavorable = this.marketAnalysis.isFavorableForTrading();
       if (!isFavorable) {
-        logger.debug('Market conditions not favorable for trading');
+        logger.info('⏸️  Market conditions not favorable for trading - waiting for better opportunity');
         return;
       }
+      logger.info('✅ Market conditions favorable - proceeding with strategy execution');
 
       // 9. Check and execute liquidity position management
       await this.executeLiquidityManagement(marketCondition, riskCheck.riskLevel);
@@ -397,16 +447,21 @@ export class TradingEngine {
       const riskAdjustedExecution = this.shouldExecuteStrategies(marketCondition, riskCheck.riskLevel);
 
       if (riskAdjustedExecution.shouldExecute) {
+        logger.info(`🚀 Executing strategies based on market conditions...`);
+
         if (marketCondition.overall === 'bullish' && marketCondition.confidence > 70 && riskCheck.riskLevel !== 'high') {
           // Strong bullish trend - favor arbitrage (only if not high risk)
+          logger.info('📈 Strong bullish trend detected - executing arbitrage strategy');
           await this.arbitrageStrategy.execute();
 
           // Also consider market making in stable conditions
           if (marketCondition.volatility === 'low' || marketCondition.volatility === 'medium') {
+            logger.info('💼 Stable volatility - adding market making strategy');
             await this.marketMakingStrategy.execute();
           }
         } else if (marketCondition.volatility === 'low' && marketCondition.liquidity === 'good' && riskCheck.riskLevel === 'low') {
           // Low volatility, good liquidity, low risk - ideal for concentrated liquidity strategies
+          logger.info('🎯 Ideal conditions for concentrated liquidity - executing both strategies');
           await this.marketMakingStrategy.execute();
           await this.arbitrageStrategy.execute();
         } else if (marketCondition.confidence > 50 && riskCheck.riskLevel === 'low') {
@@ -423,13 +478,14 @@ export class TradingEngine {
           });
         }
       } else {
-        logger.debug('Strategy execution skipped:', riskAdjustedExecution.reason);
+        logger.info('⏸️  Strategy execution skipped:', riskAdjustedExecution.reason);
       }
 
       // 11. Update statistics
       this.updateTradingStats();
 
-      logger.debug('Trading cycle completed successfully');
+      const cycleTime = Date.now() - cycleStart;
+      logger.info(`✅ Trading cycle completed successfully in ${cycleTime}ms`);
 
     } catch (error) {
       logger.error('Error in trading cycle:', error);
@@ -561,6 +617,8 @@ export class TradingEngine {
             tokenIn: params.tokenIn,
             tokenOut: params.tokenOut,
             amountIn: safeParseFloat(params.amountIn, 0),
+            userAddress: this.config.wallet.address,
+            tradingMode: this.tradingMode,
             currentPortfolio,
             marketConditions: {
               volatility: 0,
@@ -696,7 +754,7 @@ export class TradingEngine {
   }
 
   /**
-   * Get token balances from wallet
+   * Get token balances from wallet using direct wallet balance API
    */
   private async getTokenBalances(): Promise<PortfolioBalance[]> {
     try {
@@ -704,41 +762,43 @@ export class TradingEngine {
         return [];
       }
 
-      // Get user positions using SDK
-      const positionsResponse = await this.gswap.positions.getUserPositions(this.config.wallet.address);
+      logger.debug(`🔍 Requesting token balances for wallet: ${this.config.wallet.address}`);
+      // Get user assets directly from wallet (not liquidity positions)
+      const assetsResponse = await this.gswap.assets.getUserAssets(this.config.wallet.address, 1, 20);
+      logger.debug(`✅ Successfully retrieved ${assetsResponse?.tokens?.length || 0} tokens`);
 
-      const balances = new Map<string, number>();
+      if (!assetsResponse?.tokens) {
+        logger.debug('No tokens found in wallet');
+        return [];
+      }
 
-      if (positionsResponse?.positions) {
-        for (const position of positionsResponse.positions) {
-          // Note: SDK positions API exists but liquidity operations are not supported
-          if (position.token0Symbol && position.liquidity) {
-            const token0 = position.token0Symbol;
-            // CRITICAL FIX: Calculate actual V3 position amounts based on price range
-            const amount0 = this.calculateV3PositionAmount0(position as any); // eslint-disable-line @typescript-eslint/no-explicit-any
-            if (amount0 > 0) {
-              balances.set(token0, (balances.get(token0) || 0) + amount0);
-            }
-          }
+      // Convert SDK format to PortfolioBalance format
+      return assetsResponse.tokens
+        .map(token => ({
+          token: token.symbol || token.name,
+          amount: safeParseFloat(token.quantity || '0', 0),
+          valueUSD: 0 // Will be calculated in calculatePortfolioValue
+        }))
+        .filter(balance => balance.amount > 0); // Only include non-zero balances
 
-          if (position.token1Symbol && position.liquidity) {
-            const token1 = position.token1Symbol;
-            // CRITICAL FIX: Calculate actual V3 position amounts based on price range
-            const amount1 = this.calculateV3PositionAmount1(position as any); // eslint-disable-line @typescript-eslint/no-explicit-any
-            if (amount1 > 0) {
-              balances.set(token1, (balances.get(token1) || 0) + amount1);
-            }
-          }
+    } catch (error) {
+      // Handle API limit errors gracefully
+      if (error && typeof error === 'object' && 'message' in error &&
+          (error.message as string).includes('400') && (error.message as string).includes('limit')) {
+        logger.warn('getUserAssets API limit exceeded, retrying with smaller limit');
+        try {
+          const assetsResponse = await this.gswap.assets.getUserAssets(this.config.wallet.address, 1, 10);
+          return assetsResponse?.tokens?.map(token => ({
+            token: token.symbol || token.name,
+            amount: safeParseFloat(token.quantity || '0', 0),
+            valueUSD: 0
+          })).filter(balance => balance.amount > 0) || [];
+        } catch (retryError) {
+          logger.error('Error getting token balances on retry:', retryError);
+          return [];
         }
       }
 
-      return Array.from(balances.entries()).map(([token, amount]) => ({
-        token,
-        amount,
-        valueUSD: 0 // Will be calculated in calculatePortfolioValue
-      }));
-
-    } catch (error) {
       logger.error('Error getting token balances:', error);
       return [];
     }
@@ -754,37 +814,51 @@ export class TradingEngine {
       // Batch fetch prices for all unique tokens to avoid N+1 queries
       if (balances.length > 0) {
         const uniqueTokens = [...new Set(balances.map(b => b.token))];
+        logger.debug(`💰 Calculating value for tokens: ${uniqueTokens.join(', ')}`);
 
         try {
-          // Get prices by fetching pool data against GUSDC (USD stable coin)
-          const usdcToken = TRADING_CONSTANTS.TOKENS.GUSDC;
+          // Use direct price API instead of broken SDK quote method
           const priceMap = new Map<string, number>();
+          logger.debug(`💱 Using direct price API: ${this.config.api.baseUrl}/v1/trade/price`);
 
-          // Parallelize price fetching for all tokens
+          // Parallelize price fetching for all tokens using working price API
           const pricePromises = uniqueTokens.map(async (token) => {
-            if (token === usdcToken) {
+            logger.debug(`🔍 Processing token: ${token}`);
+
+            if (token === 'GUSDC') {
+              logger.debug(`✅ ${token} = $1.00 (USD stable coin)`);
               return { token, price: 1.0 }; // GUSDC is 1:1 with USD
             }
 
             try {
-              // Try to get pool data for this token paired with GUSDC
-              const poolData = await this.gswap.pools.getPoolData(token, usdcToken, 3000);
-              if (poolData?.sqrtPrice) {
-                const price = this.gswap.pools.calculateSpotPrice(token, usdcToken, poolData.sqrtPrice);
-                return { token, price: safeParseFloat(price.toString(), 0) };
+              // Convert token symbol to API format (using $ separator)
+              const tokenId = token === 'GALA' ? 'GALA$Unit$none$none' : `${token}$Unit$none$none`;
+              logger.debug(`🔗 API Token ID for ${token}: ${tokenId}`);
+
+              // Use working direct price API instead of broken quote
+              const response = await fetch(`${this.config.api.baseUrl}/v1/trade/price?token=${encodeURIComponent(tokenId)}`, {
+                method: 'GET',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json'
+                },
+                signal: AbortSignal.timeout(5000)
+              });
+
+              if (response.ok) {
+                const data = await response.json() as { data?: number; message?: string; stale?: boolean };
+                if (data.data) {
+                  const price = parseFloat(String(data.data));
+                  logger.debug(`✅ ${token} price: $${price.toFixed(6)} ${data.stale ? '(stale)' : '(live)'}`);
+                  return { token, price };
+                } else {
+                  logger.debug(`⚠️ No price data for ${token}: ${data.message}`);
+                }
+              } else {
+                logger.debug(`❌ Price API error for ${token}: ${response.status}`);
               }
             } catch (error) {
-              logger.debug(`Could not get pool price for ${token}:`, error);
-              // Try with lower fee tier
-              try {
-                const poolData = await this.gswap.pools.getPoolData(token, usdcToken, 500);
-                if (poolData?.sqrtPrice) {
-                  const price = this.gswap.pools.calculateSpotPrice(token, usdcToken, poolData.sqrtPrice);
-                  return { token, price: safeParseFloat(price.toString(), 0) };
-                }
-              } catch (error) {
-                logger.debug(`Could not get pool price for ${token} on lower fee tier:`, error);
-              }
+              logger.debug(`❌ Could not get price for ${token}:`, error);
             }
 
             return { token, price: 0 };
@@ -1283,10 +1357,110 @@ export class TradingEngine {
   async enableArbitrageStrategy(): Promise<void> {
     try {
       await this.arbitrageStrategy.initialize();
+      this.enabledStrategies.push('arbitrage');
+      this.updateTradingMode();
       logger.info('✅ Arbitrage strategy enabled');
     } catch (error) {
       logger.error('❌ Failed to enable arbitrage strategy:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Update trading mode based on enabled strategies
+   */
+  private updateTradingMode(): void {
+    const previousMode = this.tradingMode;
+    const detectedMode = detectTradingMode(this.enabledStrategies);
+
+    // Validate strategy-mode compatibility
+    this.validateStrategyModeCompatibility(this.enabledStrategies, detectedMode);
+
+    this.tradingMode = detectedMode;
+
+    if (previousMode !== this.tradingMode) {
+      const config = getTradingModeConfig(this.tradingMode);
+      logger.info(`Trading mode updated: ${previousMode} → ${this.tradingMode}`, {
+        mode: this.tradingMode,
+        description: config.description,
+        enabledStrategies: this.enabledStrategies
+      });
+    }
+  }
+
+  /**
+   * Validate that enabled strategies are compatible with the selected trading mode
+   */
+  private validateStrategyModeCompatibility(enabledStrategies: string[], mode: TradingMode): void {
+    // Define incompatible strategy-mode combinations
+    const incompatibleCombinations = [
+      // Arbitrage mode should only have arbitrage strategies
+      {
+        mode: TradingMode.ARBITRAGE,
+        incompatibleStrategies: ['market_making', 'liquidity', 'rebalance'],
+        reason: 'Arbitrage mode requires fast execution and high concentration, incompatible with market making or rebalancing'
+      },
+      // Market making mode should not have high-frequency arbitrage
+      {
+        mode: TradingMode.MARKET_MAKING,
+        incompatibleStrategies: ['arbitrage'],
+        reason: 'Market making requires consistent liquidity provision, incompatible with arbitrage quick in/out trades'
+      }
+    ];
+
+    for (const combination of incompatibleCombinations) {
+      if (mode === combination.mode) {
+        const conflicts = enabledStrategies.filter(strategy =>
+          combination.incompatibleStrategies.some(incompatible =>
+            strategy.toLowerCase().includes(incompatible.toLowerCase())
+          )
+        );
+
+        if (conflicts.length > 0) {
+          logger.warn(`Strategy-mode compatibility warning: ${combination.reason}`, {
+            tradingMode: mode,
+            conflictingStrategies: conflicts,
+            enabledStrategies: enabledStrategies
+          });
+        }
+      }
+    }
+
+    // Warn about potential issues with mixed mode
+    if (mode === TradingMode.MIXED && enabledStrategies.length > 1) {
+      const hasArbitrage = enabledStrategies.some(s => s.toLowerCase().includes('arbitrage'));
+      const hasMarketMaking = enabledStrategies.some(s => s.toLowerCase().includes('market'));
+
+      if (hasArbitrage && hasMarketMaking) {
+        logger.warn('Mixed mode with both arbitrage and market making may lead to conflicting risk profiles', {
+          tradingMode: mode,
+          enabledStrategies: enabledStrategies,
+          recommendation: 'Consider running separate instances for different strategy types'
+        });
+      }
+    }
+  }
+
+  /**
+   * Get current trading mode
+   */
+  getTradingMode(): TradingMode {
+    return this.tradingMode;
+  }
+
+  /**
+   * Manually set trading mode (overrides auto-detection)
+   */
+  setTradingMode(mode: TradingMode): void {
+    const previousMode = this.tradingMode;
+    this.tradingMode = mode;
+
+    if (previousMode !== this.tradingMode) {
+      const config = getTradingModeConfig(this.tradingMode);
+      logger.info(`Trading mode manually set: ${previousMode} → ${this.tradingMode}`, {
+        mode: this.tradingMode,
+        description: config.description
+      });
     }
   }
 

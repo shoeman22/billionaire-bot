@@ -279,7 +279,7 @@ jest.mock('../../services/rebalance-engine', () => ({
 }));
 
 // Mock the GSwap SDK
-jest.mock('../../services/gswap-wrapper', () => ({
+jest.mock('../../services/gswap-simple', () => ({
   GSwap: Object.assign(
     jest.fn().mockImplementation(() => ({
       assets: {
@@ -375,7 +375,8 @@ describe('Liquidity Integration Tests', () => {
       },
       development: {
         nodeEnv: 'test',
-        logLevel: 'info'
+        logLevel: 'info',
+        productionTestMode: false
       }
     };
 

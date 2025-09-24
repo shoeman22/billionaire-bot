@@ -10,6 +10,7 @@ import { getConfig } from '../../config/environment';
 import { logger } from '../../utils/logger';
 import { safeParseFloat } from '../../utils/safe-parse';
 import { ApiResponseParser, ResponseValidators } from '../../utils/api-response-parser';
+import { createQuoteWrapper } from '../../utils/quote-api';
 import {
   QuoteRequest,
   QuoteResponse,
@@ -64,15 +65,31 @@ export interface TransactionMonitoringResult {
 export class SwapExecutor {
   private gswap: GSwap;
   private slippageProtection: SlippageProtection;
+  private quoteWrapper: any; // Working quote API wrapper
   private static testTransactionCounter = 0;
+
+  /**
+   * Convert TokenClassKey to string format if needed
+   */
+  private tokenToString(token: string | TokenClassKey): string {
+    if (typeof token === 'string') {
+      return token;
+    }
+    // Convert TokenClassKey object to string format
+    return `${token.collection}|${token.category}|${token.type}|${token.additionalKey}`;
+  }
 
   constructor(gswap: GSwap, slippageProtection: SlippageProtection) {
     this.gswap = gswap;
     this.slippageProtection = slippageProtection;
+
+    // Initialize working quote wrapper
+    const config = getConfig();
+    this.quoteWrapper = createQuoteWrapper(config.api.baseUrl);
+
     logger.info('Swap Executor initialized');
 
     // Log test mode status
-    const config = getConfig();
     if (config.development.productionTestMode) {
       logger.info('🧪 Swap Executor: Production Test Mode - No real trades will be executed');
     }
@@ -150,8 +167,8 @@ export class SwapExecutor {
    */
   private async getSwapQuote(request: SwapRequest): Promise<QuoteResponse> {
     const quoteRequest: QuoteRequest = {
-      tokenIn: request.tokenIn,
-      tokenOut: request.tokenOut,
+      tokenIn: this.tokenToString(request.tokenIn),
+      tokenOut: this.tokenToString(request.tokenOut),
       amountIn: request.amountIn,
     };
 
@@ -166,7 +183,7 @@ export class SwapExecutor {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const quote = await this.gswap.quoting.quoteExactInput(
+        const quote = await this.quoteWrapper.quoteExactInput(
           quoteRequest.tokenIn,
           quoteRequest.tokenOut,
           quoteRequest.amountIn || '0'
@@ -293,24 +310,15 @@ export class SwapExecutor {
       if (request.tokenIn === usdcToken) {
         price = 1.0; // GUSDC is 1:1 with USD
       } else {
-        const poolData = await this.gswap.pools.getPoolData(request.tokenIn, usdcToken, 3000);
-        if (poolData?.sqrtPrice) {
-          const spotPrice = this.gswap.pools.calculateSpotPrice(request.tokenIn, usdcToken, poolData.sqrtPrice);
-          price = safeParseFloat(spotPrice.toString(), 0);
+        // Use working quote method instead of broken getPoolData
+        const quote = await this.quoteWrapper.quoteExactInput(usdcToken, request.tokenIn, 1);
+        if (quote?.outTokenAmount) {
+          // Price = 1 USDC / tokens received for 1 USDC
+          price = 1 / safeParseFloat(quote.outTokenAmount.toString(), 0);
         }
       }
     } catch (error) {
       logger.debug(`Could not get price for ${request.tokenIn}:`, error);
-      // Try lower fee tier
-      try {
-        const poolData = await this.gswap.pools.getPoolData(request.tokenIn, usdcToken, 500);
-        if (poolData?.sqrtPrice) {
-          const spotPrice = this.gswap.pools.calculateSpotPrice(request.tokenIn, usdcToken, poolData.sqrtPrice);
-          price = safeParseFloat(spotPrice.toString(), 0);
-        }
-      } catch (error) {
-        logger.debug(`Could not get price for ${request.tokenIn} on lower fee tier:`, error);
-      }
     }
 
     const priceResponse = {
@@ -350,12 +358,12 @@ export class SwapExecutor {
     const quotedPrice = amountIn > 0 ? amountOut / amountIn : 0;
 
     // Get real market data for analysis
-    const marketData = await this.getMarketData(request.tokenIn, request.tokenOut);
+    const marketData = await this.getMarketData(this.tokenToString(request.tokenIn), this.tokenToString(request.tokenOut));
 
     // Prepare trade parameters for analysis
     const tradeParams = {
-      tokenIn: request.tokenIn,
-      tokenOut: request.tokenOut,
+      tokenIn: this.tokenToString(request.tokenIn),
+      tokenOut: this.tokenToString(request.tokenOut),
       amountIn: request.amountIn,
       poolLiquidity: marketData.poolLiquidity,
       volatility24h: marketData.volatility24h,
@@ -411,7 +419,7 @@ export class SwapExecutor {
       }
 
       // Determine optimal fee tier with validation
-      const feeTier = await this.selectOptimalFeeTier(request.tokenIn, request.tokenOut);
+      const feeTier = await this.selectOptimalFeeTier(this.tokenToString(request.tokenIn), this.tokenToString(request.tokenOut));
 
       // Validate fee tier
       const validFees = [500, 3000, 10000];
@@ -491,24 +499,24 @@ export class SwapExecutor {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        // Validate that we have a valid pool for this swap
-        const poolData = await this.gswap.pools.getPoolData(
+        // Validate that we have a valid route for this swap using working quote method
+        const testQuote = await this.quoteWrapper.quoteExactInput(
           request.tokenIn,
           request.tokenOut,
-          request.fee || 3000
+          0.01 // Small test amount
         );
 
-        if (!poolData || !poolData.sqrtPrice) {
-          throw new Error(`No valid pool found for ${request.tokenIn}/${request.tokenOut} with fee ${request.fee}`);
+        if (!testQuote || !testQuote.outTokenAmount) {
+          throw new Error(`No valid route found for ${request.tokenIn}/${request.tokenOut}`);
         }
 
-        // Validate sufficient liquidity exists
-        if (!poolData.liquidity || poolData.liquidity.toString() === '0') {
+        // Validate sufficient liquidity exists by checking if we get reasonable output
+        if (safeParseFloat(testQuote.outTokenAmount, 0) <= 0) {
           throw new Error('Pool has insufficient liquidity for swap');
         }
 
         // Get a fresh quote to validate pricing
-        const validateQuote = await this.gswap.quoting.quoteExactInput(
+        const validateQuote = await this.quoteWrapper.quoteExactInput(
           request.tokenIn,
           request.tokenOut,
           request.amountIn
@@ -553,7 +561,7 @@ export class SwapExecutor {
           tokenOut: request.tokenOut,
           expectedOutput: expectedOutput.toString(),
           minimumOutput: request.amountOutMinimum,
-          poolLiquidity: poolData.liquidity.toString()
+          poolLiquidity: testQuote.outTokenAmount // Use quote output as liquidity proxy
         });
 
         return payloadResponse;
@@ -1210,15 +1218,15 @@ export class SwapExecutor {
       let bestTier: 500 | 3000 | 10000 = FEE_TIERS.STANDARD; // Default fallback
       let bestLiquidity = 0;
 
-      // Parallelize fee tier pool data fetching
+      // Test fee tiers using working quote method
       const tierPromises = feeTiers.map(async (tier) => {
         try {
-          const poolData = await this.gswap.pools.getPoolData(tokenIn, tokenOut, tier);
+          const quote = await this.quoteWrapper.quoteExactInput(tokenIn, tokenOut, 1);
 
-          if (poolData?.liquidity) {
-            const liquidity = safeParseFloat(poolData.liquidity.toString(), 0);
-            logger.debug(`Fee tier ${tier}: liquidity ${liquidity}`);
-            return { tier, liquidity };
+          if (quote?.outTokenAmount && quote.feeTier === tier) {
+            const outAmount = safeParseFloat(quote.outTokenAmount.toString(), 0);
+            logger.debug(`Fee tier ${tier}: quote output ${outAmount}`);
+            return { tier, liquidity: outAmount }; // Use output amount as proxy for liquidity
           }
         } catch (error) {
           logger.debug(`Fee tier ${tier} not available:`, error instanceof Error ? error.message : 'Unknown error');
@@ -1278,25 +1286,19 @@ export class SwapExecutor {
     volume24h: string;
   }> {
     try {
-      // Get pool information to extract liquidity
-      const poolResponse = await this.gswap.pools.getPoolData(tokenIn, tokenOut, 3000); // Standard fee tier
+      // Use quote method to check if there's a valid route (proxy for liquidity)
+      const quote = await this.quoteWrapper.quoteExactInput(tokenIn, tokenOut, 100); // Test with 100 units
 
       let poolLiquidity = '0'; // Start with no fallback
-      if (poolResponse?.liquidity) {
-        // Use actual pool liquidity from SDK response
-        poolLiquidity = poolResponse.liquidity.toString();
-        logger.debug(`Retrieved pool liquidity: ${poolLiquidity} for ${tokenIn}/${tokenOut}`);
+      if (quote?.outTokenAmount) {
+        // Use quote output as proxy for liquidity availability
+        const outAmount = safeParseFloat(quote.outTokenAmount.toString(), 0);
+        poolLiquidity = (outAmount * 1000).toString(); // Scale as rough liquidity estimate
+        logger.debug(`Retrieved quote-based liquidity proxy: ${poolLiquidity} for ${tokenIn}/${tokenOut}`);
       } else {
-        // Try alternative fee tiers for liquidity data
-        const altPoolResponse = await this.gswap.pools.getPoolData(tokenIn, tokenOut, 500);
-        if (altPoolResponse?.liquidity) {
-          poolLiquidity = altPoolResponse.liquidity.toString();
-          logger.debug(`Retrieved pool liquidity from 500 fee tier: ${poolLiquidity}`);
-        } else {
-          // If no pool data available, this indicates a serious issue
-          logger.error(`No pool liquidity found for ${tokenIn}/${tokenOut} on any fee tier`);
-          poolLiquidity = '0'; // Fail with zero rather than mock data
-        }
+        // If no quote available, no trading route exists
+        logger.error(`No trading route found for ${tokenIn}/${tokenOut}`);
+        poolLiquidity = '0'; // Fail with zero rather than mock data
       }
 
       // Get real price history from multiple pool queries over time
@@ -1330,7 +1332,7 @@ export class SwapExecutor {
 
       // Calculate realistic 24h volume estimate from pool characteristics
       let volume24h = '0'; // Start with zero instead of arbitrary fallback
-      if (poolResponse && poolResponse.liquidity) {
+      if (poolLiquidity) {
         // Use actual liquidity for realistic volume estimation
         const liquidity = safeParseFloat(poolLiquidity, 0);
 

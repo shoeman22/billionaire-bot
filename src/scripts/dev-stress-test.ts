@@ -11,14 +11,22 @@
 
 import { config } from 'dotenv';
 import { validateEnvironment } from '../config/environment';
-import { GSwapWrapper } from '../../services/gswap-simple';
+import { GSwapWrapper } from '../services/gswap-simple';
 import { Logger } from '../utils/logger';
-import { PrivateKeySigner } from '../../services/gswap-simple';
+import { PrivateKeySigner } from '../services/gswap-simple';
 import { performance } from 'perf_hooks';
+
 
 config();
 
-const logger = new Logger('DevStressTest');
+interface _RiskConfig {
+  maxPositionSize: number;
+  maxTotalExposure?: number;
+  maxPositionsPerToken?: number;
+  concentrationLimit?: number;
+}
+
+const logger = new Logger();
 
 interface StressTestConfig {
   apiCalls: number;
@@ -48,7 +56,7 @@ interface StressTestResult {
 
 class DevStressTest {
   private gswap!: GSwapWrapper;
-  private env: any;
+  private env!: { api: { baseUrl: string }; wallet: { address: string; privateKey: string } };
   private results: StressTestResult[] = [];
 
   async runStressTests(config: StressTestConfig): Promise<StressTestResult[]> {
@@ -358,7 +366,7 @@ class DevStressTest {
     logger.info(`   ✅ Completed: ${successCount}/${config.apiCalls} database operations`);
   }
 
-  private async runMemoryStressTest(config: StressTestConfig): Promise<void> {
+  private async runMemoryStressTest(_config: StressTestConfig): Promise<void> {
     logger.info('🧠 Test 5: Memory Stress Test...');
 
     const startTime = performance.now();
@@ -366,7 +374,7 @@ class DevStressTest {
     let peakMemory = initialMemory;
 
     // Create memory pressure
-    const memoryConsumers: any[] = [];
+    const memoryConsumers: Array<{ data: number[]; metadata: Record<string, unknown> }> = [];
     let successCount = 0;
     let failCount = 0;
 
@@ -511,11 +519,10 @@ class DevStressTest {
     const startTime = performance.now();
 
     try {
-      const response = await fetch(this.env.api.baseUrl + '/health', {
+      const _response = await fetch(this.env.api.baseUrl + '/health', {
         method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 5000
-      } as any);
+        headers: { 'Content-Type': 'application/json' }
+      });
 
       return performance.now() - startTime;
     } catch (error) {
@@ -565,15 +572,15 @@ class DevStressTest {
     }
   }
 
-  private async simulateDataProcessing(data: any[]): Promise<void> {
+  private async simulateDataProcessing(data: Array<{ data: number[]; metadata: Record<string, unknown> }>): Promise<void> {
     // Simulate CPU-intensive work
     for (let i = 0; i < data.length; i++) {
-      data[i].processed = true;
-      data[i].processedAt = Date.now();
+      data[i].metadata.processed = true;
+      data[i].metadata.processedAt = Date.now();
     }
   }
 
-  private async simulateErrorRecovery(iteration: number): Promise<number> {
+  private async simulateErrorRecovery(_iteration: number): Promise<number> {
     const startTime = performance.now();
 
     // Simulate random errors

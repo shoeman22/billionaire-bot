@@ -161,7 +161,7 @@ export class PositionLimits {
     } catch (error) {
       // Handle API limit errors gracefully
       if (error && typeof error === 'object' && 'message' in error &&
-          error.message.includes('400') && error.message.includes('limit')) {
+          (error.message as string).includes('400') && (error.message as string).includes('limit')) {
         logger.warn('getUserAssets API limit exceeded, retrying with smaller limit');
         try {
           const assetsResponse = await this.gswap.assets.getUserAssets(userAddress, 1, 10);
@@ -234,7 +234,7 @@ export class PositionLimits {
 
           const poolData = await response.json();
 
-          const priceUsd = parseFloat(poolData.data || '0');
+          const priceUsd = parseFloat((poolData as any)?.data || '0');
           if (priceUsd > 0) {
             logger.debug(`API price for ${token}: $${priceUsd}`);
             return { token, price: priceUsd };

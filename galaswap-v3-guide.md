@@ -83,10 +83,10 @@ Choose the tier that fits the pair’s volatility:
 |10000 | 1.00%   | Exotic/volatile pairs          |
 
 ### Token Format
-Tokens are identified via a **composite key**:  
-`Collection$Category$Type$AdditionalKey`
+Tokens are identified via a **composite key**:
+`Collection|Category|Type|AdditionalKey`
 
-Example: `"GALA$Unit$none$none"`
+Example: `"GALA|Unit|none|none"`
 - **Collection**: Token collection/name (`GALA`)
 - **Category**: Usually `Unit` for fungible tokens
 - **Type**: Token type/contract identifier (`none` for many FTs)
@@ -103,7 +103,7 @@ Before swapping, get a quote for expected output.
 - **Params**: `tokenIn`, `tokenOut`, and either `amountIn` *or* `amountOut`  
 - **Sample (Price Oracle quick GET)**:
 ```http
-GET /price-oracle/fetch-price?token=GALA$Unit$none$none&page=1&limit=10&order=asc
+GET /price-oracle/fetch-price?token=GALA|Unit|none|none&page=1&limit=10&order=asc
 Host: dex-backend-prod1.defi.gala.com
 ```
 
@@ -161,7 +161,7 @@ V3 positions are range-specific:
 - **Endpoint**: `/price-oracle/fetch-price`  
 - **Query**: `token`, `page`, `limit`, `order`  
 ```http
-GET /price-oracle/fetch-price?token=GALA$Unit$none$none&page=1&limit=10&order=asc
+GET /price-oracle/fetch-price?token=GALA|Unit|none|none&page=1&limit=10&order=asc
 Host: dex-backend-prod1.defi.gala.com
 ```
 
@@ -171,7 +171,7 @@ Host: dex-backend-prod1.defi.gala.com
 - **Body**:
 ```json
 {
-  "token": "GALA$Unit$none$none",
+  "token": "GALA|Unit|none|none",
   "page": 1,
   "limit": 1,
   "from": "2025-06-03T12:30:45Z"
@@ -189,7 +189,7 @@ Get a quote for trading between two tokens.
 **Query Parameters**
 | Name     | Type   | Required | Description |
 |----------|--------|----------|-------------|
-| tokenIn  | string | Yes | Composite key of input token (e.g., `GALA$Unit$none$none`) |
+| tokenIn  | string | Yes | Composite key of input token (e.g., `GALA|Unit|none|none`) |
 | tokenOut | string | Yes | Composite key of output token |
 | amountIn | string | No  | Amount of input token to use |
 | amountOut| string | No  | Desired output amount |
@@ -198,8 +198,8 @@ Get a quote for trading between two tokens.
 **Example Request Params**
 ```json
 {
-  "tokenIn": "GALA$Unit$none$none",
-  "tokenOut": "ETIME$Unit$none$none",
+  "tokenIn": "GALA|Unit|none|none",
+  "tokenOut": "ETIME|Unit|none|none",
   "amountOut": 1,
   "fee": 500
 }
@@ -243,8 +243,8 @@ Estimate amounts for adding liquidity to a pool.
 **Example**
 ```json
 {
-  "token0": "GALA$Unit$none$none",
-  "token1": "GUSDC$Unit$none$none",
+  "token0": "GALA|Unit|none|none",
+  "token1": "GUSDC|Unit|none|none",
   "isToken0": true,
   "fee": 3000,
   "tickLower": -887220,
@@ -291,8 +291,8 @@ Estimate token amounts when **removing** liquidity from a position.
 **Example**
 ```json
 {
-  "token0": "GALA$Unit$none$none",
-  "token1": "GUSDC$Unit$none$none",
+  "token0": "GALA|Unit|none|none",
+  "token1": "GUSDC|Unit|none|none",
   "owner": "eth|EBDff87C1E582AE52fc3f175dFe873AD9bF42aFD",
   "tickLower": -43000,
   "tickUpper": -42800,
@@ -332,7 +332,7 @@ Get the current price of a token.
 
 **Example**
 ```json
-{ "token": "GALA$Unit$none$none" }
+{ "token": "GALA|Unit|none|none" }
 ```
 
 **URL**  
@@ -352,13 +352,13 @@ Get prices for multiple tokens.
 ```json
 {
   "tokens": [
-    "Token$Unit$THREDEXT$client:6337024724eec8c292f0118d",
-    "Token$Unit$TWODEXT$client:6337024724eec8c292f0118d",
-    "GTON$Unit$none$none",
-    "Token$Unit$BJYT$eth:3E182a9784ED72c52a99C4Ac94E107d1222459E0",
-    "ETIME$Unit$none$none",
-    "GOSMI$Unit$none$none",
-    "GUSDC$Unit$none$none"
+    "Token|Unit|THREDEXT$client:6337024724eec8c292f0118d",
+    "Token|Unit|TWODEXT$client:6337024724eec8c292f0118d",
+    "GTON|Unit|none|none",
+    "Token|Unit|BJYT$eth:3E182a9784ED72c52a99C4Ac94E107d1222459E0",
+    "ETIME|Unit|none|none",
+    "GOSMI|Unit|none|none",
+    "GUSDC|Unit|none|none"
   ]
 }
 ```
@@ -482,8 +482,8 @@ Get **pool** details.
       "grossPoolLiquidity": "336376.08886291150109088",
       "sqrtPrice": "7.51461043319390978954",
       "tickSpacing": 60,
-      "token0": "GALA$Unit$none$none",
-      "token1": "SILK$Unit$none$none"
+      "token0": "GALA|Unit|none|none",
+      "token1": "SILK|Unit|none|none"
     }
   }
 }
@@ -1114,5 +1114,5 @@ main().catch(e => { console.error(e); process.exit(1); });
 ## Notes
 - **Security**: Never expose private keys. Prefer secure env vars and vaults.
 - **Slippage**: Use `sqrtPriceLimit`, `amountInMaximum`, and `amountOutMinimum` to control execution.
-- **Composite Keys**: Maintain correct `Collection$Category$Type$AdditionalKey` values across endpoints.
+- **Composite Keys**: Maintain correct `Collection|Category|Type|AdditionalKey` values across endpoints.
 

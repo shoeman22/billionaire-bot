@@ -474,13 +474,13 @@ export function generateRandomPrivateKey(): { privateKey: string; address: strin
  * Utility to normalize GalaChain token format
  */
 export function normalizeTokenKey(token: string): string {
-  // Ensure token follows Collection$Category$Type$AdditionalKey format
-  const parts = token.split('$');
-  if (parts.length !== 4) {
-    throw new Error(`Invalid token format: ${token}. Expected format: Collection$Category$Type$AdditionalKey`);
+  // Ensure token follows Collection|Category|Type|AdditionalKey format
+  const parts = token.split('|');
+  if (parts.length < 3 || parts.length > 4) {
+    throw new Error(`Invalid token format: ${token}. Expected format: Collection|Category|Type|AdditionalKey`);
   }
 
-  return parts.join('$');
+  return parts.join('|');
 }
 
 /**

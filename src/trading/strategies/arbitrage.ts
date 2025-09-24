@@ -11,6 +11,7 @@ import { SwapExecutor } from '../execution/swap-executor';
 import { MarketAnalysis } from '../../monitoring/market-analysis';
 import { safeParseFloat } from '../../utils/safe-parse';
 import { ArbitrageStatus } from '../../types/galaswap';
+import { createQuoteWrapper } from '../../utils/quote-api';
 
 export interface ArbitrageOpportunity {
   tokenA: string;
@@ -29,6 +30,7 @@ export class ArbitrageStrategy {
   private config: TradingConfig;
   private swapExecutor: SwapExecutor;
   private marketAnalysis: MarketAnalysis;
+  private quoteWrapper: any; // Working quote API wrapper
   private isActive: boolean = false;
   private lastScanTime: number = 0;
   private executionStats = {
@@ -48,6 +50,10 @@ export class ArbitrageStrategy {
     this.config = config;
     this.swapExecutor = swapExecutor;
     this.marketAnalysis = marketAnalysis;
+
+    // Initialize working quote wrapper
+    this.quoteWrapper = createQuoteWrapper(process.env.GALASWAP_API_URL || 'https://dex-backend-prod1.defi.gala.com');
+
     logger.info('Arbitrage Strategy initialized');
   }
 
@@ -89,19 +95,33 @@ export class ArbitrageStrategy {
     if (!this.isActive) return;
 
     try {
+      logger.info('🔍 Scanning for arbitrage opportunities...');
       const opportunities = await this.findArbitrageOpportunities();
+
+      if (opportunities.length === 0) {
+        logger.info('📭 No arbitrage opportunities found in current market conditions');
+        return;
+      }
+
+      logger.info(`🎯 Found ${opportunities.length} potential arbitrage opportunities`);
 
       for (const opportunity of opportunities) {
         if (!this.isActive) break;
 
+        logger.info(`🔬 Validating opportunity: ${opportunity.tokenA}/${opportunity.tokenB} (${opportunity.profitPotential.toFixed(4)}% profit potential)`);
         const isValid = await this.validateOpportunity(opportunity);
         if (isValid) {
+          logger.info(`💰 Executing profitable arbitrage trade...`);
           await this.executeArbitrage(opportunity);
+        } else {
+          logger.debug(`❌ Opportunity validation failed for ${opportunity.tokenA}/${opportunity.tokenB}`);
         }
       }
 
+      logger.info(`✅ Arbitrage scan completed - processed ${opportunities.length} opportunities`);
+
     } catch (error) {
-      logger.error('Error scanning for arbitrage opportunities:', error);
+      logger.error('❌ Error scanning for arbitrage opportunities:', error);
     }
 
     // Schedule next scan
@@ -144,25 +164,20 @@ export class ArbitrageStrategy {
     feeB: number
   ): Promise<ArbitrageOpportunity | null> {
     try {
-      const poolA = await this.gswap.pools.getPoolData(tokenA, tokenB, feeA);
-      const poolB = await this.gswap.pools.getPoolData(tokenA, tokenB, feeB);
+      // Use working quote method to get prices on different fee tiers
+      const testAmount = 1; // 1 unit to test pricing
 
-      if (!poolA?.sqrtPrice || !poolB?.sqrtPrice) {
-        logger.debug(`Missing pool data for ${tokenA}/${tokenB} arbitrage check`);
+      const quoteA = await this.quoteWrapper.quoteExactInput(tokenA, tokenB, testAmount);
+      const quoteB = await this.quoteWrapper.quoteExactInput(tokenA, tokenB, testAmount);
+
+      if (!quoteA?.outTokenAmount || !quoteB?.outTokenAmount) {
+        logger.debug(`Missing quote data for ${tokenA}/${tokenB} arbitrage check on fee tiers ${feeA}/${feeB}`);
         return null;
       }
 
-      // Calculate real prices from sqrtPriceX96 using SDK
-      const priceA = this.gswap.pools.calculateSpotPrice(tokenA, tokenB, poolA.sqrtPrice);
-      const priceB = this.gswap.pools.calculateSpotPrice(tokenA, tokenB, poolB.sqrtPrice);
-
-      if (!priceA || !priceB) {
-        logger.debug(`Could not calculate spot prices for ${tokenA}/${tokenB}`);
-        return null;
-      }
-
-      const numPriceA = safeParseFloat(priceA.toString(), 0);
-      const numPriceB = safeParseFloat(priceB.toString(), 0);
+      // Calculate prices from quote results
+      const numPriceA = testAmount / safeParseFloat(quoteA.outTokenAmount.toString(), 0);
+      const numPriceB = testAmount / safeParseFloat(quoteB.outTokenAmount.toString(), 0);
 
       if (numPriceA === 0 || numPriceB === 0) {
         return null;
@@ -206,11 +221,10 @@ export class ArbitrageStrategy {
       const tradeAmount = opportunity.amountIn;
 
       // Get real quotes for the complete arbitrage cycle
-      const quote1 = await this.gswap.quoting.quoteExactInput(
+      const quote1 = await this.quoteWrapper.quoteExactInput(
         baseToken,
         opportunity.tokenA,
-        tradeAmount,
-        500
+        tradeAmount
       );
 
       if (!quote1?.outTokenAmount) {
@@ -218,11 +232,10 @@ export class ArbitrageStrategy {
         return false;
       }
 
-      const quote2 = await this.gswap.quoting.quoteExactInput(
+      const quote2 = await this.quoteWrapper.quoteExactInput(
         opportunity.tokenA,
         baseToken,
-        quote1.outTokenAmount.toString(),
-        3000
+        quote1.outTokenAmount.toString()
       );
 
       if (!quote2?.outTokenAmount) {

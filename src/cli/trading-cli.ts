@@ -7,6 +7,7 @@ import { program } from 'commander';
 import { TradingEngine } from '../trading/TradingEngine';
 import { validateEnvironment } from '../config/environment';
 import { logger } from '../utils/logger';
+import { TradingMode } from '../types/trading';
 // safeParseFloat removed - not used in CLI anymore
 import dotenv from 'dotenv';
 
@@ -31,6 +32,7 @@ program
   .description('Start automated trading with all strategies')
   .option('-d, --duration <duration>', 'Trading duration in minutes', '60')
   .option('-s, --strategies <strategies>', 'Comma-separated list of strategies', 'arbitrage')
+  .option('-m, --mode <mode>', 'Trading mode (arbitrage, market_making, portfolio, mixed)', 'auto')
   .action(async (options) => {
     try {
       logger.info('🤖 Starting auto-trade mode...');
@@ -39,15 +41,76 @@ program
       const duration = parseInt(options.duration) * 60 * 1000; // Convert to milliseconds
       const strategies = options.strategies.split(',');
 
-      logger.info(`Auto-trading for ${options.duration} minutes with strategies: ${strategies.join(', ')}`);
+      // Set trading mode if specified (otherwise auto-detect from strategies)
+      if (options.mode !== 'auto') {
+        const modeMap: Record<string, TradingMode> = {
+          'arbitrage': TradingMode.ARBITRAGE,
+          'market_making': TradingMode.MARKET_MAKING,
+          'portfolio': TradingMode.PORTFOLIO,
+          'mixed': TradingMode.MIXED
+        };
+
+        if (modeMap[options.mode]) {
+          tradingEngine.setTradingMode(modeMap[options.mode]);
+          logger.info(`🎯 Trading mode explicitly set to: ${options.mode}`);
+        } else {
+          logger.warn(`⚠️ Invalid trading mode '${options.mode}', using auto-detection`);
+        }
+      }
+
+      logger.info(`🚀 Auto-trading for ${options.duration} minutes with strategies: ${strategies.join(', ')}`);
 
       // Enable specified strategies
       if (strategies.includes('arbitrage')) {
+        logger.info('🎯 Enabling arbitrage strategy...');
         await tradingEngine.enableArbitrageStrategy();
+        logger.info('✅ Arbitrage strategy enabled');
       }
+
+      // Start periodic status reporting
+      const startTime = Date.now();
+      let _lastStatusTime = Date.now();
+
+      const statusInterval = setInterval(async () => {
+        try {
+          const elapsed = (Date.now() - startTime) / 1000 / 60; // minutes
+          const remaining = Math.max(0, parseInt(options.duration) - elapsed);
+
+          logger.info(`⏱️  Running for ${elapsed.toFixed(1)}min | ${remaining.toFixed(1)}min remaining`);
+
+          // Get and display current status
+          const status = tradingEngine.getStatus();
+          const portfolio = await tradingEngine.getPortfolio();
+
+          logger.info(`📊 Status: ${status.isRunning ? '🟢 ACTIVE' : '🔴 STOPPED'} | API: ${status.apiHealth ? '✅' : '❌'}`);
+          logger.info(`💰 Portfolio: $${portfolio.totalValue?.toFixed(2) || '0.00'} | P&L: $${portfolio.pnl?.toFixed(2) || '0.00'}`);
+
+          // Show active strategies
+          const activeStrategies = Object.entries(status.strategies || {})
+            .filter(([_, strategyStatus]) => (strategyStatus as { isActive?: boolean })?.isActive)
+            .map(([name]) => name);
+
+          if (activeStrategies.length > 0) {
+            logger.info(`🎯 Active strategies: ${activeStrategies.join(', ')}`);
+          } else {
+            logger.info('⚠️  No active strategies running');
+          }
+
+          // Show recent activity if available
+          const statusWithActivity = status as typeof status & { lastActivity?: number };
+          if (statusWithActivity.lastActivity) {
+            const timeSinceActivity = (Date.now() - statusWithActivity.lastActivity) / 1000;
+            logger.info(`⚡ Last activity: ${timeSinceActivity.toFixed(0)}s ago`);
+          }
+
+        } catch (error) {
+          logger.warn('📊 Could not fetch status update:', error);
+        }
+      }, 30000); // Every 30 seconds
 
       // Run for specified duration
       setTimeout(async () => {
+        clearInterval(statusInterval);
         logger.info('⏰ Auto-trade duration completed, stopping...');
         await tradingEngine.stop();
         process.exit(0);
@@ -55,12 +118,14 @@ program
 
       // Handle manual interruption
       process.on('SIGINT', async () => {
+        clearInterval(statusInterval);
         logger.info('🛑 Auto-trade interrupted, stopping...');
         await tradingEngine.stop();
         process.exit(0);
       });
 
       logger.info('✅ Auto-trade mode started successfully');
+      logger.info('📈 Live status updates will appear every 30 seconds...');
 
     } catch (error) {
       logger.error('❌ Auto-trade failed:', error);

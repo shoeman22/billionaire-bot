@@ -5,16 +5,16 @@
 
 // GSwapWrapper type imported via IGSwapLike interface
 import { logger } from '../utils/logger';
+import { QuoteResult } from '../utils/quote-api';
 import { TRADING_CONSTANTS } from '../config/constants';
 import { safeParseFloat } from '../utils/safe-parse';
+import { createQuoteWrapper } from '../utils/quote-api';
 
-// Interface for GSwap-like objects with pools service (generic to avoid SDK type conflicts)
+// Interface for GSwap-like objects with quoting service (using working SDK methods)
 interface IGSwapLike {
-  pools: {
+  quoting: {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    getPoolData: (token0: string, token1: string, fee: number) => Promise<any>;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    calculateSpotPrice: (...args: any[]) => any;
+    quoteExactInput: (tokenIn: string, tokenOut: string, amountIn: number) => Promise<any>;
   };
 }
 
@@ -47,6 +47,7 @@ export interface PriceHistory {
 
 export class PriceTracker {
   private gswap: IGSwapLike;
+  private quoteWrapper: { quoteExactInput: (tokenIn: string, tokenOut: string, amountIn: number | string) => Promise<QuoteResult> }; // Working quote API wrapper
   private isRunning: boolean = false;
   private priceData: Map<string, PriceData> = new Map();
   private priceHistory: Map<string, PriceHistory> = new Map();
@@ -60,6 +61,10 @@ export class PriceTracker {
 
   constructor(gswap: IGSwapLike) {
     this.gswap = gswap;
+
+    // Initialize working quote wrapper
+    this.quoteWrapper = createQuoteWrapper(process.env.GALASWAP_API_URL || 'https://dex-backend-prod1.defi.gala.com');
+
     this.initializePriceHistory();
     logger.info('Price Tracker initialized');
   }
@@ -292,32 +297,42 @@ export class PriceTracker {
    */
   private async updateAllPrices(): Promise<void> {
     try {
-      logger.debug('Updating all token prices...');
+      const updateStart = Date.now();
+      logger.info('💱 Updating all token prices...');
 
-      // Get prices for all tracked tokens using SDK
+      // Get prices for all tracked tokens using working quote method
       for (const tokenKey of this.TOKENS_TO_TRACK) {
         try {
-          // Pass tokenKey as string directly - no conversions needed
-          const poolData = await this.gswap.pools.getPoolData(
-            tokenKey, // Already a string from TOKENS constant
-            'GUSDC$Unit$none$none',
-            10000
+          // Extract token symbol for pricing
+          const tokenSymbol = tokenKey.split('|')[0].toUpperCase();
+
+          // Special case for GUSDC (always $1.00)
+          if (tokenSymbol === 'GUSDC') {
+            const priceData: PriceData = {
+              token: tokenSymbol,
+              price: 1.0,
+              priceUsd: 1.0,
+              change24h: 0,
+              volume24h: 0,
+              timestamp: Date.now(),
+            };
+            this.updatePriceData(priceData);
+            logger.debug(`Updated price for ${tokenSymbol}: $1.00 (hardcoded stable)`);
+            continue;
+          }
+
+          // Use working quote method for other tokens
+          const quote = await this.quoteWrapper.quoteExactInput(
+            'GUSDC|Unit|none|none', // From GUSDC
+            tokenKey,               // To target token
+            1                      // 1 GUSDC worth
           );
 
-          if (poolData?.sqrtPrice) {
-            // Calculate real price from sqrtPriceX96 using SDK
-            // Pass tokens as strings directly
-            const priceResult = this.gswap.pools.calculateSpotPrice(
-              tokenKey, // Pass as string
-              'GUSDC$Unit$none$none',
-              poolData.sqrtPrice
-            );
-            const calculatedPrice = priceResult ? safeParseFloat(priceResult.toString(), 0) : 0;
+          if (quote?.outTokenAmount) {
+            // Price = 1 GUSDC / amount of tokens received for 1 GUSDC
+            const calculatedPrice = 1 / safeParseFloat(quote.outTokenAmount.toString(), 0);
 
-            if (calculatedPrice > 0) {
-              // Extract token symbol from composite key directly
-              const tokenSymbol = tokenKey.split('$')[0].toUpperCase();
-
+            if (calculatedPrice > 0 && isFinite(calculatedPrice)) {
               const priceData: PriceData = {
                 token: tokenSymbol,
                 price: calculatedPrice,
@@ -328,19 +343,31 @@ export class PriceTracker {
               };
 
               this.updatePriceData(priceData);
-              logger.debug(`Updated price for ${tokenSymbol}: $${calculatedPrice.toFixed(6)}`);
+              logger.debug(`Updated price for ${tokenSymbol}: $${calculatedPrice.toFixed(6)} (via quote on fee tier ${quote.feeTier})`);
             } else {
               logger.warn(`Invalid price calculated for ${tokenKey}: ${calculatedPrice}`);
             }
           } else {
-            logger.warn(`No sqrtPrice returned for ${tokenKey}`);
+            logger.warn(`No quote result for ${tokenKey}`);
           }
         } catch (error) {
-          logger.warn(`Failed to get price for ${tokenKey}:`, error);
+          // Handle expected cases where tokens don't have active pools or quotes
+          const tokenSymbol = tokenKey.split('|')[0].toUpperCase();
+          if (error && typeof error === 'object' && 'message' in error) {
+            if (String(error.message).includes('No route found') || String(error.message).includes('404')) {
+              logger.debug(`ℹ️ No route/quote available for ${tokenSymbol} (expected for some tokens)`);
+            } else {
+              logger.debug(`Price unavailable for ${tokenSymbol}: ${error.message || 'Unknown error'}`);
+            }
+          } else {
+            logger.warn(`Failed to get price for ${tokenSymbol}:`, error);
+          }
         }
       }
 
-      logger.debug(`Updated prices for ${this.TOKENS_TO_TRACK.length} tokens`);
+      const updateTime = Date.now() - updateStart;
+      const successfulUpdates = Array.from(this.priceData.keys()).length;
+      logger.info(`✅ Price update completed: ${successfulUpdates}/${this.TOKENS_TO_TRACK.length} tokens updated in ${updateTime}ms`);
 
     } catch (error) {
       logger.error('Error updating all prices:', error);

@@ -3,6 +3,38 @@
  * Types for trading strategies, risk management, and execution
  */
 
+// Trading mode types
+export enum TradingMode {
+  ARBITRAGE = 'arbitrage',
+  MARKET_MAKING = 'market_making',
+  PORTFOLIO = 'portfolio',
+  MIXED = 'mixed'
+}
+
+/**
+ * Risk profile configuration for different trading modes
+ */
+export interface RiskProfile {
+  maxConcentration: number;
+  riskThresholds: {
+    LOW_RISK: number;
+    MEDIUM_RISK: number;
+    HIGH_RISK: number;
+    CRITICAL_RISK: number;
+  };
+  ignoreChecks: string[];
+  description: string;
+}
+
+/**
+ * Trading mode detection result
+ */
+export interface TradingModeConfig {
+  mode: TradingMode;
+  profile: RiskProfile;
+  description: string;
+}
+
 // Strategy types
 export type StrategyType = 'arbitrage' | 'trend_following' | 'mean_reversion';
 

@@ -30,7 +30,8 @@ export class TestHelpers {
         wsUrl: 'http://localhost:3001/ws'
       },
       wallet: {
-        address: 'client|0x1234567890123456789012345678901234567890'
+        address: 'client|0x1234567890123456789012345678901234567890',
+        privateKey: 'test-private-key'
       },
       trading: {
         maxPositionSize: 1000,

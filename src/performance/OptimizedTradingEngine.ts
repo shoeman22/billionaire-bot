@@ -6,12 +6,14 @@
 import { GSwap as _GSwap } from '../services/gswap-simple';
 import { BotConfig } from '../config/environment';
 import { logger } from '../utils/logger';
+import { QuoteResult } from '../utils/quote-api';
 import { PerformanceMonitor } from './PerformanceMonitor';
- 
+
 import { PriceCache } from './PriceCache';
 import { TradingEngine } from '../trading/TradingEngine';
 import { calculatePriceFromSqrtPriceX96 } from '../utils/price-math';
 import { safeParseFloat } from '../utils/safe-parse';
+import { createQuoteWrapper } from '../utils/quote-api';
 
 export interface OptimizedTradeParams {
   tokenIn: string;
@@ -37,6 +39,7 @@ export interface FastPathResult {
 export class OptimizedTradingEngine extends TradingEngine {
   private performanceMonitor: PerformanceMonitor;
   private priceCache: PriceCache;
+  private quoteWrapper: { quoteExactInput: (tokenIn: string, tokenOut: string, amountIn: number | string) => Promise<QuoteResult> }; // Working quote API wrapper
   private parallelRequestPool: Set<Promise<any>> = new Set(); // eslint-disable-line @typescript-eslint/no-explicit-any
   private readonly MAX_PARALLEL_REQUESTS = 5;
   private lastOptimizationCheck = Date.now();
@@ -44,7 +47,7 @@ export class OptimizedTradingEngine extends TradingEngine {
 
   constructor(config: BotConfig) {
     super(config);
-    
+
     this.performanceMonitor = new PerformanceMonitor();
     this.priceCache = new PriceCache({
       maxSize: 500,
@@ -53,6 +56,9 @@ export class OptimizedTradingEngine extends TradingEngine {
       stableTtlMs: 15000, // 15 seconds for stable tokens
       batchSize: 10
     });
+
+    // Initialize working quote wrapper
+    this.quoteWrapper = createQuoteWrapper(process.env.GALASWAP_API_URL || 'https://dex-backend-prod1.defi.gala.com');
 
     logger.info('Optimized Trading Engine initialized with performance monitoring');
   }
@@ -499,46 +505,20 @@ export class OptimizedTradingEngine extends TradingEngine {
     source: 'api' | 'websocket' | 'computed';
   } | null> {
     try {
-      // Use GSwap SDK positions API to get current price data
-      // This is more reliable than external price feeds for GSwap tokens
-      const poolInfo = await this.gswap.pools.getPoolData(
-        token === 'GALA' ? `${token}|Unit|none|none` : 'GUSDC$Unit$none$none',
-        token === 'GALA' ? 'GUSDC$Unit$none$none' : `${token}|Unit|none|none`,
-        3000 // Use standard fee tier
-      );
+      // Use working quote API to get current price data
+      const tokenIn = token === 'GALA' ? 'GALA|Unit|none|none' : `${token}|Unit|none|none`;
+      const tokenOut = 'GUSDC|Unit|none|none'; // Quote against USDC for USD price
 
-      if (poolInfo && poolInfo.sqrtPrice) {
-        // Calculate price from sqrt price X96 format
-        const price = this.calculatePriceFromSqrtPriceX96Safe(poolInfo.sqrtPrice.toString(), token === 'GALA');
+      const quoteResult = await this.quoteWrapper.quoteExactInput(tokenIn, tokenOut, 1);
+
+      if (quoteResult && quoteResult.outTokenAmount) {
+        const price = safeParseFloat(quoteResult.outTokenAmount.toString(), 0);
 
         if (price > 0) {
           return {
             price,
             priceUsd: price,
             source: 'api'
-          };
-        }
-      }
-
-      // Fallback: try to get quote for a standard amount
-      const quoteAmount = '1000000'; // 1 token in smallest unit (6 decimals for most tokens)
-      const quoteResult = await this.gswap.quoting.quoteExactInput(
-        token,
-        'GUSDC', // Quote against USDC for USD price
-        quoteAmount,
-        3000
-      );
-
-      if (quoteResult && quoteResult.outTokenAmount) {
-        const amountOut = safeParseFloat(quoteResult.outTokenAmount.toString(), 0);
-        const amountIn = safeParseFloat(quoteAmount, 0) / 1000000; // Convert from smallest unit
-        const price = amountOut / amountIn;
-
-        if (price > 0) {
-          return {
-            price,
-            priceUsd: price,
-            source: 'computed'
           };
         }
       }

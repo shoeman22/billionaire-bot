@@ -11,18 +11,26 @@
 
 import { config } from 'dotenv';
 import { validateEnvironment } from '../config/environment';
-import { GSwapWrapper } from '../../services/gswap-simple';
+import { GSwapWrapper, GSwap } from '../services/gswap-simple';
 import { Logger } from '../utils/logger';
-import { PrivateKeySigner } from '../../services/gswap-simple';
+import { PrivateKeySigner } from '../services/gswap-simple';
 import { RiskMonitor } from '../trading/risk/risk-monitor';
 import { EmergencyControls } from '../trading/risk/emergency-controls';
 import { PositionLimits } from '../trading/risk/position-limits';
 import { AlertSystem } from '../monitoring/alerts';
 import { SwapExecutor } from '../trading/execution/swap-executor';
+import { SlippageProtection } from '../trading/risk/slippage';
+
+interface RiskConfig {
+  maxPositionSize: number;
+  maxTotalExposure?: number;
+  maxPositionsPerToken?: number;
+  concentrationLimit?: number;
+}
 
 config();
 
-const logger = new Logger('TestComponents');
+const logger = new Logger();
 
 async function testComponents() {
   try {
@@ -50,7 +58,12 @@ async function testComponents() {
     const alertSystem = new AlertSystem();
     logger.info('✅ Alert System initialized');
 
-    const emergencyControls = new EmergencyControls(alertSystem);
+    const emergencyControls = new EmergencyControls({
+      maxPositionSize: 1000,
+      maxTotalExposure: 5000,
+      maxPositionsPerToken: 10,
+      concentrationLimit: 0.3
+    } as unknown as RiskConfig, {} as unknown as GSwap, {} as unknown as SwapExecutor, 'test-address');
     logger.info('✅ Emergency Controls initialized');
 
     const positionLimits = new PositionLimits({
@@ -58,16 +71,26 @@ async function testComponents() {
       maxTotalExposure: 5000,
       maxPositionsPerToken: 10,
       concentrationLimit: 0.3
-    });
+    } as unknown as RiskConfig, {} as unknown as GSwap);
     logger.info('✅ Position Limits initialized');
 
-    const riskMonitor = new RiskMonitor(alertSystem, emergencyControls);
+    const riskMonitor = new RiskMonitor({
+      maxPositionSize: 1000,
+      maxTotalExposure: 5000,
+      maxPositionsPerToken: 10,
+      concentrationLimit: 0.3
+    } as unknown as RiskConfig, {} as unknown as GSwap, alertSystem);
     logger.info('✅ Risk Monitor initialized');
 
     // Test 4: Trading Components
     logger.info('⚡ Test 4: Trading components...');
 
-    const swapExecutor = new SwapExecutor(gswap, alertSystem);
+    // Create SlippageProtection instance
+    const slippageProtection = new SlippageProtection({
+      maxPositionSize: 1000
+    } as unknown as RiskConfig);
+
+    const swapExecutor = new SwapExecutor(gswap, slippageProtection);
     logger.info('✅ Swap Executor initialized');
 
     // Test 5: Risk Controls Testing
@@ -171,6 +194,7 @@ async function testComponents() {
 if (import.meta.url === `file://${process.argv[1]}`) {
   testComponents()
     .then(result => {
+      /* eslint-disable no-console */
       if (result.success) {
         console.log('\n🎉 Component Testing: PASSED');
         console.log(`🔧 System Readiness: ${result.readinessPercentage}%`);
@@ -188,8 +212,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         console.log(`Error: ${result.error}`);
         process.exit(1);
       }
+      /* eslint-enable no-console */
     })
     .catch(error => {
+      // eslint-disable-next-line no-console
       console.error('Fatal error:', error);
       process.exit(1);
     });
