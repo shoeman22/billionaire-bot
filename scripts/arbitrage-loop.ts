@@ -115,7 +115,10 @@ class ArbitrageLoopController {
         // Apply delay with potential exponential backoff
         const delay = this.calculateDelay();
         if (delay > 0 && !this.shouldStop) {
-          logger.info(`⏳ Waiting ${delay}s before next run...`);
+          // Only show initial message for long delays (countdown will handle the rest)
+          if (delay > 5) {
+            logger.info(`⏳ Waiting ${delay}s before next run...`);
+          }
           await this.sleep(delay * 1000);
         }
       }
@@ -244,8 +247,40 @@ class ArbitrageLoopController {
     logger.info(`   Total errors: ${this.stats.errorRuns}`);
   }
 
-  private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+  private async sleep(ms: number): Promise<void> {
+    const seconds = Math.floor(ms / 1000);
+
+    // Show countdown for delays longer than 5 seconds
+    if (seconds > 5) {
+      for (let i = seconds; i > 0; i--) {
+        // Format countdown display with minutes if needed
+        let timeDisplay;
+        if (i >= 60) {
+          const mins = Math.floor(i / 60);
+          const secs = i % 60;
+          timeDisplay = `${mins}m ${secs}s`;
+        } else {
+          timeDisplay = `${i}s`;
+        }
+
+        // Use process.stdout.write to update same line
+        process.stdout.write(`\r⏳ Next run in: ${timeDisplay}... `);
+
+        // Check if we should stop during countdown
+        if (this.shouldStop) {
+          process.stdout.write('\r🛑 Stopping countdown...\n');
+          return;
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+
+      // Clear the countdown line and add newline
+      process.stdout.write('\r⏳ Starting next run...     \n');
+    } else {
+      // For short delays, just use regular sleep
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
   }
 
   stop(): void {
