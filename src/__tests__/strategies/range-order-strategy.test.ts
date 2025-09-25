@@ -11,6 +11,18 @@ import { TRADING_CONSTANTS } from '../../config/constants';
 jest.mock('../../services/liquidity-manager');
 const MockLiquidityManager = LiquidityManager as jest.MockedClass<typeof LiquidityManager>;
 
+// Mock the quote wrapper
+const mockQuoteExactInput = jest.fn().mockResolvedValue({
+  outTokenAmount: '0.05',
+  currentPoolSqrtPrice: '1000000000000000000'
+});
+
+jest.mock('../../utils/quote-api', () => ({
+  createQuoteWrapper: jest.fn(() => ({
+    quoteExactInput: mockQuoteExactInput
+  }))
+}));
+
 describe('RangeOrderStrategy', () => {
   let rangeOrderStrategy: RangeOrderStrategy;
   let mockLiquidityManager: jest.Mocked<LiquidityManager>;
@@ -30,6 +42,7 @@ describe('RangeOrderStrategy', () => {
     mockLiquidityManager.removeLiquidity = jest.fn().mockResolvedValue({ amount0: '100', amount1: '5' });
     mockLiquidityManager.getPosition = jest.fn().mockReturnValue(null);
     mockLiquidityManager.collectFees = jest.fn().mockResolvedValue({ amount0: '1', amount1: '0.05' });
+    mockLiquidityManager.calculateSpotPrice = jest.fn().mockReturnValue(0.05);
 
     rangeOrderStrategy = new RangeOrderStrategy(mockLiquidityManager);
   });
@@ -312,8 +325,12 @@ describe('RangeOrderStrategy', () => {
     });
 
     it('should update order statuses', async () => {
-      // Mock price reaching target
-      (mockLiquidityManager as any).gswap.pools.calculateSpotPrice.mockReturnValue('0.055');
+      // Mock getCurrentPrice to return target price
+      mockQuoteExactInput.mockResolvedValue({
+        outTokenAmount: '0.055',
+        currentPoolSqrtPrice: '1000000000000000000'
+      });
+      mockLiquidityManager.calculateSpotPrice.mockReturnValue(0.055);
 
       mockLiquidityManager.collectFees.mockResolvedValue({
         amount0: '5',
@@ -334,8 +351,14 @@ describe('RangeOrderStrategy', () => {
     });
 
     it('should handle execution errors gracefully', async () => {
-      // Mock price reaching target but execution failing
-      (mockLiquidityManager as any).gswap.pools.calculateSpotPrice.mockReturnValue('0.055');
+      // Mock getCurrentPrice to return target price
+      mockQuoteExactInput.mockResolvedValue({
+        outTokenAmount: '0.055',
+        currentPoolSqrtPrice: '1000000000000000000'
+      });
+      mockLiquidityManager.calculateSpotPrice.mockReturnValue(0.055);
+
+      // Mock execution failing
       mockLiquidityManager.collectFees.mockRejectedValue(new Error('Network error'));
 
       await rangeOrderStrategy.updateOrderStatuses();

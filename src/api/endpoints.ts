@@ -15,6 +15,7 @@ export const ENDPOINTS = {
 
   // Pool Information
   POOL: '/v1/trade/pool',
+  POOL_DETAIL: '/explore/pool',  // New detailed pool endpoint with TVL, volume, etc.
   ADD_LIQUIDITY_ESTIMATE: '/v1/trade/add-liq-estimate',
   REMOVE_LIQUIDITY_ESTIMATE: '/v1/trade/remove-liq-estimate',
 
@@ -50,6 +51,15 @@ export const ENDPOINTS = {
   BRIDGE_STATUS: '/v1/connect/bridge/status',
 
   // ===========================================
+  // EXPLORE/ANALYTICS API ENDPOINTS
+  // ===========================================
+
+  POOL_TRANSACTIONS: '/explore/transactions',
+  USER_HISTORY: '/explore/user-history',
+  POOL_ANALYTICS: '/explore/analytics',
+  VOLUME_GRAPH_DATA: '/explore/graph-data',
+
+  // ===========================================
   // SYSTEM ENDPOINTS
   // ===========================================
 
@@ -72,12 +82,17 @@ export const ENDPOINT_METHODS = {
   [ENDPOINTS.QUOTE]: 'GET',
   [ENDPOINTS.PRICE]: 'GET',
   [ENDPOINTS.POOL]: 'GET',
+  [ENDPOINTS.POOL_DETAIL]: 'GET',
   [ENDPOINTS.ADD_LIQUIDITY_ESTIMATE]: 'GET',
   [ENDPOINTS.REMOVE_LIQUIDITY_ESTIMATE]: 'GET',
   [ENDPOINTS.POSITION]: 'GET',
   [ENDPOINTS.POSITIONS]: 'GET',
   [ENDPOINTS.TRANSACTION_STATUS]: 'GET',
   [ENDPOINTS.BRIDGE_CONFIGURATIONS]: 'GET',
+  [ENDPOINTS.POOL_TRANSACTIONS]: 'GET',
+  [ENDPOINTS.USER_HISTORY]: 'GET',
+  [ENDPOINTS.POOL_ANALYTICS]: 'GET',
+  [ENDPOINTS.VOLUME_GRAPH_DATA]: 'GET',
   [ENDPOINTS.HEALTH]: 'GET',
   [ENDPOINTS.STATUS]: 'GET',
   [ENDPOINTS.VERSION]: 'GET',
@@ -106,6 +121,7 @@ export const ENDPOINT_RATE_LIMITS = {
   [ENDPOINTS.PRICE]: { requestsPerSecond: 20, burstLimit: 50 },
   [ENDPOINTS.PRICE_MULTIPLE]: { requestsPerSecond: 5, burstLimit: 10 },
   [ENDPOINTS.POOL]: { requestsPerSecond: 10, burstLimit: 20 },
+  [ENDPOINTS.POOL_DETAIL]: { requestsPerSecond: 15, burstLimit: 30 }, // Higher rate for cached pool details
 
   // Medium frequency endpoints (positions, estimates)
   [ENDPOINTS.POSITION]: { requestsPerSecond: 5, burstLimit: 10 },
@@ -132,6 +148,12 @@ export const ENDPOINT_RATE_LIMITS = {
   [ENDPOINTS.BRIDGE_TOKEN_OUT]: { requestsPerSecond: 1, burstLimit: 2 },
   [ENDPOINTS.BRIDGE_STATUS]: { requestsPerSecond: 2, burstLimit: 5 },
 
+  // Analytics endpoints (moderate frequency for historical data)
+  [ENDPOINTS.POOL_TRANSACTIONS]: { requestsPerSecond: 3, burstLimit: 8 },
+  [ENDPOINTS.USER_HISTORY]: { requestsPerSecond: 2, burstLimit: 5 },
+  [ENDPOINTS.POOL_ANALYTICS]: { requestsPerSecond: 3, burstLimit: 8 },
+  [ENDPOINTS.VOLUME_GRAPH_DATA]: { requestsPerSecond: 5, burstLimit: 15 }, // Higher rate for real-time volume data
+
   // System endpoints
   [ENDPOINTS.HEALTH]: { requestsPerSecond: 1, burstLimit: 2 },
   [ENDPOINTS.STATUS]: { requestsPerSecond: 1, burstLimit: 2 },
@@ -150,6 +172,7 @@ export const ENDPOINT_TIMEOUTS = {
   [ENDPOINTS.PRICE]: 5000,
   [ENDPOINTS.PRICE_MULTIPLE]: 8000,
   [ENDPOINTS.POOL]: 5000,
+  [ENDPOINTS.POOL_DETAIL]: 5000,
   [ENDPOINTS.POSITION]: 5000,
   [ENDPOINTS.POSITIONS]: 8000,
   [ENDPOINTS.ADD_LIQUIDITY_ESTIMATE]: 5000,
@@ -169,6 +192,12 @@ export const ENDPOINT_TIMEOUTS = {
   [ENDPOINTS.BRIDGE_REQUEST]: 15000,
   [ENDPOINTS.BRIDGE_REQUEST_TOKEN_OUT]: 15000,
   [ENDPOINTS.BRIDGE_TOKEN_OUT]: 15000,
+
+  // Analytics endpoints (can take longer due to data volume)
+  [ENDPOINTS.POOL_TRANSACTIONS]: 20000,
+  [ENDPOINTS.USER_HISTORY]: 15000,
+  [ENDPOINTS.POOL_ANALYTICS]: 25000,
+  [ENDPOINTS.VOLUME_GRAPH_DATA]: 15000,
 } as const;
 
 // Required parameters for each endpoint
@@ -177,6 +206,7 @@ export const ENDPOINT_REQUIRED_PARAMS = {
   [ENDPOINTS.PRICE]: ['token'],
   [ENDPOINTS.PRICE_MULTIPLE]: ['tokens'],
   [ENDPOINTS.POOL]: ['token0', 'token1', 'fee'],
+  [ENDPOINTS.POOL_DETAIL]: ['poolHash'],
   [ENDPOINTS.ADD_LIQUIDITY_ESTIMATE]: ['token0', 'token1', 'amount', 'tickUpper', 'tickLower', 'isToken0', 'fee'],
   [ENDPOINTS.REMOVE_LIQUIDITY_ESTIMATE]: ['token0', 'token1', 'owner', 'tickUpper', 'tickLower', 'fee', 'amount'],
   [ENDPOINTS.POSITION]: ['token0', 'token1', 'fee', 'tickLower', 'tickUpper', 'owner'],
@@ -193,6 +223,12 @@ export const ENDPOINT_REQUIRED_PARAMS = {
   [ENDPOINTS.BRIDGE_REQUEST_TOKEN_OUT]: ['uniqueKey', 'signature'],
   [ENDPOINTS.BRIDGE_TOKEN_OUT]: ['bridgeFromChannel', 'bridgeRequestId', 'signature'],
   [ENDPOINTS.BRIDGE_STATUS]: ['hash'],
+
+  // Analytics endpoints
+  [ENDPOINTS.POOL_TRANSACTIONS]: ['poolHash'],
+  [ENDPOINTS.USER_HISTORY]: ['userAddress'],
+  [ENDPOINTS.POOL_ANALYTICS]: ['poolHash'],
+  [ENDPOINTS.VOLUME_GRAPH_DATA]: ['poolHash', 'duration', 'startTime', 'endTime'],
 } as const;
 
 // Validation schemas for request parameters
@@ -212,10 +248,19 @@ export const ENDPOINT_VALIDATION = {
     token1: { type: 'string', pattern: /^[A-Za-z0-9]+\$[A-Za-z0-9]+\$[A-Za-z0-9]+\$[A-Za-z0-9]+$/ },
     fee: { type: 'number', values: [500, 3000, 10000] },
   },
+  [ENDPOINTS.POOL_DETAIL]: {
+    poolHash: { type: 'string', pattern: /^[a-fA-F0-9]{64}$/ }, // 64-character hex string
+  },
   [ENDPOINTS.POSITIONS]: {
     user: { type: 'string', pattern: /^(eth|client)\|0x[a-fA-F0-9]{40}$/ },
     limit: { type: 'number', min: 1, max: 100 },
     bookmark: { type: 'string', optional: true },
+  },
+  [ENDPOINTS.VOLUME_GRAPH_DATA]: {
+    poolHash: { type: 'string', pattern: /^[a-fA-F0-9]{64}$/ },
+    duration: { type: 'string', values: ['5m', '1h', '24h'] },
+    startTime: { type: 'number', min: 0 },
+    endTime: { type: 'number', min: 0 },
   },
 } as const;
 
@@ -240,8 +285,10 @@ export type EndpointErrorCode = typeof ENDPOINT_ERROR_CODES[keyof typeof ENDPOIN
 /**
  * Build URL with query parameters for GET requests
  */
-export function buildQueryUrl(endpoint: string, params: Record<string, any>): string { // eslint-disable-line @typescript-eslint/no-explicit-any
-  const url = new URL(endpoint, 'https://dex-backend-prod1.defi.gala.com');
+export function buildQueryUrl(endpoint: string, params: Record<string, any>, baseUrl?: string): string { // eslint-disable-line @typescript-eslint/no-explicit-any
+  // Use provided baseUrl or fallback to default
+  const apiBaseUrl = baseUrl || 'https://dex-backend-prod1.defi.gala.com';
+  const url = new URL(endpoint, apiBaseUrl);
 
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null) {
@@ -249,7 +296,7 @@ export function buildQueryUrl(endpoint: string, params: Record<string, any>): st
     }
   });
 
-  return url.pathname + url.search;
+  return url.toString();
 }
 
 /**
