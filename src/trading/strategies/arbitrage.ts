@@ -12,6 +12,7 @@ import { MarketAnalysis } from '../../monitoring/market-analysis';
 import { safeParseFloat } from '../../utils/safe-parse';
 import { ArbitrageStatus } from '../../types/galaswap';
 import { createQuoteWrapper } from '../../utils/quote-api';
+import { poolDiscovery, PoolData } from '../../services/pool-discovery';
 
 export interface ArbitrageOpportunity {
   tokenA: string;
@@ -33,6 +34,12 @@ export class ArbitrageStrategy {
   private quoteWrapper: any; // Working quote API wrapper
   private isActive: boolean = false;
   private lastScanTime: number = 0;
+
+  // Pool discovery integration
+  private availableTokens: string[] = [];
+  private tradingPairs: Array<{ token0: string, token1: string, pools: PoolData[] }> = [];
+  private poolsInitialized: boolean = false;
+
   private executionStats = {
     totalOpportunities: 0,
     executedTrades: 0,
@@ -66,6 +73,11 @@ export class ArbitrageStrategy {
     this.isActive = true;
     logger.info('🔄 Starting Arbitrage Strategy...');
 
+    // Initialize pool discovery if not already done
+    if (!this.poolsInitialized) {
+      await this.initialize();
+    }
+
     // Start scanning for opportunities
     this.scanForOpportunities();
   }
@@ -76,11 +88,27 @@ export class ArbitrageStrategy {
   }
 
   /**
-   * Initialize the strategy
+   * Initialize the strategy with pool discovery
    */
   async initialize(): Promise<void> {
-    logger.info('Initializing Arbitrage Strategy...');
-    // Strategy-specific initialization if needed
+    logger.info('Initializing Arbitrage Strategy with pool discovery...');
+
+    try {
+      // Fetch all available pools and trading pairs
+      await poolDiscovery.fetchAllPools();
+      this.availableTokens = poolDiscovery.getAvailableTokens();
+      this.tradingPairs = poolDiscovery.getTradingPairs();
+      this.poolsInitialized = true;
+
+      logger.info(`✅ Pool discovery initialized: ${this.availableTokens.length} tokens, ${this.tradingPairs.length} pairs`);
+    } catch (error) {
+      logger.error('❌ Failed to initialize pool discovery:', error);
+      logger.warn('⚠️  Falling back to hardcoded tokens');
+
+      // Fallback to hardcoded tokens if pool discovery fails
+      this.availableTokens = Object.values(TRADING_CONSTANTS.TOKENS);
+      this.poolsInitialized = false;
+    }
   }
 
   /**
@@ -132,18 +160,48 @@ export class ArbitrageStrategy {
 
   private async findArbitrageOpportunities(): Promise<ArbitrageOpportunity[]> {
     const opportunities: ArbitrageOpportunity[] = [];
-    const tokens = Object.values(TRADING_CONSTANTS.TOKENS);
+
+    // Ensure pools are initialized
+    if (!this.poolsInitialized) {
+      await this.initialize();
+    }
 
     try {
-      // Check all token pairs for arbitrage opportunities
-      for (let i = 0; i < tokens.length; i++) {
-        for (let j = i + 1; j < tokens.length; j++) {
-          const tokenA = tokens[i];
-          const tokenB = tokens[j];
+      if (this.poolsInitialized) {
+        // Use discovered trading pairs for more targeted arbitrage scanning
+        logger.info(`🔍 Scanning ${this.tradingPairs.length} discovered trading pairs for arbitrage opportunities`);
 
-          const opportunity = await this.checkArbitrageOpportunity(tokenA, tokenB, 500, 3000);
-          if (opportunity) {
-            opportunities.push(opportunity);
+        for (const pair of this.tradingPairs) {
+          if (!this.isActive) break;
+
+          const tokenA = pair.token0;
+          const tokenB = pair.token1;
+
+          // Check arbitrage opportunities across different fee tiers
+          for (const pool of pair.pools) {
+            const feeTier = parseFloat(pool.fee) * 10000; // Convert to basis points
+
+            // Compare same pool against different fee tiers (looking for cross-pool arbitrage)
+            const opportunity = await this.checkArbitrageOpportunity(tokenA, tokenB, feeTier, 3000);
+            if (opportunity) {
+              opportunities.push(opportunity);
+            }
+          }
+        }
+      } else {
+        // Fallback to hardcoded token scanning
+        logger.warn('⚠️  Using fallback token scanning');
+        const tokens = this.availableTokens;
+
+        for (let i = 0; i < tokens.length; i++) {
+          for (let j = i + 1; j < tokens.length; j++) {
+            const tokenA = tokens[i];
+            const tokenB = tokens[j];
+
+            const opportunity = await this.checkArbitrageOpportunity(tokenA, tokenB, 500, 3000);
+            if (opportunity) {
+              opportunities.push(opportunity);
+            }
           }
         }
       }

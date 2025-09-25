@@ -21,6 +21,7 @@ import { logger } from '../../utils/logger';
 import { TRADING_CONSTANTS } from '../../config/constants';
 import { SwapExecutor } from '../execution/swap-executor';
 import { MarketAnalysis } from '../../monitoring/market-analysis';
+import { poolDiscovery } from '../../services/pool-discovery';
 
 // Import all strategies
 import { ArbitrageStrategy } from './arbitrage';
@@ -280,6 +281,42 @@ export class StrategyOrchestrator {
   }
 
   /**
+   * Initialize pool discovery for all strategies
+   */
+  private async initializePoolDiscovery(): Promise<void> {
+    logger.info('🔍 Initializing pool discovery for all strategies...');
+
+    try {
+      // Pre-fetch pool data once for all strategies
+      await poolDiscovery.fetchAllPools();
+      const poolsCount = poolDiscovery.getCachedPools().length;
+      const tokensCount = poolDiscovery.getAvailableTokens().length;
+      const pairsCount = poolDiscovery.getTradingPairs().length;
+
+      logger.info(`✅ Pool discovery initialized: ${poolsCount} pools, ${tokensCount} tokens, ${pairsCount} pairs`);
+
+      // Initialize all strategy instances with pool data
+      for (const [strategyName, strategy] of this.strategies) {
+        try {
+          if (strategy && typeof strategy.initialize === 'function') {
+            logger.debug(`Initializing ${strategyName} strategy with pool data...`);
+            await strategy.initialize();
+          }
+        } catch (error) {
+          logger.warn(`⚠️  Failed to initialize ${strategyName} strategy:`, error);
+          // Don't fail the entire orchestrator if one strategy fails
+        }
+      }
+
+      logger.info('🎯 All strategies initialized with pool discovery data');
+
+    } catch (error) {
+      logger.error('❌ Failed to initialize pool discovery:', error);
+      logger.warn('⚠️  Strategies will fallback to hardcoded tokens if needed');
+    }
+  }
+
+  /**
    * Start the strategy orchestrator
    */
   async start(): Promise<void> {
@@ -290,6 +327,9 @@ export class StrategyOrchestrator {
 
     this.isActive = true;
     logger.info('🎯 Starting Strategy Orchestrator');
+
+    // Initialize pool discovery for all strategies
+    await this.initializePoolDiscovery();
 
     // Start market condition monitoring
     this.startMarketAnalysis();

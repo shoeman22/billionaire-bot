@@ -22,6 +22,7 @@ import { MarketAnalysis } from '../../monitoring/market-analysis';
 import { calculateArbitrageSlippage } from '../../utils/slippage-calculator';
 import { createQuoteWrapper } from '../../utils/quote-api';
 import { credentialService } from '../../security/credential-service';
+import { poolDiscovery, TriangularPath, PoolData } from '../../services/pool-discovery';
 
 export interface TriangleArbitragePath {
   tokenA: string; // Start token
@@ -73,6 +74,8 @@ export interface TriangleArbitrageStats {
   bestProfitPercent: number;
   avgExecutionTime: number;
   failureReasons: Record<string, number>;
+  liquidityFailures: number; // No pools found errors
+  apiFailures: number; // Other API errors
 }
 
 export class TriangleArbitrageStrategy {
@@ -92,17 +95,20 @@ export class TriangleArbitrageStrategy {
     bestPath: '',
     bestProfitPercent: 0,
     avgExecutionTime: 0,
-    failureReasons: {}
+    failureReasons: {},
+    liquidityFailures: 0,
+    apiFailures: 0
   };
 
   // Configuration
   private readonly MIN_PROFIT_PERCENT = 0.5; // 0.5% minimum profit
   private readonly MAX_SLIPPAGE_COMPOUND = 5.0; // 5% max compound slippage
   private readonly MAX_GAS_COST_PERCENT = 0.3; // Max 0.3% of trade for gas
-  private readonly POSITION_SIZE_PERCENT = 0.1; // 10% of available balance
+  private readonly POSITION_SIZE_PERCENT = 1.0; // Use full base amount for demo/testing
 
-  // Token prioritization for triangle discovery
-  private readonly PRIORITY_TOKENS = ['GALA', 'GUSDC', 'GUSDT', 'GWETH', 'GWBTC'];
+  // Dynamic token prioritization from pool discovery
+  private availableTokens: string[] = [];
+  private triangularPaths: TriangularPath[] = [];
   private readonly STABLE_TOKENS = ['GUSDC', 'GUSDT'];
   private readonly VOLATILE_TOKENS = ['GALA', 'GWETH', 'GWBTC', 'ETIME', 'SILK'];
 
@@ -122,7 +128,7 @@ export class TriangleArbitrageStrategy {
     logger.info('Triangle Arbitrage Strategy initialized', {
       minProfitPercent: this.MIN_PROFIT_PERCENT,
       maxSlippage: this.MAX_SLIPPAGE_COMPOUND,
-      priorityTokens: this.PRIORITY_TOKENS
+      poolDiscoveryEnabled: true
     });
   }
 
@@ -137,6 +143,9 @@ export class TriangleArbitrageStrategy {
 
     this.isActive = true;
     logger.info('🔺 Starting Triangle Arbitrage Strategy');
+
+    // Initialize pool discovery
+    await this.initializePoolData();
 
     // Run initial scan
     await this.scanForOpportunities();
@@ -189,12 +198,14 @@ export class TriangleArbitrageStrategy {
       // Sort opportunities by net profit percentage
       opportunities.sort((a, b) => b.netProfitPercent - a.netProfitPercent);
 
-      logger.info(`Found ${opportunities.length} profitable triangle opportunities`, {
+      const summary = this.generateAnalysisSummary(allPaths, opportunities);
+      logger.info(`Found ${opportunities.length} profitable triangle opportunities out of ${allPaths.length} paths analyzed`, {
         bestOpportunity: opportunities[0] ? {
           path: opportunities[0].pathName,
           netProfitPercent: opportunities[0].netProfitPercent,
           netProfit: opportunities[0].netProfit
-        } : null
+        } : null,
+        ...summary
       });
 
       // Execute the best opportunity if available
@@ -217,27 +228,74 @@ export class TriangleArbitrageStrategy {
   }
 
   /**
-   * Generate all possible triangle arbitrage paths
+   * Initialize pool discovery and load available paths
+   */
+  private async initializePoolData(): Promise<void> {
+    try {
+      logger.info('🔍 Discovering available pools and tokens...');
+
+      await poolDiscovery.fetchAllPools();
+      this.availableTokens = poolDiscovery.getAvailableTokens();
+      this.triangularPaths = poolDiscovery.findTriangularPaths();
+
+      logger.info('✅ Pool discovery complete', {
+        availableTokens: this.availableTokens.length,
+        triangularPaths: this.triangularPaths.length,
+        topTokens: this.availableTokens.slice(0, 5).map(t => t.split('|')[0])
+      });
+
+    } catch (error) {
+      logger.warn('⚠️  Pool discovery failed, falling back to static tokens', { error });
+      // Fallback to static token list if pool discovery fails
+      this.availableTokens = ['GALA|Unit|none|none', 'GUSDC|Unit|none|none', 'GUSDT|Unit|none|none', 'GWETH|Unit|none|none', 'GWBTC|Unit|none|none'];
+      this.triangularPaths = [];
+    }
+  }
+
+  /**
+   * Generate triangle arbitrage paths using real pool data
    */
   private generateTrianglePaths(): { pathName: string; tokens: [string, string, string] }[] {
     const paths: { pathName: string; tokens: [string, string, string] }[] = [];
-    const tokens = this.PRIORITY_TOKENS;
 
-    for (let i = 0; i < tokens.length; i++) {
-      for (let j = 0; j < tokens.length; j++) {
-        for (let k = 0; k < tokens.length; k++) {
-          // Skip if any tokens are the same
-          if (i === j || j === k || i === k) continue;
+    if (this.triangularPaths.length > 0) {
+      // Use discovered triangular paths from pool discovery
+      logger.info(`🔺 Using ${this.triangularPaths.length} discovered triangular paths with real liquidity`);
 
-          const tokenA = tokens[i];
-          const tokenB = tokens[j];
-          const tokenC = tokens[k];
+      this.triangularPaths.forEach(triangularPath => {
+        const [tokenA, tokenB, tokenC] = triangularPath.tokens;
+        const tokenASymbol = tokenA.split('|')[0];
+        const tokenBSymbol = tokenB.split('|')[0];
+        const tokenCSymbol = tokenC.split('|')[0];
+        const pathName = `${tokenASymbol}→${tokenBSymbol}→${tokenCSymbol}→${tokenASymbol}`;
 
-          const pathName = `${tokenA}→${tokenB}→${tokenC}→${tokenA}`;
-          paths.push({
-            pathName,
-            tokens: [tokenA, tokenB, tokenC]
-          });
+        paths.push({
+          pathName,
+          tokens: [tokenASymbol, tokenBSymbol, tokenCSymbol]
+        });
+      });
+    } else {
+      // Fallback: generate paths from available tokens
+      logger.warn('⚠️  No pre-calculated triangular paths, generating from available tokens');
+      const tokens = this.availableTokens.map(t => t.split('|')[0]);
+      const maxTokens = Math.min(tokens.length, 8); // Limit to prevent excessive combinations
+
+      for (let i = 0; i < maxTokens; i++) {
+        for (let j = 0; j < maxTokens; j++) {
+          for (let k = 0; k < maxTokens; k++) {
+            // Skip if any tokens are the same
+            if (i === j || j === k || i === k) continue;
+
+            const tokenA = tokens[i];
+            const tokenB = tokens[j];
+            const tokenC = tokens[k];
+
+            const pathName = `${tokenA}→${tokenB}→${tokenC}→${tokenA}`;
+            paths.push({
+              pathName,
+              tokens: [tokenA, tokenB, tokenC]
+            });
+          }
         }
       }
     }
@@ -440,24 +498,69 @@ export class TriangleArbitrageStrategy {
     tokenOut: string,
     amountIn: number
   ): Promise<{ outputAmount: number; feeTier: number } | null> {
+    // Validate input amount before making API call
+    if (!amountIn || isNaN(amountIn) || amountIn <= 0) {
+      logger.warn(`Invalid amountIn for quote ${tokenIn} → ${tokenOut}: ${amountIn}`);
+      return null;
+    }
+
     const tokenInClass = this.getTokenClass(tokenIn);
     const tokenOutClass = this.getTokenClass(tokenOut);
 
-
     try {
-      const result = await this.quoteWrapper.quoteExactInput(tokenInClass, tokenOutClass, amountIn.toString());
+      const result = await this.quoteWrapper.quoteExactInput(tokenInClass, tokenOutClass, Math.floor(amountIn).toString());
+
+      const outputAmount = parseFloat(result.amountOut || '0');
+      if (isNaN(outputAmount) || outputAmount <= 0 || !result.amountOut) {
+        logger.warn(`Invalid/missing output amount for ${tokenIn} → ${tokenOut}`, {
+          amountOut: result.amountOut,
+          parsed: outputAmount,
+          resultKeys: Object.keys(result)
+        });
+        return null;
+      }
 
       return {
-        outputAmount: parseFloat(result.amountOut),
+        outputAmount,
         feeTier: result.feeTier
       };
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+
+      // Track different types of failures
+      if (errorMsg.includes('No pools found')) {
+        this.stats.liquidityFailures++;
+      } else {
+        this.stats.apiFailures++;
+      }
+
       logger.warn(`Quote failed for ${tokenIn} → ${tokenOut}`, {
         amountIn,
-        error: error instanceof Error ? error.message : error
+        error: errorMsg
       });
       return null;
     }
+  }
+
+  /**
+   * Generate analysis summary for user feedback
+   */
+  private generateAnalysisSummary(allPaths: any[], opportunities: TriangleArbitragePath[]) {
+    const liquidityIssues = this.stats.liquidityFailures || 0;
+    const apiFailures = this.stats.apiFailures || 0;
+    const totalAnalyzed = allPaths.length;
+    const successfulAnalysis = totalAnalyzed - liquidityIssues - apiFailures;
+
+    return {
+      pathsAnalyzed: totalAnalyzed,
+      successfulQuotes: successfulAnalysis,
+      liquidityIssues, // No pools found
+      apiFailures, // API errors
+      profitableOpportunities: opportunities.length,
+      analysis: liquidityIssues > (totalAnalyzed * 0.8)
+        ? 'Most token pairs lack sufficient liquidity on GalaSwap V3 DEX'
+        : 'Normal market analysis - some pairs unavailable'
+    };
   }
 
   /**
@@ -502,11 +605,21 @@ export class TriangleArbitrageStrategy {
    * Calculate optimal position size based on available balance and risk limits
    */
   private calculateOptimalPositionSize(token: string): number {
-    // Use a fixed position size for now - can be made dynamic later
-    const baseAmount = this.STABLE_TOKENS.includes(token) ? 100 : 10;
+    // Use reasonable fixed amounts for demo/testing - sufficient for API validation
+    const baseAmount = this.STABLE_TOKENS.includes(token) ? 1000 : 100;
 
-    // Apply position size percentage
-    return baseAmount * this.POSITION_SIZE_PERCENT;
+    // Ensure we have a valid, positive number
+    const amount = Math.max(baseAmount * this.POSITION_SIZE_PERCENT,
+                           this.STABLE_TOKENS.includes(token) ? 100 : 10);
+
+    // Validate the amount is not NaN or invalid
+    if (isNaN(amount) || amount <= 0) {
+      const fallbackAmount = this.STABLE_TOKENS.includes(token) ? 1000 : 100;
+      logger.warn(`Invalid position size calculated for ${token}, using fallback: ${fallbackAmount}`);
+      return fallbackAmount;
+    }
+
+    return Math.floor(amount); // Ensure integer amounts for cleaner API calls
   }
 
   /**
@@ -617,7 +730,9 @@ export class TriangleArbitrageStrategy {
       bestPath: '',
       bestProfitPercent: 0,
       avgExecutionTime: 0,
-      failureReasons: {}
+      failureReasons: {},
+      liquidityFailures: 0,
+      apiFailures: 0
     };
 
     logger.info('Triangle arbitrage statistics reset');

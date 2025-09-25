@@ -23,6 +23,7 @@ import { SwapExecutor } from '../execution/swap-executor';
 import { MarketAnalysis } from '../../monitoring/market-analysis';
 import { createQuoteWrapper } from '../../utils/quote-api';
 import { credentialService } from '../../security/credential-service';
+import { poolDiscovery, PoolData } from '../../services/pool-discovery';
 
 export interface AssetPair {
   assetA: string;
@@ -98,8 +99,10 @@ export class CrossAssetMomentumStrategy {
   private baseUrl: string;
   private isActive: boolean = false;
 
-  // Asset pairs to monitor
+  // Asset pairs to monitor (dynamically discovered)
   private pairs: Map<string, AssetPair> = new Map();
+  private availablePools: PoolData[] = [];
+  private momentumAssets: string[] = []; // Assets suitable for momentum trading
 
   // Price history for correlation analysis
   private priceHistory: Map<string, PricePoint[]> = new Map();
@@ -163,11 +166,8 @@ export class CrossAssetMomentumStrategy {
     this.baseUrl = fullConfig.api.baseUrl;
     this.quoteWrapper = createQuoteWrapper(this.baseUrl);
 
-    this.initializeAssetPairs();
-    this.initializePriceHistory();
-
     logger.info('Cross-Asset Momentum Strategy initialized', {
-      pairs: Array.from(this.pairs.keys()),
+      poolDiscoveryEnabled: true,
       correlationThreshold: this.CORRELATION_THRESHOLD,
       breakoutMultiplier: this.BREAKOUT_MULTIPLIER,
       updateInterval: this.UPDATE_INTERVAL
@@ -175,49 +175,157 @@ export class CrossAssetMomentumStrategy {
   }
 
   /**
-   * Initialize monitored asset pairs
+   * Initialize momentum asset pairs using real pool data
    */
-  private initializeAssetPairs(): void {
-    // Primary crypto pair: GWETH/GWBTC
-    this.pairs.set('GWETH/GWBTC', {
-      assetA: 'GWETH',
-      assetB: 'GWBTC',
-      symbol: 'GWETH/GWBTC',
-      baseCorrelation: 0.8, // Assume 80% base correlation
-      currentCorrelation: 0,
-      correlationPeriod: this.CORRELATION_PERIOD,
-      momentumThreshold: 2.0, // 2% momentum threshold
-      volumeThreshold: 1000, // $1k min volume
-      isActive: true,
-      lastUpdate: 0
+  private async initializeMomentumPairs(): Promise<void> {
+    try {
+      logger.info('🔍 Discovering momentum-suitable asset pairs...');
+
+      await poolDiscovery.fetchAllPools();
+      this.availablePools = poolDiscovery.getMomentumAssetPools();
+
+      // Get unique assets that are good for momentum trading
+      const momentumAssets = new Set<string>();
+      this.availablePools.forEach(pool => {
+        // Focus on high-volume, volatile assets
+        if (pool.tvl >= 100000) { // Minimum $100k TVL for momentum trading
+          momentumAssets.add(pool.token0);
+          momentumAssets.add(pool.token1);
+        }
+      });
+
+      this.momentumAssets = Array.from(momentumAssets);
+
+      // Create asset pairs from available combinations
+      for (let i = 0; i < this.momentumAssets.length; i++) {
+        for (let j = i + 1; j < this.momentumAssets.length; j++) {
+          const assetA = this.momentumAssets[i];
+          const assetB = this.momentumAssets[j];
+
+          // Check if both assets have pools (liquidity for trading)
+          const hasPoolA = this.findPoolsForAsset(assetA).length > 0;
+          const hasPoolB = this.findPoolsForAsset(assetB).length > 0;
+
+          if (hasPoolA && hasPoolB) {
+            const pairKey = `${assetA}/${assetB}`;
+
+            this.pairs.set(pairKey, {
+              assetA,
+              assetB,
+              symbol: pairKey,
+              baseCorrelation: this.estimateBaseCorrelation(assetA, assetB),
+              currentCorrelation: 0,
+              correlationPeriod: this.CORRELATION_PERIOD,
+              momentumThreshold: this.getMomentumThreshold(assetA, assetB),
+              volumeThreshold: 1000, // $1k min volume
+              isActive: true,
+              lastUpdate: 0
+            });
+
+            logger.info(`✅ Added momentum pair: ${pairKey}`, {
+              assetA,
+              assetB,
+              baseCorrelation: this.estimateBaseCorrelation(assetA, assetB),
+              momentumThreshold: this.getMomentumThreshold(assetA, assetB)
+            });
+          }
+        }
+      }
+
+      logger.info(`📊 Initialized ${this.pairs.size} momentum asset pairs`, {
+        totalAssets: this.momentumAssets.length,
+        totalPairs: this.pairs.size,
+        momentumAssets: this.momentumAssets
+      });
+
+      this.initializePriceHistory();
+
+    } catch (error) {
+      logger.warn('⚠️  Failed to initialize momentum pairs, using fallback', { error });
+      this.createFallbackPairs();
+    }
+  }
+
+  /**
+   * Find pools for a specific asset
+   */
+  private findPoolsForAsset(asset: string): PoolData[] {
+    return this.availablePools.filter(pool =>
+      pool.token0 === asset || pool.token1 === asset
+    );
+  }
+
+  /**
+   * Estimate base correlation between two assets
+   */
+  private estimateBaseCorrelation(assetA: string, assetB: string): number {
+    // Simple correlation estimation based on asset types
+    const stablecoins = ['GUSDC', 'GUSDT'];
+    const majorCrypto = ['GWETH', 'GWBTC'];
+    const altcoins = ['GALA', 'GSOL'];
+
+    if (stablecoins.includes(assetA) && stablecoins.includes(assetB)) {
+      return 0.95; // Stablecoins highly correlated
+    }
+
+    if (majorCrypto.includes(assetA) && majorCrypto.includes(assetB)) {
+      return 0.8; // Major cryptos moderately correlated
+    }
+
+    if (altcoins.includes(assetA) && altcoins.includes(assetB)) {
+      return 0.6; // Altcoins less correlated
+    }
+
+    return 0.5; // Mixed assets - moderate correlation
+  }
+
+  /**
+   * Get momentum threshold based on asset volatility
+   */
+  private getMomentumThreshold(assetA: string, assetB: string): number {
+    const stablecoins = ['GUSDC', 'GUSDT'];
+    const highVolatility = ['GALA', 'GSOL'];
+
+    if (stablecoins.includes(assetA) || stablecoins.includes(assetB)) {
+      return 0.5; // Lower threshold for stablecoins
+    }
+
+    if (highVolatility.includes(assetA) || highVolatility.includes(assetB)) {
+      return 3.0; // Higher threshold for volatile assets
+    }
+
+    return 2.0; // Default threshold
+  }
+
+  /**
+   * Create fallback pairs if pool discovery fails
+   */
+  private createFallbackPairs(): void {
+    logger.info('📋 Creating fallback momentum pairs...');
+
+    // Create basic pairs that are likely to exist
+    const fallbackPairs = [
+      { assetA: 'GALA', assetB: 'GWETH', correlation: 0.6, threshold: 2.5 },
+      { assetA: 'GALA', assetB: 'GUSDC', correlation: 0.3, threshold: 2.0 }
+    ];
+
+    fallbackPairs.forEach(pair => {
+      const pairKey = `${pair.assetA}/${pair.assetB}`;
+      this.pairs.set(pairKey, {
+        assetA: pair.assetA,
+        assetB: pair.assetB,
+        symbol: pairKey,
+        baseCorrelation: pair.correlation,
+        currentCorrelation: 0,
+        correlationPeriod: this.CORRELATION_PERIOD,
+        momentumThreshold: pair.threshold,
+        volumeThreshold: 1000,
+        isActive: true,
+        lastUpdate: 0
+      });
     });
 
-    // Secondary pairs
-    this.pairs.set('GALA/GWETH', {
-      assetA: 'GALA',
-      assetB: 'GWETH',
-      symbol: 'GALA/GWETH',
-      baseCorrelation: 0.6,
-      currentCorrelation: 0,
-      correlationPeriod: this.CORRELATION_PERIOD,
-      momentumThreshold: 3.0, // Higher threshold for more volatile pair
-      volumeThreshold: 5000,
-      isActive: true,
-      lastUpdate: 0
-    });
-
-    this.pairs.set('GALA/GWBTC', {
-      assetA: 'GALA',
-      assetB: 'GWBTC',
-      symbol: 'GALA/GWBTC',
-      baseCorrelation: 0.65,
-      currentCorrelation: 0,
-      correlationPeriod: this.CORRELATION_PERIOD,
-      momentumThreshold: 3.0,
-      volumeThreshold: 5000,
-      isActive: true,
-      lastUpdate: 0
-    });
+    this.initializePriceHistory();
   }
 
   /**
@@ -241,6 +349,9 @@ export class CrossAssetMomentumStrategy {
 
     this.isActive = true;
     logger.info('📈 Starting Cross-Asset Momentum Strategy');
+
+    // Initialize momentum pairs with real pool data
+    await this.initializeMomentumPairs();
 
     // Start data collection
     await this.startDataCollection();
@@ -968,11 +1079,21 @@ export class CrossAssetMomentumStrategy {
   }
 
   /**
-   * Get token class from symbol
+   * Get token class from symbol using discovered tokens first
    */
   private getTokenClass(symbol: string): string {
-    const tokenInfo = TRADING_CONSTANTS.FALLBACK_TOKENS.find((t: any) => t.symbol === symbol);
-    return tokenInfo ? tokenInfo.tokenClass : `${symbol}|Unit|none|none`;
+    // Check if we have discovered token data
+    if (this.availablePools && this.availablePools.length > 0) {
+      // Look through discovered pools to find this token
+      for (const pool of this.availablePools) {
+        if (pool.token0.startsWith(symbol + '|') || pool.token1.startsWith(symbol + '|')) {
+          return pool.token0.startsWith(symbol + '|') ? pool.token0 : pool.token1;
+        }
+      }
+    }
+
+    // Fallback to standard format if not found
+    return `${symbol}|Unit|none|none`;
   }
 
   /**

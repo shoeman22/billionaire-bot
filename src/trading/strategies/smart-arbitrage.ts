@@ -21,6 +21,7 @@ import { calculateMinOutputAmount } from '../../utils/slippage-calculator';
 import { validateEnvironment } from '../../config/environment';
 import { createQuoteWrapper } from '../../utils/quote-api';
 import { safeParseFloat } from '../../utils/safe-parse';
+import { poolDiscovery, PoolData } from '../../services/pool-discovery';
 
 export interface PairMetadata {
   tokenA: string;
@@ -106,7 +107,7 @@ export class SmartArbitrageStrategy {
 
     // Initialize pairs if first run
     if (Object.keys(this.learningData.pairs).length === 0) {
-      this.initializePairs();
+      await this.initializePairs();
     }
 
     // Start adaptive scanning for all pairs
@@ -133,40 +134,96 @@ export class SmartArbitrageStrategy {
     logger.info('⏹️ Smart Arbitrage Strategy stopped and learning data saved');
   }
 
-  private initializePairs(): void {
-    logger.info('🔢 Initializing token pairs from fallback tokens...');
+  private async initializePairs(): Promise<void> {
+    logger.info('🔢 Initializing token pairs from pool discovery...');
 
-    const tokens = TRADING_CONSTANTS.FALLBACK_TOKENS;
-    let pairCount = 0;
+    try {
+      // Fetch pool data for intelligent pair initialization
+      await poolDiscovery.fetchAllPools();
+      const tradingPairs = poolDiscovery.getTradingPairs();
+      let pairCount = 0;
 
-    for (let i = 0; i < tokens.length; i++) {
-      for (let j = i + 1; j < tokens.length; j++) {
-        const tokenA = tokens[i];
-        const tokenB = tokens[j];
-        const pairKey = this.getPairKey(tokenA.tokenClass, tokenB.tokenClass);
+      logger.info(`📊 Found ${tradingPairs.length} real trading pairs from pool discovery`);
+
+      // Initialize pairs based on actual pool data
+      for (const pair of tradingPairs) {
+        const pairKey = this.getPairKey(pair.token0, pair.token1);
+
+        // Determine liquidity level based on pool TVL
+        const highestTvlPool = pair.pools.reduce((max, pool) =>
+          pool.tvl > max.tvl ? pool : max, pair.pools[0]);
+
+        const liquidityLevel = this.determineLiquidityLevel(highestTvlPool.tvl);
 
         this.learningData.pairs[pairKey] = {
-          tokenA: tokenA.tokenClass,
-          tokenB: tokenB.tokenClass,
-          tokenASymbol: tokenA.symbol,
-          tokenBSymbol: tokenB.symbol,
+          tokenA: pair.token0,
+          tokenB: pair.token1,
+          tokenASymbol: pair.token0.split('|')[0], // Extract symbol from full token class
+          tokenBSymbol: pair.token1.split('|')[0],
           successCount: 0,
           totalAttempts: 0,
           lastSuccessTime: 0,
           lastAttemptTime: 0,
           avgProfitability: 0,
           consecutiveErrors: 0,
-          liquidityLevel: 'none',
+          liquidityLevel,
           scanFrequency: this.COLD_SCAN_FREQUENCY, // Start as cold
           priority: 'cold'
         };
 
         pairCount++;
       }
+
+      logger.info(`✅ Initialized ${pairCount} real trading pairs from pool discovery`);
+
+    } catch (error) {
+      logger.error('❌ Failed to initialize pairs from pool discovery:', error);
+      logger.warn('⚠️  Falling back to hardcoded tokens');
+
+      // Fallback to original hardcoded token initialization
+      const tokens = TRADING_CONSTANTS.FALLBACK_TOKENS;
+      let pairCount = 0;
+
+      for (let i = 0; i < tokens.length; i++) {
+        for (let j = i + 1; j < tokens.length; j++) {
+          const tokenA = tokens[i];
+          const tokenB = tokens[j];
+          const pairKey = this.getPairKey(tokenA.tokenClass, tokenB.tokenClass);
+
+          this.learningData.pairs[pairKey] = {
+            tokenA: tokenA.tokenClass,
+            tokenB: tokenB.tokenClass,
+            tokenASymbol: tokenA.symbol,
+            tokenBSymbol: tokenB.symbol,
+            successCount: 0,
+            totalAttempts: 0,
+            lastSuccessTime: 0,
+            lastAttemptTime: 0,
+            avgProfitability: 0,
+            consecutiveErrors: 0,
+            liquidityLevel: 'none',
+            scanFrequency: this.COLD_SCAN_FREQUENCY,
+            priority: 'cold'
+          };
+
+          pairCount++;
+        }
+      }
+
+      logger.info(`📊 Initialized ${pairCount} fallback token pairs`);
     }
 
-    logger.info(`📊 Initialized ${pairCount} token pairs for learning`);
     this.saveLearningData();
+  }
+
+  /**
+   * Determine liquidity level based on pool TVL
+   */
+  private determineLiquidityLevel(tvl: number): 'high' | 'medium' | 'low' | 'none' {
+    if (tvl >= 1000000) return 'high';      // $1M+ TVL
+    if (tvl >= 100000) return 'medium';     // $100k+ TVL
+    if (tvl >= 10000) return 'low';         // $10k+ TVL
+    return 'none';                          // < $10k TVL
   }
 
   private startAdaptiveScanning(): void {
