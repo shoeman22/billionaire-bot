@@ -30,6 +30,7 @@ import { StablecoinArbitrageStrategy } from '../../src/trading/strategies/stable
 import { CrossAssetMomentumStrategy } from '../../src/trading/strategies/cross-asset-momentum';
 import { credentialService } from '../../src/security/credential-service';
 import { PrivateKeySigner } from '@gala-chain/gswap-sdk';
+import { PriceTracker } from '../../src/monitoring/price-tracker';
 
 // Load environment
 dotenv.config();
@@ -82,7 +83,8 @@ class StrategyOrchestratorRunner {
 
       const slippageProtection = new SlippageProtection(config.trading);
       const swapExecutor = new SwapExecutor(gswap, slippageProtection);
-      const marketAnalysis = new MarketAnalysis(signer, gswap);
+      const priceTracker = new PriceTracker();
+      const marketAnalysis = new MarketAnalysis(priceTracker, gswap);
 
       // Initialize individual strategies
       const strategies = await this.initializeStrategies(
