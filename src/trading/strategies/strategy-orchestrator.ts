@@ -545,10 +545,20 @@ export class StrategyOrchestrator {
         const performance = this.strategyPerformance.get(name);
         if (!performance) continue;
 
-        // Get stats from strategy (if available)
+        // Get stats from strategy (try both getStats and getStatus methods)
         let stats: any = {};
         if (strategy.getStats && typeof strategy.getStats === 'function') {
           stats = strategy.getStats();
+        } else if (strategy.getStatus && typeof strategy.getStatus === 'function') {
+          const status = strategy.getStatus();
+          // Map getStatus() format to expected stats format
+          stats = {
+            totalTrades: status.opportunities?.executed || 0,
+            executedTrades: status.opportunities?.executed || 0,
+            successfulTrades: status.opportunities?.successful || 0,
+            totalProfit: parseFloat(status.performance?.totalProfit || '0'),
+            avgProfitPerTrade: parseFloat(status.performance?.avgProfitPerTrade || '0')
+          };
         }
 
         // Update performance metrics
