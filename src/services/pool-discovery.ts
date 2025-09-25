@@ -1,5 +1,6 @@
 import { logger } from '../utils/logger';
 import { validateEnvironment } from '../config/environment';
+import { createPoolDetailClient, PoolDetailClient } from '../api/pool-detail-client';
 
 export interface PoolData {
   poolPair: string;
@@ -47,6 +48,7 @@ export class PoolDiscoveryService {
   private lastUpdate: number = 0;
   private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
   private readonly baseUrl: string;
+  private readonly poolDetailClient: PoolDetailClient;
 
   constructor() {
     try {
@@ -57,10 +59,12 @@ export class PoolDiscoveryService {
       logger.warn('⚠️  Environment validation failed, using default API URL for demo mode');
       this.baseUrl = 'https://dex-backend-prod1.defi.gala.com';
     }
+
+    this.poolDetailClient = createPoolDetailClient(this.baseUrl);
   }
 
   /**
-   * Fetch all pools from GalaSwap explore API with pagination
+   * Fetch all pools from GalaSwap explore API with enhanced details
    */
   async fetchAllPools(forceRefresh = false): Promise<PoolData[]> {
     const now = Date.now();
@@ -130,13 +134,16 @@ export class PoolDiscoveryService {
         await new Promise(resolve => setTimeout(resolve, 200));
       }
 
-      this.pools = allPools;
+      // Enhance pools with detailed data for better pricing and metrics
+      const enhancedPools = await this.enhancePoolsWithDetails(allPools);
+
+      this.pools = enhancedPools;
       this.lastUpdate = now;
 
-      logger.info(`✅ Successfully fetched ${allPools.length} total pools`);
+      logger.info(`✅ Successfully fetched ${allPools.length} total pools with enhanced details`);
       this.logPoolSummary();
 
-      return allPools;
+      return enhancedPools;
 
     } catch (error) {
       logger.error('❌ Failed to fetch pools:', error);
@@ -149,6 +156,77 @@ export class PoolDiscoveryService {
 
       throw error;
     }
+  }
+
+  /**
+   * Enhance pool data with detailed information from pool detail endpoint
+   */
+  private async enhancePoolsWithDetails(pools: PoolData[]): Promise<PoolData[]> {
+    logger.info(`🔄 Enhancing ${pools.length} pools with detailed metrics...`);
+
+    // Fetch pool details in batches to respect API limits
+    const batchSize = 10;
+    const enhancedPools: PoolData[] = [];
+
+    for (let i = 0; i < pools.length; i += batchSize) {
+      const batch = pools.slice(i, i + batchSize);
+      const poolHashes = batch.map(pool => pool.poolHash);
+
+      logger.debug(`📊 Fetching details for batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(pools.length / batchSize)}`);
+
+      try {
+        const detailsResults = await this.poolDetailClient.getMultiplePoolDetails(poolHashes);
+
+        // Merge basic pool data with detailed data
+        for (let j = 0; j < batch.length; j++) {
+          const basicPool = batch[j];
+          const detailedData = detailsResults[j];
+
+          if (detailedData) {
+            // Enhanced pool with more accurate pricing and metrics
+            enhancedPools.push({
+              ...basicPool,
+              // Use spot prices from detailed endpoint (more accurate than listing data)
+              token0Price: detailedData.token0Price,
+              token1Price: detailedData.token1Price,
+              // Use detailed TVL data
+              token0Tvl: detailedData.token0Tvl,
+              token0TvlUsd: detailedData.token0TvlUsd,
+              token1Tvl: detailedData.token1Tvl,
+              token1TvlUsd: detailedData.token1TvlUsd,
+              tvl: detailedData.tvl,
+              // Use detailed volume and fee data
+              volume1d: detailedData.volume1d,
+              volume30d: detailedData.volume30d,
+              fee24h: detailedData.fee24h,
+              dayPerTvl: detailedData.dayPerTvl
+            });
+          } else {
+            // Fallback to basic data if detailed fetch failed
+            logger.warn(`⚠️  Failed to get details for pool ${basicPool.poolHash.substring(0, 8)}..., using basic data`);
+            enhancedPools.push(basicPool);
+          }
+        }
+
+        // Small delay between batches to respect API limits
+        if (i + batchSize < pools.length) {
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+
+      } catch (error) {
+        logger.warn(`⚠️  Failed to enhance batch ${Math.floor(i / batchSize) + 1}:`, error);
+        // Fallback to basic pool data for this batch
+        enhancedPools.push(...batch);
+      }
+    }
+
+    const successfulEnhancements = enhancedPools.filter((pool, i) =>
+      pool.token0Price !== pools[i]?.token0Price || pool.token1Price !== pools[i]?.token1Price
+    ).length;
+
+    logger.info(`✅ Enhanced ${successfulEnhancements}/${pools.length} pools with detailed data`);
+
+    return enhancedPools;
   }
 
   /**
@@ -359,6 +437,69 @@ export class PoolDiscoveryService {
    */
   getCachedPools(): PoolData[] {
     return this.pools;
+  }
+
+  /**
+   * Get spot prices from enhanced pool data (avoids separate API calls)
+   */
+  getSpotPrices(token0Symbol: string, token1Symbol: string): { token0Price: string; token1Price: string } | null {
+    const pool = this.findBestPool(token0Symbol, token1Symbol);
+    if (!pool) return null;
+
+    return {
+      token0Price: pool.token0Price,
+      token1Price: pool.token1Price
+    };
+  }
+
+  /**
+   * Get enhanced pool metrics for risk assessment
+   */
+  getPoolMetrics(poolHash: string): {
+    tvl: number;
+    volume24h: number;
+    volume30d: number;
+    feeApr: number;
+    liquidityRatio: number;
+  } | null {
+    const pool = this.pools.find(p => p.poolHash === poolHash);
+    if (!pool) return null;
+
+    const liquidityRatio = pool.volume1d > 0 ? pool.tvl / pool.volume1d : 0;
+    const feeApr = pool.dayPerTvl; // Already calculated as APR
+
+    return {
+      tvl: pool.tvl,
+      volume24h: pool.volume1d,
+      volume30d: pool.volume30d,
+      feeApr,
+      liquidityRatio
+    };
+  }
+
+  /**
+   * Clear the pool detail client cache
+   */
+  clearDetailCache(): void {
+    this.poolDetailClient.clearCache();
+    logger.debug('🧹 Cleared pool detail client cache');
+  }
+
+  /**
+   * Get cache statistics from both services
+   */
+  getCacheStats(): {
+    poolCount: number;
+    lastUpdate: number;
+    isStale: boolean;
+    detailCacheStats: { size: number; maxAge: number };
+  } {
+    return {
+      poolCount: this.pools.length,
+      lastUpdate: this.lastUpdate,
+      isStale: this.isDataStale(),
+      detailCacheStats: this.poolDetailClient.getCacheStats()
+    };
   }
 
   /**

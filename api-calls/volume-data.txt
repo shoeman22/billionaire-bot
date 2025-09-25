@@ -1,0 +1,157 @@
+Fetch for pool volume data over variation resolutions, 5m, 1h and 24h
+
+PARAMS:
+- duration: 5m, 1h, 24h
+- startTime: beginning of window in timestamp format
+- endTime: end of range in timestamp format
+- poolHash: key from pools
+
+fetch("https://dex-backend-prod1.defi.gala.com/explore/graph-data?startTime=0&endTime=1758793416&duration=24h&poolHash=321a546861cfdcb348fd55e30341f8f17e1e33c3134a5d18eea89897817a2285", {
+  "headers": {
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "accept-language": "en-US,en;q=0.9",
+    "cache-control": "max-age=0",
+    "if-none-match": "W/\"58a-jyVTZaAjowBnKc0M1nmZe+Y5fC4\"",
+    "priority": "u=0, i",
+    "sec-ch-ua": "\"Chromium\";v=\"140\", \"Not=A?Brand\";v=\"24\", \"Google Chrome\";v=\"140\"",
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": "\"Linux\"",
+    "sec-fetch-dest": "document",
+    "sec-fetch-mode": "navigate",
+    "sec-fetch-site": "none",
+    "sec-fetch-user": "?1",
+    "upgrade-insecure-requests": "1",
+    "cookie": "prism_91470544=6e3ff465-722b-47fe-a710-196a552feea8; _fbp=fb.1.1741297663417.246742013249377009; _ga=GA1.1.769452998.1741297664; _ga_3XGGF2P3S6=GS1.1.1741814799.1.1.1741814819.0.0.0; _ga_Y1CD8G7DXN=GS2.1.s1749663653$o1$g1$t1749664137$j60$l0$h0; _scid=C9pisv8bZ0qXmGkAwy3ZyOnvLjGiB5yo; _scid_r=C9pisv8bZ0qXmGkAwy3ZyOnvLjGiB5yo; _ga_3X6ZDBR6QB=GS2.1.s1750849217$o1$g0$t1750849217$j60$l0$h0; _sctr=1%7C1750831200000; _ga_K09V31G780=GS2.1.s1751048628$o1$g0$t1751048628$j60$l0$h1542706088; _ga_1P3MG1G9LG=GS2.1.s1754084986$o5$g1$t1754085000$j46$l0$h0; _iidt=0739UpIdt759eQyEtp65schlWtExqll4alKXDCxGhHtVqLeT1l8vbITpoP+g6W3+QDIl8mE2TffzIdD48ED9Up+SvrqhlD43D9W23Y0=; _ga_5C4CRM08L2=GS2.1.s1758052643$o126$g1$t1758052653$j50$l0$h0; _vid_t=QFHdPdAkJri0xdz3G7kEEPiU/3FXWbp9eAAgpqw4YV4XZnKz1DRYd0uyImig/7kz5oGqcrleddJ2tMfynlXVBIQRw9XAtzEYnIXZVOY=; _ga_MQRQBPV2FQ=GS2.1.s1758795239$o3$g1$t1758795258$j41$l0$h0"
+  },
+  "body": null,
+  "method": "GET"
+});
+
+RETURNS:
+{
+  "status": 200,
+    "error": false,
+      "message": "Graph data fetched successfully",
+        "data": [
+          {
+            "startTime": 0,
+            "endTime": 86400,
+            "midTime": 43200,
+            "volume": 0
+          },
+          {
+            "startTime": 86400,
+            "endTime": 172800,
+            "midTime": 129600,
+            "volume": 0
+          },
+          {
+            "startTime": 172800,
+            "endTime": 259200,
+            "midTime": 216000,
+            "volume": 0
+          },
+          {
+            "startTime": 259200,
+            "endTime": 345600,
+            "midTime": 302400,
+            "volume": 0
+          },
+          {
+            "startTime": 345600,
+            "endTime": 432000,
+            "midTime": 388800,
+            "volume": 0
+          },
+          {
+            "startTime": 432000,
+            "endTime": 518400,
+            "midTime": 475200,
+            "volume": 0
+          },
+          {
+            "startTime": 518400,
+            "endTime": 604800,
+            "midTime": 561600,
+            "volume": 0
+          },
+          {
+            "startTime": 604800,
+            "endTime": 691200,
+            "midTime": 648000,
+            "volume": 0
+          },
+          {
+            "startTime": 691200,
+            "endTime": 777600,
+            "midTime": 734400,
+            "volume": 0
+          },
+          {
+            "startTime": 777600,
+            "endTime": 864000,
+            "midTime": 820800,
+            "volume": 0
+          },
+          {
+            "startTime": 864000,
+            "endTime": 950400,
+            "midTime": 907200,
+            "volume": 0
+          },
+          {
+            "startTime": 950400,
+            "endTime": 1036800,
+            "midTime": 993600,
+            "volume": 0
+          },
+          {
+            "startTime": 1036800,
+            "endTime": 1123200,
+            "midTime": 1080000,
+            "volume": 0
+          },
+          {
+            "startTime": 1123200,
+            "endTime": 1209600,
+            "midTime": 1166400,
+            "volume": 0
+          },
+          {
+            "startTime": 1209600,
+            "endTime": 1296000,
+            "midTime": 1252800,
+            "volume": 0
+          },
+          {
+            "startTime": 1296000,
+            "endTime": 1382400,
+            "midTime": 1339200,
+            "volume": 0
+          },
+          {
+            "startTime": 1382400,
+            "endTime": 1468800,
+            "midTime": 1425600,
+            "volume": 0
+          },
+          {
+            "startTime": 1468800,
+            "endTime": 1555200,
+            "midTime": 1512000,
+            "volume": 0
+          },
+          {
+            "startTime": 1555200,
+            "endTime": 1641600,
+            "midTime": 1598400,
+            "volume": 0
+          },
+          {
+            "startTime": 1641600,
+            "endTime": 1728000,
+            "midTime": 1684800,
+            "volume": 0
+          }
+        ]
+}

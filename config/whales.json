@@ -1,0 +1,133 @@
+{
+  "$schema": "./schemas/whales.schema.json",
+  "version": "1.0.0",
+  "lastUpdated": "2025-01-18T00:00:00Z",
+  "description": "Whale watchlist configuration for GalaSwap V3 trading bot",
+
+  "knownWhales": [
+    {
+      "address": "client|64f8caf887fd8551315d8509",
+      "nickname": "DominantWhale",
+      "priority": "critical",
+      "copyTrading": true,
+      "profitabilityScore": 0.95,
+      "notes": "Dominant whale - 68% of pool activity. Most profitable trader.",
+      "addedAt": "2025-01-15T00:00:00Z",
+      "tags": ["high-volume", "consistent", "profitable", "dominant"],
+      "tradingStyle": "accumulation",
+      "averageTradeSize": 50000,
+      "winRate": 0.85,
+      "riskProfile": "conservative"
+    },
+    {
+      "address": "client|604161f025e6931a676ccf37",
+      "nickname": "SecondaryWhale",
+      "priority": "high",
+      "copyTrading": true,
+      "profitabilityScore": 0.78,
+      "notes": "Secondary whale - 20% of pool activity. Solid performance.",
+      "addedAt": "2025-01-15T00:00:00Z",
+      "tags": ["medium-volume", "consistent", "reliable"],
+      "tradingStyle": "swing",
+      "averageTradeSize": 25000,
+      "winRate": 0.72,
+      "riskProfile": "moderate"
+    },
+    {
+      "address": "eth|0628E50F2338762eCaCCC53506c33bcb5327C964",
+      "nickname": "EthWhale",
+      "priority": "medium",
+      "copyTrading": false,
+      "profitabilityScore": 0.62,
+      "notes": "ETH whale - 7% of pool activity. Volatile but interesting patterns.",
+      "addedAt": "2025-01-15T00:00:00Z",
+      "tags": ["eth-native", "volatile", "pattern-trader"],
+      "tradingStyle": "scalping",
+      "averageTradeSize": 15000,
+      "winRate": 0.58,
+      "riskProfile": "aggressive"
+    }
+  ],
+
+  "watchlistSettings": {
+    "maxWhales": 50,
+    "autoRemoveInactiveDays": 30,
+    "minVolumeThreshold": 1000,
+    "minWinRateThreshold": 0.60,
+    "maxRiskScore": 8.0,
+    "autoUpdateMetricsInterval": "1h",
+    "alertCheckInterval": "5m"
+  },
+
+  "copyTradingSettings": {
+    "enabled": true,
+    "maxPositionSize": 10000,
+    "minConfidenceLevel": 0.7,
+    "delaySeconds": 30,
+    "enabledPriorities": ["critical", "high"],
+    "blacklistedAddresses": [],
+    "emergencyStopLoss": 0.05,
+    "maxConcurrentCopies": 3
+  },
+
+  "alertSettings": {
+    "volumeThresholds": {
+      "small": 100,
+      "medium": 500,
+      "large": 1000,
+      "massive": 5000
+    },
+    "confidenceThresholds": {
+      "low": 0.4,
+      "medium": 0.6,
+      "high": 0.8,
+      "critical": 0.9
+    },
+    "urgencySettings": {
+      "immediate": {
+        "volumeMultiplier": 10,
+        "confidenceMin": 0.8,
+        "notificationChannels": ["telegram", "email", "webhook"]
+      },
+      "high": {
+        "volumeMultiplier": 5,
+        "confidenceMin": 0.7,
+        "notificationChannels": ["telegram", "webhook"]
+      },
+      "medium": {
+        "volumeMultiplier": 2,
+        "confidenceMin": 0.6,
+        "notificationChannels": ["webhook"]
+      },
+      "low": {
+        "volumeMultiplier": 1,
+        "confidenceMin": 0.4,
+        "notificationChannels": []
+      }
+    },
+    "maxAlertsPerHour": 20,
+    "cooldownMinutes": 15,
+    "enablePatternChangeAlerts": true,
+    "enableExitSignalAlerts": true
+  },
+
+  "performanceTracking": {
+    "trackingWindowDays": 30,
+    "minTradesForAnalysis": 10,
+    "enableSharpeRatio": true,
+    "enableMaxDrawdown": true,
+    "enableConsistencyScore": true,
+    "benchmarkReturn": 0.05,
+    "updateFrequency": "4h"
+  },
+
+  "riskManagement": {
+    "maxDrawdownThreshold": 0.15,
+    "minSharpeRatio": 0.5,
+    "maxVolatility": 0.3,
+    "positionSizingModel": "kelly",
+    "dynamicRiskAdjustment": true,
+    "correlationAnalysis": true,
+    "maxCorrelation": 0.8
+  }
+}

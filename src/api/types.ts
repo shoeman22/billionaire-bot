@@ -110,6 +110,34 @@ export interface PoolResponse extends BaseResponse {
   };
 }
 
+// Pool Detail response (from /explore/pool endpoint)
+export interface PoolDetailResponse {
+  status: number;
+  error: boolean;
+  message: string;
+  data: {
+    poolPair: string;
+    poolHash: string;
+    token0: string;
+    token0Image: string;
+    token1: string;
+    token1Image: string;
+    token0Price: string;
+    token1Price: string;
+    poolName: string;
+    fee: number;
+    fee24h: number;
+    token0Tvl: number;
+    token0TvlUsd: number;
+    token1Tvl: number;
+    token1TvlUsd: number;
+    tvl: number;
+    volume1d: number;
+    volume30d: number;
+    dayPerTvl: number;
+  };
+}
+
 // Bundle transaction response
 export interface BundleResponse extends BaseResponse {
   success: true;
@@ -136,4 +164,177 @@ export interface TransactionStatusResponse extends BaseResponse {
     effectiveGasPrice?: string;
     error?: string;
   };
+}
+
+// ===========================================
+// TRANSACTION HISTORY & ANALYTICS TYPES
+// ===========================================
+
+// Individual transaction record
+export interface TransactionRecord {
+  id: number;
+  blockNumber: number;
+  poolHash: string;
+  userAddress: string;
+  transactionTime: string; // ISO timestamp format
+  token0: string;
+  token1: string;
+  amount0: number;
+  amount1: number;
+  volume: number;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+// Pool transactions response
+export interface PoolTransactionsResponse extends BaseResponse {
+  success: true;
+  data: {
+    transactions: TransactionRecord[];
+    totalCount: number;
+    poolHash: string;
+    token0: string;
+    token1: string;
+    timeRange: {
+      from: string;
+      to: string;
+    };
+  };
+}
+
+// User trading history response
+export interface UserHistoryResponse extends BaseResponse {
+  success: true;
+  data: {
+    userAddress: string;
+    transactions: TransactionRecord[];
+    totalVolume: number;
+    totalTrades: number;
+    averageTradeSize: number;
+    mostTradedPairs: Array<{
+      token0: string;
+      token1: string;
+      volume: number;
+      tradeCount: number;
+    }>;
+  };
+}
+
+// Pool analytics response
+export interface PoolAnalyticsResponse extends BaseResponse {
+  success: true;
+  data: {
+    poolHash: string;
+    token0: string;
+    token1: string;
+    analytics: {
+      totalVolume: number;
+      totalTrades: number;
+      uniqueTraders: number;
+      averageTradeSize: number;
+      volumeByHour: Array<{
+        hour: string;
+        volume: number;
+        tradeCount: number;
+      }>;
+      topTraders: Array<{
+        userAddress: string;
+        volume: number;
+        tradeCount: number;
+        lastTradeTime: string;
+      }>;
+      priceHistory: Array<{
+        timestamp: string;
+        token0Price: number;
+        token1Price: number;
+        volume: number;
+      }>;
+    };
+  };
+}
+
+// ===========================================
+// WHALE TRACKING TYPES
+// ===========================================
+
+// Whale trader definition
+export interface WhaleTrader {
+  userAddress: string;
+  totalVolume: number;
+  tradeCount: number;
+  averageTradeSize: number;
+  firstTradeTime: string;
+  lastTradeTime: string;
+  isBot: boolean;
+  tradingFrequency: number; // trades per hour
+  profitability: number; // estimated profit percentage
+  riskScore: number; // 1-10 scale
+}
+
+// Whale activity summary
+export interface WhaleActivity {
+  trader: WhaleTrader;
+  recentTrades: TransactionRecord[];
+  tradingPattern: {
+    averageInterval: number; // seconds between trades
+    preferredTimeRanges: string[]; // hour ranges like "09-12"
+    volumeTrend: 'increasing' | 'decreasing' | 'stable';
+  };
+  followWorthiness: number; // 1-10 scale
+}
+
+// ===========================================
+// VOLUME GRAPH DATA TYPES
+// ===========================================
+
+// Volume resolution types
+export type VolumeResolution = '5m' | '1h' | '24h';
+
+// Individual volume data point
+export interface VolumeDataPoint {
+  startTime: number;
+  endTime: number;
+  midTime: number;
+  volume: number;
+}
+
+// Volume graph data response
+export interface VolumeGraphResponse {
+  status: number;
+  error: boolean;
+  message: string;
+  data: VolumeDataPoint[];
+}
+
+// ===========================================
+// VOLUME ANALYSIS TYPES
+// ===========================================
+
+// Volume prediction data
+export interface VolumeAnalysis {
+  poolHash: string;
+  currentVolume: number;
+  historicalAverage: number;
+  volumeSpike: boolean;
+  spikePercentage: number;
+  prediction: {
+    nextHourVolume: number;
+    confidence: number; // 0-1 scale
+    trend: 'bullish' | 'bearish' | 'neutral';
+  };
+  triggers: {
+    whaleActivity: boolean;
+    priceMovement: boolean;
+    timePattern: boolean;
+  };
+}
+
+// Trading pattern analysis
+export interface TradingPattern {
+  patternType: 'accumulation' | 'distribution' | 'scalping' | 'arbitrage';
+  confidence: number;
+  duration: number; // minutes
+  volumeProfile: number[];
+  priceImpact: number;
+  participants: string[]; // user addresses
 }

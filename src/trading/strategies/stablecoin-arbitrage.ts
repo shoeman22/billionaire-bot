@@ -24,6 +24,9 @@ import { createQuoteWrapper } from '../../utils/quote-api';
 import { calculateMinOutputAmount, getTokenDecimals } from '../../utils/slippage-calculator';
 import { credentialService } from '../../security/credential-service';
 import { poolDiscovery, PoolData } from '../../services/pool-discovery';
+import { createTransactionAnalyzer, TransactionAnalyzer } from '../../analytics/transaction-analyzer';
+import { createWhaleTracker, WhaleTracker } from '../../analytics/whale-tracker';
+import { createVolumePredictor, VolumePredictor } from '../../analytics/volume-predictor';
 
 export interface StablecoinPath {
   stablecoinA: string; // e.g., "GUSDC"
@@ -90,6 +93,11 @@ export class StablecoinArbitrageStrategy {
   private paths: Map<string, StablecoinPath> = new Map();
   private availablePools: PoolData[] = [];
 
+  // Analytics services for enhanced decision making
+  private transactionAnalyzer: TransactionAnalyzer;
+  private whaleTracker: WhaleTracker;
+  private volumePredictor: VolumePredictor;
+
   // Strategy configuration (updated for indirect paths)
   private readonly MIN_SPREAD_PERCENT = 0.1; // 0.1% minimum spread (higher due to 2-hop complexity)
   private readonly MAX_SLIPPAGE_PERCENT = 0.5; // 0.5% max slippage for 2-hop trades
@@ -115,6 +123,15 @@ export class StablecoinArbitrageStrategy {
     hourlyStats: {}
   };
 
+  // API optimization tracking
+  private apiStats = {
+    quotesRequested: 0,
+    quotesFromSpotPrices: 0,
+    quotesFromAPI: 0,
+    spotPriceSuccessRate: 0,
+    estimatedAPISavings: 0
+  };
+
   // Running profitability calculation
   private initialCapital: number = 10000; // $10k starting capital
   private currentCapital: number = 10000;
@@ -134,12 +151,18 @@ export class StablecoinArbitrageStrategy {
     const fullConfig = getConfig();
     this.quoteWrapper = createQuoteWrapper(fullConfig.api.baseUrl);
 
+    // Initialize analytics services
+    this.transactionAnalyzer = createTransactionAnalyzer();
+    this.whaleTracker = createWhaleTracker();
+    this.volumePredictor = createVolumePredictor();
+
     logger.info('Stablecoin Arbitrage Strategy initialized (indirect paths)', {
       strategy: 'bridge-token-arbitrage',
       minSpread: this.MIN_SPREAD_PERCENT,
       maxSlippage: this.MAX_SLIPPAGE_PERCENT,
       basePositionSize: this.BASE_POSITION_SIZE,
-      poolDiscoveryEnabled: true
+      poolDiscoveryEnabled: true,
+      analyticsEnabled: true
     });
   }
 
@@ -277,10 +300,18 @@ export class StablecoinArbitrageStrategy {
     }
 
     this.isActive = false;
+
+    const apiOptStats = this.getAPIOptimizationStats();
     logger.info('🛑 Stablecoin Arbitrage Strategy stopped', {
       stats: this.getStats(),
       finalCapital: this.currentCapital,
-      totalReturn: ((this.currentCapital - this.initialCapital) / this.initialCapital * 100).toFixed(2) + '%'
+      totalReturn: ((this.currentCapital - this.initialCapital) / this.initialCapital * 100).toFixed(2) + '%',
+      apiOptimization: {
+        totalQuoteRequests: apiOptStats.quotesRequested,
+        spotPriceUsage: `${apiOptStats.quotesFromSpotPrices}/${apiOptStats.quotesRequested}`,
+        apiCallReduction: apiOptStats.apiCallReduction,
+        estimatedSavings: `${apiOptStats.estimatedAPISavings} API calls avoided`
+      }
     });
   }
 
@@ -307,18 +338,33 @@ export class StablecoinArbitrageStrategy {
   }
 
   /**
-   * Scan for stablecoin arbitrage opportunities
+   * Scan for stablecoin arbitrage opportunities (enhanced with analytics)
    */
   async scanForOpportunities(): Promise<StablecoinOpportunity[]> {
     if (!this.isActive) return [];
 
     const opportunities: StablecoinOpportunity[] = [];
 
+    // Check for whale alerts first - immediate action may be needed
+    const whaleAlerts = await this.whaleTracker.checkForAlerts();
+    const immediateWhaleSignals = whaleAlerts.filter(alert =>
+      alert.actionRecommendation.urgency === 'immediate' &&
+      alert.actionRecommendation.action === 'copy'
+    );
+
+    if (immediateWhaleSignals.length > 0) {
+      logger.info('🐋 Immediate whale signals detected - prioritizing analysis', {
+        signalCount: immediateWhaleSignals.length,
+        pools: immediateWhaleSignals.map(s => s.poolHash.substring(0, 8))
+      });
+    }
+
     for (const [pathSymbol, path] of this.paths.entries()) {
       if (!path.isActive) continue;
 
       try {
-        const opportunity = await this.analyzePath(path);
+        // Enhanced analysis with whale and volume intelligence
+        const opportunity = await this.analyzePathWithAnalytics(path);
         if (opportunity && this.isOpportunityProfitable(opportunity)) {
           opportunities.push(opportunity);
         }
@@ -327,13 +373,33 @@ export class StablecoinArbitrageStrategy {
       }
     }
 
-    // Sort by net profit percentage
-    opportunities.sort((a, b) => b.netProfitPercent - a.netProfitPercent);
+    // Enhanced opportunity ranking with analytics
+    opportunities.sort((a, b) => {
+      // Primary: Analytics confidence score
+      const aAnalytics = (a as any).analyticsScore || 0;
+      const bAnalytics = (b as any).analyticsScore || 0;
 
-    // Execute the best opportunity
+      if (Math.abs(aAnalytics - bAnalytics) > 0.2) {
+        return bAnalytics - aAnalytics;
+      }
+
+      // Secondary: Net profit percentage
+      return b.netProfitPercent - a.netProfitPercent;
+    });
+
+    // Execute the best opportunity with enhanced validation
     if (opportunities.length > 0) {
       const best = opportunities[0];
-      await this.executeStablecoinTrade(best);
+      const shouldExecute = await this.validateOpportunityWithAnalytics(best);
+
+      if (shouldExecute) {
+        await this.executeStablecoinTrade(best);
+      } else {
+        logger.info('🚫 Analytics validation rejected best opportunity', {
+          path: best.path.symbol,
+          reason: 'Risk factors too high'
+        });
+      }
     }
 
     this.lastScanTime = Date.now();
@@ -522,30 +588,298 @@ export class StablecoinArbitrageStrategy {
   }
 
   /**
-   * Get quote for a token pair
+   * Get quote for a token pair using spot prices when possible
    */
   private async getQuote(
     tokenIn: string,
     tokenOut: string,
     amountIn: number
   ): Promise<{ outputAmount: number; feeTier: number } | null> {
+    this.apiStats.quotesRequested++;
+
+    // First try to use spot prices from enhanced pool data
+    const spotPrices = poolDiscovery.getSpotPrices(tokenIn, tokenOut);
+    if (spotPrices && this.canUseSpotPricing(tokenIn, tokenOut)) {
+      logger.debug(`📊 Using spot prices for ${tokenIn}/${tokenOut} (avoiding API call)`);
+
+      const outputAmount = this.calculateOutputFromSpotPrice(
+        amountIn,
+        spotPrices.token0Price,
+        spotPrices.token1Price,
+        tokenIn,
+        tokenOut
+      );
+
+      if (outputAmount > 0) {
+        this.apiStats.quotesFromSpotPrices++;
+        this.updateAPIStats();
+
+        return {
+          outputAmount,
+          feeTier: 3000 // Default fee tier for spot price calculations
+        };
+      }
+    }
+
+    // Fallback to API quote if spot prices aren't available or reliable
     const tokenInClass = this.getTokenClass(tokenIn);
     const tokenOutClass = this.getTokenClass(tokenOut);
 
     try {
+      logger.debug(`🔄 Fetching API quote for ${tokenIn}/${tokenOut} (${amountIn})`);
       const result = await this.quoteWrapper.quoteExactInput(tokenInClass, tokenOutClass, amountIn.toString());
+
+      this.apiStats.quotesFromAPI++;
+      this.updateAPIStats();
 
       return {
         outputAmount: parseFloat(result.amountOut),
         feeTier: result.feeTier
       };
     } catch (error) {
+      logger.warn(`❌ Quote failed for ${tokenIn}/${tokenOut}:`, error);
       return null;
     }
   }
 
   /**
-   * Calculate optimal position size based on spread and available capital
+   * Update API optimization statistics
+   */
+  private updateAPIStats(): void {
+    this.apiStats.spotPriceSuccessRate = this.apiStats.quotesRequested > 0
+      ? (this.apiStats.quotesFromSpotPrices / this.apiStats.quotesRequested) * 100
+      : 0;
+
+    // Estimate API call savings (spot prices reduce latency and rate limiting)
+    this.apiStats.estimatedAPISavings = this.apiStats.quotesFromSpotPrices;
+  }
+
+  /**
+   * Calculate output amount from spot prices
+   */
+  private calculateOutputFromSpotPrice(
+    amountIn: number,
+    token0Price: string,
+    token1Price: string,
+    tokenIn: string,
+    tokenOut: string
+  ): number {
+    try {
+      const price0 = parseFloat(token0Price);
+      const price1 = parseFloat(token1Price);
+
+      if (price0 <= 0 || price1 <= 0) return 0;
+
+      // Calculate exchange rate considering which token is input
+      const exchangeRate = tokenIn < tokenOut ? price0 / price1 : price1 / price0;
+
+      // Apply a small slippage buffer for conservative estimates (0.1%)
+      const outputAmount = amountIn * exchangeRate * 0.999;
+
+      logger.debug(`💹 Spot price calculation: ${amountIn} ${tokenIn} → ${outputAmount.toFixed(6)} ${tokenOut} (rate: ${exchangeRate.toFixed(6)})`);
+
+      return outputAmount;
+    } catch (error) {
+      logger.warn('Failed to calculate spot price output:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Check if spot pricing can be used for this token pair
+   */
+  private canUseSpotPricing(tokenIn: string, tokenOut: string): boolean {
+    // Only use spot pricing for stablecoin pairs and major pairs
+    const stablecoins = ['GUSDC', 'GUSDT', 'GUSD'];
+    const majors = ['GALA', 'GWETH', 'GWBTC'];
+
+    const isStableToStable = stablecoins.includes(tokenIn) && stablecoins.includes(tokenOut);
+    const isStableToMajor = (stablecoins.includes(tokenIn) && majors.includes(tokenOut)) ||
+                           (majors.includes(tokenIn) && stablecoins.includes(tokenOut));
+
+    return isStableToStable || isStableToMajor;
+  }
+
+  /**
+   * Enhanced path analysis with transaction analytics
+   */
+  private async analyzePathWithAnalytics(path: StablecoinPath): Promise<StablecoinOpportunity | null> {
+    try {
+      // Get standard analysis first
+      const baseOpportunity = await this.analyzePath(path);
+      if (!baseOpportunity) return null;
+
+      // Enhance with analytics data
+      const analyticsEnhancement = await this.getAnalyticsEnhancement(path);
+
+      // Combine base opportunity with analytics insights
+      const enhancedOpportunity = {
+        ...baseOpportunity,
+        analyticsScore: analyticsEnhancement.score,
+        whaleActivity: analyticsEnhancement.whaleActivity,
+        volumePredict: analyticsEnhancement.volumePredict,
+        riskFactors: analyticsEnhancement.riskFactors
+      };
+
+      // Adjust confidence based on analytics
+      enhancedOpportunity.confidence *= analyticsEnhancement.confidenceMultiplier;
+
+      logger.debug(`🔍 Analytics enhancement for ${path.symbol}`, {
+        baseConfidence: baseOpportunity.confidence,
+        analyticsScore: analyticsEnhancement.score,
+        finalConfidence: enhancedOpportunity.confidence,
+        whaleActivity: analyticsEnhancement.whaleActivity,
+        volumeTrend: analyticsEnhancement.volumePredict?.trend
+      });
+
+      return enhancedOpportunity;
+
+    } catch (error) {
+      logger.warn(`Analytics enhancement failed for ${path.symbol}`, { error });
+      // Fallback to base analysis
+      return this.analyzePath(path);
+    }
+  }
+
+  /**
+   * Get analytics enhancement data for a path
+   */
+  private async getAnalyticsEnhancement(path: StablecoinPath): Promise<{
+    score: number;
+    confidenceMultiplier: number;
+    whaleActivity: boolean;
+    volumePredict: any;
+    riskFactors: string[];
+  }> {
+    const poolHashes = [path.hop1Pool.poolHash, path.hop2Pool.poolHash].filter(Boolean);
+
+    if (poolHashes.length === 0) {
+      return {
+        score: 0.5,
+        confidenceMultiplier: 1.0,
+        whaleActivity: false,
+        volumePredict: null,
+        riskFactors: ['No pool data available']
+      };
+    }
+
+    // Analyze primary pool (first hop)
+    const primaryPool = poolHashes[0];
+
+    try {
+      // Get pool insights
+      const insights = await this.transactionAnalyzer.analyzePool(primaryPool);
+
+      // Get volume prediction
+      const volumePrediction = await this.volumePredictor.predictVolume(primaryPool);
+
+      // Calculate analytics score
+      let score = 0.5; // Base score
+
+      // Whale activity bonus
+      if (insights.whales.length > 0) {
+        const topWhale = insights.whales[0];
+        if (topWhale.followWorthiness >= 8) {
+          score += 0.2;
+        } else if (topWhale.followWorthiness >= 6) {
+          score += 0.1;
+        }
+      }
+
+      // Volume prediction bonus
+      if (volumePrediction.trend === 'spike_expected') {
+        score += 0.15;
+      } else if (volumePrediction.trend === 'bullish') {
+        score += 0.1;
+      }
+
+      // Trading recommendation alignment
+      if (insights.recommendations.shouldTrade && insights.recommendations.confidence > 0.7) {
+        score += 0.1;
+      }
+
+      // Risk factor penalties
+      score -= insights.riskFactors.manipulation * 0.2;
+      score -= insights.riskFactors.volatility * 0.1;
+
+      // Confidence multiplier based on various factors
+      let confidenceMultiplier = 1.0;
+
+      if (insights.whales.length > 0 && insights.whales[0].followWorthiness >= 7) {
+        confidenceMultiplier += 0.2;
+      }
+
+      if (volumePrediction.confidence.next1hour > 0.6) {
+        confidenceMultiplier += 0.1;
+      }
+
+      // Reduce confidence for high-risk scenarios
+      if (insights.riskFactors.manipulation > 0.7) {
+        confidenceMultiplier *= 0.7;
+      }
+
+      return {
+        score: Math.max(0, Math.min(1, score)),
+        confidenceMultiplier: Math.max(0.5, Math.min(1.5, confidenceMultiplier)),
+        whaleActivity: insights.whales.length > 0,
+        volumePredict: volumePrediction,
+        riskFactors: insights.recommendations.reasoning
+      };
+
+    } catch (error) {
+      logger.warn(`Analytics enhancement failed for pool ${primaryPool.substring(0, 8)}:`, error);
+      return {
+        score: 0.5,
+        confidenceMultiplier: 1.0,
+        whaleActivity: false,
+        volumePredict: null,
+        riskFactors: ['Analytics data unavailable']
+      };
+    }
+  }
+
+  /**
+   * Validate opportunity with analytics before execution
+   */
+  private async validateOpportunityWithAnalytics(opportunity: StablecoinOpportunity): Promise<boolean> {
+    const enhanced = opportunity as any;
+
+    // Must have minimum analytics score
+    if (enhanced.analyticsScore < 0.4) {
+      logger.debug(`❌ Analytics score too low: ${enhanced.analyticsScore}`);
+      return false;
+    }
+
+    // Check for dangerous risk factors
+    if (enhanced.riskFactors?.includes('High manipulation risk')) {
+      logger.debug('❌ Manipulation risk detected');
+      return false;
+    }
+
+    // Volume prediction check
+    if (enhanced.volumePredict?.trend === 'decline_expected') {
+      logger.debug('❌ Volume decline predicted');
+      return false;
+    }
+
+    // Enhanced confidence must meet threshold
+    if (opportunity.confidence < this.MIN_CONFIDENCE * 0.8) { // Slightly lower threshold with analytics
+      logger.debug(`❌ Enhanced confidence too low: ${opportunity.confidence}`);
+      return false;
+    }
+
+    logger.debug('✅ Analytics validation passed', {
+      analyticsScore: enhanced.analyticsScore,
+      confidence: opportunity.confidence,
+      whaleActivity: enhanced.whaleActivity,
+      volumeTrend: enhanced.volumePredict?.trend
+    });
+
+    return true;
+  }
+
+  /**
+   * Calculate optimal position size based on spread, TVL, and available capital
    */
   private calculateOptimalPositionSize(path: StablecoinPath): number {
     // Base position size
@@ -558,8 +892,36 @@ export class StablecoinArbitrageStrategy {
       positionSize *= 2.0;
     }
 
+    // Adjust based on TVL - larger positions for high-liquidity pools
+    const minTvl = Math.min(path.hop1Pool.tvl || 0, path.hop2Pool.tvl || 0);
+    if (minTvl > 0) {
+      // Scale position size based on minimum TVL across both hops
+      const liquidityRatio = minTvl / 100000; // Base 100k TVL
+      const tvlMultiplier = Math.min(2.0, Math.max(0.5, liquidityRatio));
+
+      positionSize *= tvlMultiplier;
+
+      logger.debug(`📊 TVL-adjusted position size: ${positionSize.toFixed(2)} (minTvl: $${minTvl.toLocaleString()}, multiplier: ${tvlMultiplier.toFixed(2)})`);
+    }
+
+    // Use enhanced pool metrics for additional risk assessment
+    if (path.hop1Pool.poolHash) {
+      const metrics = poolDiscovery.getPoolMetrics(path.hop1Pool.poolHash);
+      if (metrics) {
+        // Reduce position size for low-volume pools
+        const volumeRatio = metrics.volume24h > 0 ? Math.min(1.0, metrics.volume24h / 50000) : 0.5; // Base 50k volume
+        positionSize *= Math.max(0.3, volumeRatio);
+
+        logger.debug(`📈 Volume-adjusted position size: ${positionSize.toFixed(2)} (24h volume: $${metrics.volume24h.toLocaleString()})`);
+      }
+    }
+
     // Cap at maximum position size
-    return Math.min(positionSize, this.MAX_POSITION_SIZE);
+    const finalSize = Math.min(positionSize, this.MAX_POSITION_SIZE);
+
+    logger.debug(`💰 Final position size: $${finalSize.toFixed(2)} for path ${path.symbol}`);
+
+    return finalSize;
   }
 
   /**
@@ -655,6 +1017,25 @@ export class StablecoinArbitrageStrategy {
    */
   getStats(): StablecoinStats {
     return { ...this.stats };
+  }
+
+  /**
+   * Get API optimization statistics
+   */
+  getAPIOptimizationStats(): {
+    quotesRequested: number;
+    quotesFromSpotPrices: number;
+    quotesFromAPI: number;
+    spotPriceSuccessRate: number;
+    estimatedAPISavings: number;
+    apiCallReduction: string;
+  } {
+    return {
+      ...this.apiStats,
+      apiCallReduction: this.apiStats.quotesRequested > 0
+        ? `${this.apiStats.spotPriceSuccessRate.toFixed(1)}%`
+        : '0%'
+    };
   }
 
   /**

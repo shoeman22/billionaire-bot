@@ -576,6 +576,128 @@ export interface PortfolioBalance {
   valueUSD: number;
 }
 
+// Transaction analysis types for wallet performance tracking
+export interface TransactionAnalysis {
+  hash: string;
+  timestamp: Date;
+  type: 'swap' | 'liquidity_add' | 'liquidity_remove' | 'transfer';
+  status: 'success' | 'failed' | 'pending';
+
+  // Swap data
+  tokenIn?: string;
+  tokenOut?: string;
+  amountIn?: number;
+  amountOut?: number;
+  expectedAmountOut?: number;
+  slippage?: number;
+  priceImpact?: number;
+
+  // Financial data
+  valueInUSD?: number;
+  valueOutUSD?: number;
+  profitLossUSD?: number;
+  gasFeeUSD?: number;
+
+  // Strategy classification
+  strategy?: 'arbitrage_direct' | 'arbitrage_triangular' | 'arbitrage_cross_pair' | 'liquidity_provision' | 'manual';
+  confidence?: number; // 0-1 confidence in strategy classification
+}
+
+export interface WalletPerformanceMetrics {
+  // Time period
+  startDate: Date;
+  endDate: Date;
+
+  // Trade statistics
+  totalTrades: number;
+  successfulTrades: number;
+  failedTrades: number;
+  successRate: number;
+
+  // Profitability metrics
+  totalProfitUSD: number;
+  totalVolumeUSD: number;
+  totalFeesUSD: number;
+  netProfitUSD: number;
+  avgProfitPerTrade: number;
+  winRate: number; // Percentage of profitable trades
+  profitFactor: number; // Total profit / Total loss
+
+  // Risk metrics
+  maxDrawdown: number;
+  maxDrawdownDate?: Date;
+  sharpeRatio?: number;
+  volatility: number;
+
+  // Strategy performance
+  strategyBreakdown: {
+    [strategy: string]: {
+      trades: number;
+      profit: number;
+      winRate: number;
+      avgProfit: number;
+    };
+  };
+
+  // Token analysis
+  tokenVolumes: {
+    [token: string]: {
+      volume: number;
+      volumeUSD: number;
+      trades: number;
+      netFlow: number; // Positive = accumulated, negative = distributed
+    };
+  };
+
+  // Trading pair analysis
+  pairPerformance: {
+    [pair: string]: {
+      trades: number;
+      volume: number;
+      profit: number;
+      avgSlippage: number;
+      successRate: number;
+    };
+  };
+
+  // Time-based analysis
+  hourlyDistribution: number[]; // 24 hours
+  dailyPnL: Array<{ date: Date; pnl: number; trades: number }>;
+}
+
+export interface ArbitrageOpportunityAnalysis {
+  pair: string;
+  type: 'direct' | 'triangular' | 'cross_pair';
+  profitabilityScore: number; // 0-100
+  avgProfitPercent: number;
+  successRate: number;
+  totalOpportunities: number;
+  avgExecutionTime: number;
+  competitionLevel: 'low' | 'medium' | 'high';
+
+  // Historical performance
+  last24h: { trades: number; profit: number };
+  last7d: { trades: number; profit: number };
+  last30d: { trades: number; profit: number };
+}
+
+export interface PortfolioComposition {
+  timestamp: Date;
+  totalValueUSD: number;
+  tokenBreakdown: Array<{
+    token: string;
+    amount: number;
+    valueUSD: number;
+    percentage: number;
+    pricePerToken: number;
+  }>;
+
+  // Portfolio metrics
+  diversificationIndex: number; // 0-1, higher = more diversified
+  concentration: number; // Percentage in largest position
+  liquidityScore: number; // 0-100, based on token liquidity
+}
+
 export interface PositionPerformance {
   positionId: string;
   token0: string;

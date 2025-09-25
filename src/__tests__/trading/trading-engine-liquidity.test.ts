@@ -364,7 +364,6 @@ describe('TradingEngine Liquidity Integration', () => {
     mockConfig = {
       wallet: {
         address: 'eth|test-wallet-address',
-        privateKey: 'test-private-key',
         maxPositionSize: 10000
       },
       api: {

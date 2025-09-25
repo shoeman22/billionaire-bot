@@ -4,7 +4,7 @@
  */
 
 import { logger } from '../utils/logger';
-import { getConfig } from '../config/environment';
+import { getConfig, getPrivateKey } from '../config/environment';
 
 export class CredentialService {
   private static instance: CredentialService;
@@ -63,7 +63,7 @@ export class CredentialService {
     try {
       const config = getConfig();
 
-      if (!config.wallet.address || !config.wallet.privateKey) {
+      if (!config.wallet.address) {
         return false;
       }
 
@@ -72,8 +72,13 @@ export class CredentialService {
         return false;
       }
 
-      // Validate private key exists (don't validate format to avoid exposure)
-      if (typeof config.wallet.privateKey !== 'string' || config.wallet.privateKey.length < 10) {
+      // Validate private key exists securely without storing it
+      try {
+        const privateKeyBuffer = getPrivateKey();
+        if (!privateKeyBuffer || privateKeyBuffer.length === 0) {
+          return false;
+        }
+      } catch {
         return false;
       }
 

@@ -8,15 +8,15 @@ import elliptic from 'elliptic';
 import * as sha3 from 'js-sha3';
 import stringify from 'json-stringify-deterministic';
 import { logger } from './logger';
+import { getPrivateKey } from '../config/environment';
 
 const EC = elliptic.ec;
 const ec = new EC('secp256k1');
 
-// Type definitions for elliptic
-type ECKeyPair = elliptic.ec.KeyPair;
+// Type definitions for elliptic (commented out as no longer used with secure key access)
+// type ECKeyPair = elliptic.ec.KeyPair;
 
 export interface SigningConfig {
-  privateKey: string; // Base64 encoded private key
   userAddress: string; // User's wallet address
 }
 
@@ -32,8 +32,6 @@ export interface SignedPayload extends SignablePayload {
 }
 
 export class PayloadSigner {
-  private privateKey: string;
-  private keyPair: ECKeyPair; // EC KeyPair type
   private userAddress: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private galaChainSdk: any = null; // Will be dynamically loaded
@@ -42,11 +40,13 @@ export class PayloadSigner {
     this.userAddress = config.userAddress;
 
     try {
-      // Decode base64 private key
-      this.privateKey = Buffer.from(config.privateKey, 'base64').toString('hex');
+      // Validate private key is available without storing it
+      const privateKeyBuffer = getPrivateKey();
+      const privateKeyHex = privateKeyBuffer.toString('hex');
 
-      // Create key pair
-      this.keyPair = ec.keyFromPrivate(this.privateKey);
+      // Test that we can create a key pair (without storing it)
+      const testKeyPair = ec.keyFromPrivate(privateKeyHex);
+      testKeyPair.getPublic('hex'); // Validate key is working
 
       logger.info('Payload signer initialized for address:',
         config.userAddress.substring(0, 10) + '...'
@@ -107,8 +107,8 @@ export class PayloadSigner {
     try {
       logger.debug('Signing with GalaChain SDK');
 
-      // Convert base64 private key to buffer
-      const privateKeyBuffer = Buffer.from(this.privateKey, 'hex');
+      // Get private key securely without storing it
+      const privateKeyBuffer = getPrivateKey();
 
       // Use GalaChain signatures module
       const signature = this.galaChainSdk.signatures.getSignature(
@@ -193,8 +193,13 @@ export class PayloadSigner {
         throw new Error('Hash must be exactly 32 bytes for secp256k1 signing');
       }
 
+      // Get private key securely and create key pair only when needed
+      const privateKeyBuffer = getPrivateKey();
+      const privateKeyHex = privateKeyBuffer.toString('hex');
+      const keyPair = ec.keyFromPrivate(privateKeyHex);
+
       // Sign the hash
-      const signature = this.keyPair.sign(hash);
+      const signature = keyPair.sign(hash);
 
       // Normalize signature (ensure low S value)
       if (signature.s.cmp(ec.curve.n.shrn(1)) > 0) {
@@ -277,10 +282,15 @@ export class PayloadSigner {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const recovery = signature.slice(128, 130);
 
+      // Get private key securely and create key pair only when needed
+      const privateKeyBuffer = getPrivateKey();
+      const privateKeyHex = privateKeyBuffer.toString('hex');
+      const keyPair = ec.keyFromPrivate(privateKeyHex);
+
       // Verify with public key
       const sigObj = { r, s };
 
-      return this.keyPair.verify(hash, sigObj);
+      return keyPair.verify(hash, sigObj);
 
     } catch (_error) {
       logger.error('Error in fallback verification:', _error);
@@ -306,7 +316,11 @@ export class PayloadSigner {
    * Get public key in hex format
    */
   getPublicKey(): string {
-    return this.keyPair.getPublic('hex');
+    // Get private key securely and create key pair only when needed
+    const privateKeyBuffer = getPrivateKey();
+    const privateKeyHex = privateKeyBuffer.toString('hex');
+    const keyPair = ec.keyFromPrivate(privateKeyHex);
+    return keyPair.getPublic('hex');
   }
 
   /**

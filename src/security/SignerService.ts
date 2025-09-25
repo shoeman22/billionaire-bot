@@ -33,21 +33,8 @@ export class SignerService {
    * Initialize the signer from environment variables
    */
   private initializeSigner(): PayloadSigner {
-    const privateKey = process.env.WALLET_PRIVATE_KEY;
-    if (!privateKey) {
-      throw new Error('WALLET_PRIVATE_KEY environment variable is required');
-    }
-
-    // Validate private key format
-    try {
-      Buffer.from(privateKey, 'base64');
-    } catch (error) {
-      throw new Error('WALLET_PRIVATE_KEY must be a valid base64 encoded key');
-    }
-
-    // Create signer without storing the private key
+    // Create signer - it will get private key securely from environment
     return new PayloadSigner({
-      privateKey,
       userAddress: this.walletAddress
     });
   }

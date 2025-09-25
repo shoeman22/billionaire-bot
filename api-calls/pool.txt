@@ -1,0 +1,45 @@
+fetch("https://dex-backend-prod1.defi.gala.com/explore/pool?poolHash=cc93185e6902353cc0e912099790826089d3e3cba8e1e5aa3d5eba9d0c31d742", {
+  "headers": {
+    "accept": "application/json, text/plain, */*",
+    "accept-language": "en-US,en;q=0.9",
+    "if-none-match": "W/\"30a-w9WBznFIcgtjaKc/YEU+YHifumM\"",
+    "priority": "u=1, i",
+    "sec-ch-ua": "\"Chromium\";v=\"140\", \"Not=A?Brand\";v=\"24\", \"Google Chrome\";v=\"140\"",
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": "\"Linux\"",
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-site",
+    "Referer": "https://swap.gala.com/"
+  },
+  "body": null,
+  "method": "GET"
+});
+
+RETURN:
+{
+  "status": 200,
+  "error": false,
+  "message": "Pool detail fetched successfully",
+  "data": {
+    "poolPair": "GALA|Unit|none|none/GUSDT|Unit|none|none/10000",
+    "poolHash": "cc93185e6902353cc0e912099790826089d3e3cba8e1e5aa3d5eba9d0c31d742",
+    "token0": "GALA",
+    "token0Image": "https://static.gala.games/images/icons/units/gala.png",
+    "token1": "GUSDT",
+    "token1Image": "https://tokens.gala.games/compressed-images/logos/USDT-icon.png",
+    "token0Price": "67.35972970711651",
+    "token1Price": "0.014845665271343133",
+    "poolName": "GALA/GUSDT",
+    "fee": 1,
+    "fee24h": 341.7123128251111,
+    "token0Tvl": 95617731.61215936,
+    "token0TvlUsd": 1422600.6109257073,
+    "token1Tvl": 26532.98473619997,
+    "token1TvlUsd": 25705.049480491587,
+    "tvl": 1448305.6604061988,
+    "volume1d": 34171.23128251122,
+    "volume30d": 2189415.460587793,
+    "dayPerTvl": 0.023593936153593013
+  }
+}

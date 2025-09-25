@@ -5,6 +5,7 @@
 
 import { DataSource, DataSourceOptions } from 'typeorm';
 import { Position } from '../entities/Position';
+import { AnalyticsEntities } from '../entities/analytics';
 import { logger } from '../utils/logger';
 import path from 'path';
 
@@ -30,7 +31,7 @@ export const getDatabaseConfig = (): DataSourceOptions => {
     return {
       type: 'sqlite',
       database: path.join(basePath, 'data/billionaire-bot.db'),
-      entities: [Position],
+      entities: [Position, ...AnalyticsEntities],
       synchronize: true, // Auto-create tables in development
       logging: process.env.LOG_LEVEL === 'debug',
       migrations: [path.join(basePath, 'src/migrations/*.ts')],
@@ -43,7 +44,7 @@ export const getDatabaseConfig = (): DataSourceOptions => {
     return {
       type: 'postgres',
       url: process.env.DATABASE_URL,
-      entities: [Position],
+      entities: [Position, ...AnalyticsEntities],
       synchronize: false, // Never auto-sync in production
       logging: false,
       migrations: [path.join(process.cwd(), 'src/migrations/*.ts')],
@@ -60,7 +61,7 @@ export const getDatabaseConfig = (): DataSourceOptions => {
     username: process.env.DB_USERNAME || 'postgres',
     password: process.env.DB_PASSWORD || '',
     database: process.env.DB_DATABASE || 'billionaire_bot',
-    entities: [Position],
+    entities: [Position, ...AnalyticsEntities],
     synchronize: false,
     logging: process.env.LOG_LEVEL === 'debug',
     migrations: [path.join(process.cwd(), 'src/migrations/*.ts')],

@@ -356,7 +356,6 @@ describe('Liquidity Integration Tests', () => {
     mockConfig = {
       wallet: {
         address: 'eth|test-wallet-address',
-        privateKey: Buffer.from('test-private-key').toString('base64'),
         maxPositionSize: 10000
       },
       api: {

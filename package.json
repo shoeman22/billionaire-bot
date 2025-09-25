@@ -110,7 +110,15 @@
     "strategy:orchestrator:continuous": "tsx scripts/strategies/strategy-orchestrator.ts --demo --continuous",
     "strategy:orchestrator:live:continuous": "tsx scripts/strategies/strategy-orchestrator.ts --live --continuous",
     "strategy:all": "tsx scripts/strategies/strategy-orchestrator.ts --demo --strategies all",
-    "strategy:all:live": "tsx scripts/strategies/strategy-orchestrator.ts --live --strategies all"
+    "strategy:all:live": "tsx scripts/strategies/strategy-orchestrator.ts --live --strategies all",
+    "test:enhanced-system": "tsx src/scripts/test-enhanced-system.ts",
+    "enhanced-system:demo": "tsx src/scripts/test-enhanced-system.ts",
+    "test:analytics": "tsx src/scripts/test-analytics-system.ts",
+    "analyze": "tsx src/scripts/analyze-wallet-performance.ts",
+    "analyze:today": "tsx src/scripts/analyze-wallet-performance.ts --today",
+    "analyze:week": "tsx src/scripts/analyze-wallet-performance.ts --week",
+    "analyze:month": "tsx src/scripts/analyze-wallet-performance.ts --month",
+    "analyze:arbitrage": "tsx src/scripts/analyze-wallet-performance.ts --week"
   },
   "dependencies": {
     "@gala-chain/api": "^2.4.3",
