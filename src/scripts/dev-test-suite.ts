@@ -56,7 +56,7 @@ class DevTestSuite {
   private startTime: number = 0;
   private gswap!: GSwapWrapper;
   private tradingEngine!: TradingEngine;
-  private env!: { api: { baseUrl: string }; wallet: { address: string; privateKey: string } };
+  private env!: { api: { baseUrl: string }; wallet: { address: string; privateKey?: string } };
 
   async runComprehensiveTests(): Promise<TestSuiteResults> {
     this.startTime = Date.now();

@@ -56,7 +56,7 @@ interface SystemMetrics {
 
 class DevPerformanceBenchmark {
   private gswap!: GSwapWrapper;
-  private env!: { api: { baseUrl: string }; wallet: { address: string; privateKey: string } };
+  private env!: { api: { baseUrl: string }; wallet: { address: string; privateKey?: string } };
   private results: BenchmarkResult[] = [];
   private systemMetrics: SystemMetrics[] = [];
   private metricsInterval?: NodeJS.Timeout;

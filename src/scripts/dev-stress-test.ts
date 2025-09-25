@@ -56,7 +56,7 @@ interface StressTestResult {
 
 class DevStressTest {
   private gswap!: GSwapWrapper;
-  private env!: { api: { baseUrl: string }; wallet: { address: string; privateKey: string } };
+  private env!: { api: { baseUrl: string }; wallet: { address: string; privateKey?: string } };
   private results: StressTestResult[] = [];
 
   async runStressTests(config: StressTestConfig): Promise<StressTestResult[]> {

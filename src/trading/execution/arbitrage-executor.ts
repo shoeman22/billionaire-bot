@@ -31,7 +31,14 @@ export interface ArbitrageConfig {
  */
 async function initializeGSwap(): Promise<{ gSwap: GSwap; env: ReturnType<typeof validateEnvironment> }> {
   const env = validateEnvironment();
-  const signer = new PrivateKeySigner(env.wallet.privateKey);
+
+  // Use environment variable directly for security
+  const privateKey = process.env.WALLET_PRIVATE_KEY;
+  if (!privateKey) {
+    throw new Error('WALLET_PRIVATE_KEY environment variable is required for arbitrage execution');
+  }
+
+  const signer = new PrivateKeySigner(privateKey);
 
   const gSwap = new GSwap({
     signer,

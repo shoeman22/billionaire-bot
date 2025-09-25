@@ -94,7 +94,7 @@ describe('QuoteApi', () => {
 
       const result = await quoteApi.quoteExactInput('GALA|Unit|none|none', 'GUSDC|Unit|none|none', 100);
 
-      expect(result.priceImpact).toBe(5); // 5% price impact
+      expect(result.priceImpact).toBeCloseTo(5, 6); // 5% price impact (allow floating point precision)
     });
 
     it('should handle missing sqrt prices gracefully', async () => {
@@ -174,7 +174,12 @@ describe('QuoteApi', () => {
         .mockResolvedValueOnce(rateLimitResponse as Response)
         .mockResolvedValueOnce(successResponse as Response);
 
-      const result = await quoteApi.quoteExactInput('GALA|Unit|none|none', 'GUSDC|Unit|none|none', 100);
+      const quotePromise = quoteApi.quoteExactInput('GALA|Unit|none|none', 'GUSDC|Unit|none|none', 100);
+
+      // Advance timers to skip retry delays
+      await jest.runAllTimersAsync();
+
+      const result = await quotePromise;
 
       expect(global.fetch).toHaveBeenCalledTimes(2);
       expect(result.outTokenAmount).toBe('95');
@@ -207,7 +212,12 @@ describe('QuoteApi', () => {
         .mockResolvedValueOnce(serverErrorResponse as Response)
         .mockResolvedValueOnce(successResponse as Response);
 
-      const result = await quoteApi.quoteExactInput('GALA|Unit|none|none', 'GUSDC|Unit|none|none', 100);
+      const quotePromise = quoteApi.quoteExactInput('GALA|Unit|none|none', 'GUSDC|Unit|none|none', 100);
+
+      // Advance timers to skip retry delays
+      await jest.runAllTimersAsync();
+
+      const result = await quotePromise;
 
       expect(global.fetch).toHaveBeenCalledTimes(2);
       expect(result.outTokenAmount).toBe('95');
@@ -238,9 +248,12 @@ describe('QuoteApi', () => {
 
       (global.fetch as jest.MockedFunction<typeof fetch>).mockResolvedValue(serverErrorResponse as Response);
 
-      await expect(
-        quoteApi.quoteExactInput('GALA|Unit|none|none', 'GUSDC|Unit|none|none', 100)
-      ).rejects.toThrow('Server error');
+      const quotePromise = quoteApi.quoteExactInput('GALA|Unit|none|none', 'GUSDC|Unit|none|none', 100);
+
+      // Advance timers to skip retry delays
+      await jest.runAllTimersAsync();
+
+      await expect(quotePromise).rejects.toThrow('Server error');
 
       // Should call initial + 3 retries = 4 total calls
       expect(global.fetch).toHaveBeenCalledTimes(4);
@@ -268,7 +281,12 @@ describe('QuoteApi', () => {
         .mockRejectedValueOnce(networkError)
         .mockResolvedValueOnce(successResponse as Response);
 
-      const result = await quoteApi.quoteExactInput('GALA|Unit|none|none', 'GUSDC|Unit|none|none', 100);
+      const quotePromise = quoteApi.quoteExactInput('GALA|Unit|none|none', 'GUSDC|Unit|none|none', 100);
+
+      // Advance timers to skip retry delays
+      await jest.runAllTimersAsync();
+
+      const result = await quotePromise;
 
       expect(global.fetch).toHaveBeenCalledTimes(2);
       expect(result.outTokenAmount).toBe('95');
@@ -320,7 +338,12 @@ describe('QuoteApi', () => {
         .mockRejectedValueOnce(timeoutError)
         .mockResolvedValueOnce(successResponse as Response);
 
-      const result = await quoteApi.quoteExactInput('GALA|Unit|none|none', 'GUSDC|Unit|none|none', 100);
+      const quotePromise = quoteApi.quoteExactInput('GALA|Unit|none|none', 'GUSDC|Unit|none|none', 100);
+
+      // Advance timers to skip retry delays
+      await jest.runAllTimersAsync();
+
+      const result = await quotePromise;
 
       expect(global.fetch).toHaveBeenCalledTimes(2);
       expect(result.outTokenAmount).toBe('95');
@@ -372,7 +395,7 @@ describe('QuoteApi', () => {
       const signal = (quoteApi as any).createTimeoutSignal(5000);
 
       expect(mockTimeout).toHaveBeenCalledWith(5000);
-      expect(signal).toBe('mock-signal');
+      expect(signal).toBe(mockTimeout.mock.results[0].value);
     });
 
     it('should fallback to AbortController when AbortSignal.timeout unavailable', () => {

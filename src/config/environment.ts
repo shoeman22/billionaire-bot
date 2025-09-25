@@ -44,7 +44,7 @@ export interface ApiConfig {
 
 export interface WalletConfig {
   address: string;
-  privateKey: string; // Added for dev script compatibility
+  privateKey?: string; // Optional - prefer environment variables for security
   maxPositionSize?: number;
 }
 

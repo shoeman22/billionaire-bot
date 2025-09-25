@@ -47,7 +47,7 @@ interface FailureResult {
 
 class DevFailureSimulator {
   private gswap!: GSwapWrapper;
-  private env!: { api: { baseUrl: string }; wallet: { address: string; privateKey: string } };
+  private env!: { api: { baseUrl: string }; wallet: { address: string; privateKey?: string } };
   private results: FailureResult[] = [];
 
   private readonly failureTests: FailureTest[] = [
