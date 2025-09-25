@@ -10,6 +10,7 @@ import { TRADING_CONSTANTS } from '../config/constants';
 // calculatePriceFromSqrtPriceX96 removed - not used in this file
 import { safeParseFloat } from '../utils/safe-parse';
 import { createQuoteWrapper, QuoteResult } from '../utils/quote-api';
+import { poolDiscovery } from '../services/pool-discovery';
 
 export interface MarketCondition {
   overall: MarketTrend;
@@ -807,22 +808,52 @@ export class MarketAnalysis {
   }
 
   /**
-   * Get all pools containing a specific token
+   * Get all pools containing a specific token using real pool discovery data
    */
   private async getPoolsForToken(token: string): Promise<Array<{token0: string, token1: string, fee: number}>> {
-    const pools: Array<{token0: string, token1: string, fee: number}> = [];
-    const otherTokens = Object.values(TRADING_CONSTANTS.TOKENS).filter(t => t !== token);
-    const feeTiers = Object.values(TRADING_CONSTANTS.FEE_TIERS);
-
-    for (const otherToken of otherTokens) {
-      for (const fee of feeTiers) {
-        // Add both token orders since we don't know which is token0/token1
-        pools.push({ token0: token, token1: otherToken, fee });
-        pools.push({ token0: otherToken, token1: token, fee });
+    try {
+      // Use pool discovery to get real pools
+      const cachedPools = poolDiscovery.getCachedPools();
+      if (cachedPools.length === 0) {
+        // If no cached pools, fetch them first
+        await poolDiscovery.fetchAllPools();
       }
-    }
 
-    return pools;
+      const discoveredPools = poolDiscovery.getCachedPools();
+      const matchingPools: Array<{token0: string, token1: string, fee: number}> = [];
+
+      // Find all pools that contain the specified token
+      for (const pool of discoveredPools) {
+        if (pool.token0.startsWith(token + '|') || pool.token1.startsWith(token + '|') ||
+            pool.token0 === token || pool.token1 === token) {
+          matchingPools.push({
+            token0: pool.token0,
+            token1: pool.token1,
+            fee: parseFloat(pool.fee)
+          });
+        }
+      }
+
+      logger.debug(`Found ${matchingPools.length} pools for token ${token}`);
+      return matchingPools;
+
+    } catch (error) {
+      logger.warn(`Failed to get pools for token ${token}, falling back to hardcoded:`, error);
+
+      // Fallback to original hardcoded approach
+      const pools: Array<{token0: string, token1: string, fee: number}> = [];
+      const otherTokens = Object.values(TRADING_CONSTANTS.TOKENS).filter(t => t !== token);
+      const feeTiers = Object.values(TRADING_CONSTANTS.FEE_TIERS);
+
+      for (const otherToken of otherTokens) {
+        for (const fee of feeTiers) {
+          pools.push({ token0: token, token1: otherToken, fee });
+          pools.push({ token0: otherToken, token1: token, fee });
+        }
+      }
+
+      return pools;
+    }
   }
 
   /**

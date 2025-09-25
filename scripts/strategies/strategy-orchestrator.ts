@@ -29,6 +29,7 @@ import { TriangleArbitrageStrategy } from '../../src/trading/strategies/triangle
 import { StablecoinArbitrageStrategy } from '../../src/trading/strategies/stablecoin-arbitrage';
 import { CrossAssetMomentumStrategy } from '../../src/trading/strategies/cross-asset-momentum';
 import { credentialService } from '../../src/security/credential-service';
+import { PrivateKeySigner } from '@gala-chain/gswap-sdk';
 
 // Load environment
 dotenv.config();
@@ -73,17 +74,15 @@ class StrategyOrchestratorRunner {
       const enabledStrategies = this.parseStrategies(options.strategies);
 
       // Initialize core systems
+      const signer = isLiveMode ? new PrivateKeySigner(config.wallet.privateKey) : {} as any;
       const gswap = new GSwap({
-        signer: isLiveMode ? credentialService.getSigner() : {} as any,
+        signer,
         baseUrl: config.api.baseUrl
       });
 
       const slippageProtection = new SlippageProtection(config.trading);
       const swapExecutor = new SwapExecutor(gswap, slippageProtection);
-      const marketAnalysis = new MarketAnalysis(
-        isLiveMode ? credentialService.getSigner() : {} as any,
-        gswap
-      );
+      const marketAnalysis = new MarketAnalysis(signer, gswap);
 
       // Initialize individual strategies
       const strategies = await this.initializeStrategies(
@@ -91,7 +90,7 @@ class StrategyOrchestratorRunner {
         gswap,
         swapExecutor,
         marketAnalysis,
-        isLiveMode
+        signer
       );
 
       // Initialize orchestrator
@@ -179,6 +178,11 @@ EXAMPLES:
       return ['triangle', 'stablecoin', 'momentum']; // Default: all strategies
     }
 
+    // Handle special case for "all"
+    if (strategiesStr.toLowerCase().trim() === 'all') {
+      return ['triangle', 'stablecoin', 'momentum'];
+    }
+
     const strategies = strategiesStr.split(',').map(s => s.trim().toLowerCase());
     const valid = ['triangle', 'stablecoin', 'momentum'];
 
@@ -187,7 +191,8 @@ EXAMPLES:
       logger.warn(`⚠️  Invalid strategies ignored: ${invalid.join(', ')}`);
     }
 
-    return strategies.filter(s => valid.includes(s));
+    const validStrategies = strategies.filter(s => valid.includes(s));
+    return validStrategies.length > 0 ? validStrategies : ['triangle', 'stablecoin', 'momentum'];
   }
 
   private parseAllocation(allocationStr?: string, strategyCount: number): number[] {
@@ -219,10 +224,9 @@ EXAMPLES:
     gswap: GSwap,
     swapExecutor: SwapExecutor,
     marketAnalysis: MarketAnalysis,
-    isLiveMode: boolean
+    signer: any
   ): Promise<any[]> {
     const strategies = [];
-    const signer = isLiveMode ? credentialService.getSigner() : {} as any;
 
     logger.info('🔧 Initializing strategies:', enabledStrategies.join(', '));
 

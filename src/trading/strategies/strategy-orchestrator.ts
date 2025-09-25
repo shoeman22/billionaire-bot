@@ -448,7 +448,10 @@ export class StrategyOrchestrator {
       });
 
     } catch (error) {
-      logger.error('Failed to update market conditions', { error });
+      logger.error('Failed to update market conditions', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
 
       // Fallback to conservative defaults if market analysis fails
       this.currentMarketCondition = {
