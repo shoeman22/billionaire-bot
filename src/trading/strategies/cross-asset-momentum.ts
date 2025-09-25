@@ -440,6 +440,28 @@ export class CrossAssetMomentumStrategy {
 
     for (const asset of assets) {
       try {
+        // Skip if asset is the same as base currency (can't swap identical tokens)
+        if (asset === 'GUSDC') {
+          // For base currency, price is always 1.0
+          const pricePoint: PricePoint = {
+            price: 1.0,
+            volume: 0, // Base currency volume is not meaningful for self-comparison
+            timestamp: Date.now()
+          };
+
+          // Add to history
+          const history = this.priceHistory.get(asset) || [];
+          history.push(pricePoint);
+
+          // Trim history to limit
+          if (history.length > this.PRICE_HISTORY_LIMIT) {
+            history.shift();
+          }
+
+          this.priceHistory.set(asset, history);
+          continue;
+        }
+
         // Get current price (using GUSDC as base for consistency)
         const quote = await this.getQuote(asset, 'GUSDC', 1);
         if (!quote) continue;
@@ -1047,6 +1069,11 @@ export class CrossAssetMomentumStrategy {
    * Get real volume data for asset pair from pool information
    */
   private async getAssetVolume(tokenIn: string, tokenOut: string): Promise<number> {
+    // Return 0 volume for identical tokens (can't have a pool with same token)
+    if (tokenIn === tokenOut) {
+      return 0;
+    }
+
     try {
       // Get pool data to retrieve 24h volume
       const response = await fetch(`${this.baseUrl}/v1/trade/pool?token0=${tokenIn}&token1=${tokenOut}&fee=10000`);
@@ -1134,5 +1161,16 @@ export class CrossAssetMomentumStrategy {
     this.activePositions.clear();
 
     logger.info('Cross-asset momentum statistics reset');
+  }
+
+  /**
+   * Get current correlation matrix for all pairs
+   */
+  getCorrelationMatrix(): Record<string, number> {
+    const matrix: Record<string, number> = {};
+    for (const [pairSymbol, pair] of this.pairs.entries()) {
+      matrix[pairSymbol] = pair.currentCorrelation || 0;
+    }
+    return matrix;
   }
 }

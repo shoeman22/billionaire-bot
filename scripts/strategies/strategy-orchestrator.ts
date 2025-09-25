@@ -25,9 +25,6 @@ import { SwapExecutor } from '../../src/trading/execution/swap-executor';
 import { MarketAnalysis } from '../../src/monitoring/market-analysis';
 import { SlippageProtection } from '../../src/trading/risk/slippage';
 import { StrategyOrchestrator } from '../../src/trading/strategies/strategy-orchestrator';
-import { TriangleArbitrageStrategy } from '../../src/trading/strategies/triangle-arbitrage';
-import { StablecoinArbitrageStrategy } from '../../src/trading/strategies/stablecoin-arbitrage';
-import { CrossAssetMomentumStrategy } from '../../src/trading/strategies/cross-asset-momentum';
 import { credentialService } from '../../src/security/credential-service';
 import { PrivateKeySigner } from '@gala-chain/gswap-sdk';
 import { PriceTracker } from '../../src/monitoring/price-tracker';
@@ -86,16 +83,7 @@ class StrategyOrchestratorRunner {
       const priceTracker = new PriceTracker();
       const marketAnalysis = new MarketAnalysis(priceTracker, gswap);
 
-      // Initialize individual strategies
-      const strategies = await this.initializeStrategies(
-        enabledStrategies,
-        gswap,
-        swapExecutor,
-        marketAnalysis,
-        signer
-      );
-
-      // Initialize orchestrator with correct parameters
+      // Initialize orchestrator with correct parameters (it manages its own strategies internally)
       this.orchestrator = new StrategyOrchestrator(gswap, config.trading, swapExecutor, marketAnalysis);
 
       // Apply custom configuration
@@ -216,34 +204,6 @@ EXAMPLES:
     return allocations;
   }
 
-  private async initializeStrategies(
-    enabledStrategies: string[],
-    gswap: GSwap,
-    swapExecutor: SwapExecutor,
-    marketAnalysis: MarketAnalysis,
-    signer: any
-  ): Promise<any[]> {
-    const strategies = [];
-
-    logger.info('🔧 Initializing strategies:', enabledStrategies.join(', '));
-
-    if (enabledStrategies.includes('triangle')) {
-      strategies.push(new TriangleArbitrageStrategy(gswap, signer, swapExecutor, marketAnalysis));
-      logger.info('   ✅ Triangle Arbitrage initialized');
-    }
-
-    if (enabledStrategies.includes('stablecoin')) {
-      strategies.push(new StablecoinArbitrageStrategy(gswap, signer, swapExecutor, marketAnalysis));
-      logger.info('   ✅ Stablecoin Arbitrage initialized');
-    }
-
-    if (enabledStrategies.includes('momentum')) {
-      strategies.push(new CrossAssetMomentumStrategy(gswap, signer, swapExecutor, marketAnalysis));
-      logger.info('   ✅ Cross-Asset Momentum initialized');
-    }
-
-    return strategies;
-  }
 
   private displayModeBanner(isLive: boolean, isDemo: boolean, options: OrchestratorOptions): void {
     if (isLive) {

@@ -240,24 +240,37 @@ describe('QuoteApi', () => {
     });
 
     it('should exhaust all retries and throw final error', async () => {
+      // Use real timers for this specific test to avoid Jest fake timer issues
+      jest.useRealTimers();
+
       const serverErrorResponse = {
         ok: false,
         status: 500,
+        text: async () => '',
         json: async () => ({})
       };
 
       (global.fetch as jest.MockedFunction<typeof fetch>).mockResolvedValue(serverErrorResponse as Response);
 
-      const quotePromise = quoteApi.quoteExactInput('GALA|Unit|none|none', 'GUSDC|Unit|none|none', 100);
+      // Override the sleep method to use minimal delays for testing
+      const originalSleep = (quoteApi as any).sleep;
+      (quoteApi as any).sleep = async (ms: number) => {
+        await new Promise(resolve => setTimeout(resolve, 1)); // 1ms delay instead of full delay
+      };
 
-      // Advance timers to skip retry delays
-      await jest.runAllTimersAsync();
+      await expect(
+        quoteApi.quoteExactInput('GALA|Unit|none|none', 'GUSDC|Unit|none|none', 100)
+      ).rejects.toThrow('Server error: 500');
 
-      await expect(quotePromise).rejects.toThrow('Server error');
+      // Restore original sleep method
+      (quoteApi as any).sleep = originalSleep;
 
       // Should call initial + 3 retries = 4 total calls
       expect(global.fetch).toHaveBeenCalledTimes(4);
-    });
+
+      // Restore fake timers for other tests
+      jest.useFakeTimers();
+    }, 10000); // 10 second timeout
 
     it('should handle network errors with retries', async () => {
       const networkError = new Error('network error');

@@ -175,14 +175,15 @@ describe('StablecoinArbitrageStrategy', () => {
 
       // Mock scanForOpportunities to return a profitable opportunity
       const mockOpportunity = {
-        pair: {
-          tokenA: 'GUSDC|Unit|none|none',
-          tokenB: 'GUSDT|Unit|none|none',
-          symbol: 'GUSDC/GUSDT',
-          decimalsA: 6,
-          decimalsB: 6,
-          minSpread: 0.01,
-          maxPositionSize: 10000,
+        path: {
+          stablecoinA: 'GUSDC',
+          stablecoinB: 'GUSDT',
+          bridgeToken: 'GALA',
+          symbol: 'GUSDC→GALA→GUSDT',
+          hop1Pool: { token0: 'GUSDC|Unit|none|none', token1: 'GALA|Unit|none|none', fee: '10000', tvl: 10000 } as any,
+          hop2Pool: { token0: 'GALA|Unit|none|none', token1: 'GUSDT|Unit|none|none', fee: '10000', tvl: 10000 } as any,
+          totalTvl: 20000,
+          avgFee: 0.01,
           currentSpread: 0.05,
           direction: 'A_TO_B' as const,
           lastUpdate: Date.now(),
@@ -191,8 +192,11 @@ describe('StablecoinArbitrageStrategy', () => {
         direction: 'A_TO_B' as const,
         inputToken: 'GUSDC|Unit|none|none',
         outputToken: 'GUSDT|Unit|none|none',
+        bridgeToken: 'GALA|Unit|none|none',
         inputAmount: 1000,
-        expectedOutput: 1000.5,
+        hop1Output: 1000.25,
+        hop2Output: 1000.5,
+        expectedFinalOutput: 1000.5,
         minOutput: 999.5,
         spread: 0.5,
         spreadPercent: 0.05,
@@ -202,7 +206,7 @@ describe('StablecoinArbitrageStrategy', () => {
         confidence: 0.9,
         executionPriority: 8,
         timestamp: Date.now(),
-        feeTier: 500
+        totalSlippage: 0.02
       };
 
       jest.spyOn(strategy, 'scanForOpportunities').mockResolvedValue([mockOpportunity]);
@@ -214,7 +218,7 @@ describe('StablecoinArbitrageStrategy', () => {
       expect(profitableOpp).toBeDefined();
 
       if (profitableOpp) {
-        expect(profitableOpp.pair.symbol).toBe('GUSDC/GUSDT');
+        expect(profitableOpp.path.symbol).toBe('GUSDC/GUSDT');
         expect(profitableOpp.spreadPercent).toBeGreaterThan(0.02);
         expect(profitableOpp.direction).toMatch(/A_TO_B|B_TO_A/);
       }
@@ -244,8 +248,8 @@ describe('StablecoinArbitrageStrategy', () => {
 
       if (opportunities.length > 0) {
         const opp = opportunities[0];
-        expect(opp.minOutput).toBeLessThan(opp.expectedOutput);
-        expect(opp.minOutput).toBeGreaterThan(opp.expectedOutput * 0.999); // Very tight slippage
+        expect(opp.minOutput).toBeLessThan(opp.expectedFinalOutput);
+        expect(opp.minOutput).toBeGreaterThan(opp.expectedFinalOutput * 0.999); // Very tight slippage
       }
     });
   });
@@ -602,14 +606,15 @@ describe('StablecoinArbitrageStrategy', () => {
 
       // Mock scanForOpportunities to trigger trades
       jest.spyOn(strategy, 'scanForOpportunities').mockResolvedValue([{
-        pair: {
-          tokenA: 'GUSDC|Unit|none|none',
-          tokenB: 'GUSDT|Unit|none|none',
-          symbol: 'GUSDC/GUSDT',
-          decimalsA: 6,
-          decimalsB: 6,
-          minSpread: 0.01,
-          maxPositionSize: 10000,
+        path: {
+          stablecoinA: 'GUSDC',
+          stablecoinB: 'GUSDT',
+          bridgeToken: 'GALA',
+          symbol: 'GUSDC→GALA→GUSDT',
+          hop1Pool: { token0: 'GUSDC|Unit|none|none', token1: 'GALA|Unit|none|none', fee: '10000', tvl: 10000 } as any,
+          hop2Pool: { token0: 'GALA|Unit|none|none', token1: 'GUSDT|Unit|none|none', fee: '10000', tvl: 10000 } as any,
+          totalTvl: 20000,
+          avgFee: 0.01,
           currentSpread: 0.05,
           direction: 'A_TO_B' as const,
           lastUpdate: Date.now(),
@@ -618,8 +623,11 @@ describe('StablecoinArbitrageStrategy', () => {
         direction: 'A_TO_B' as const,
         inputToken: 'GUSDC|Unit|none|none',
         outputToken: 'GUSDT|Unit|none|none',
+        bridgeToken: 'GALA|Unit|none|none',
         inputAmount: 1000,
-        expectedOutput: 1000.5,
+        hop1Output: 1000.25,
+        hop2Output: 1000.5,
+        expectedFinalOutput: 1000.5,
         minOutput: 999.5,
         spread: 0.5,
         spreadPercent: 0.05,
@@ -629,7 +637,7 @@ describe('StablecoinArbitrageStrategy', () => {
         confidence: 0.9,
         executionPriority: 8,
         timestamp: Date.now(),
-        feeTier: 500
+        totalSlippage: 0.02
       }]);
 
       // Execute multiple times
