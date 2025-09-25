@@ -93,13 +93,8 @@ class StrategyOrchestratorRunner {
         signer
       );
 
-      // Initialize orchestrator
-      this.orchestrator = new StrategyOrchestrator(strategies, {
-        capitalAllocation: this.parseAllocation(options.allocation, strategies.length),
-        rebalanceInterval: (options.rebalance || 15) * 60 * 1000, // Default 15 minutes
-        maxConcurrentStrategies: 3,
-        riskLimit: options.amount ? options.amount * strategies.length : undefined
-      });
+      // Initialize orchestrator with correct parameters
+      this.orchestrator = new StrategyOrchestrator(gswap, config.trading, swapExecutor, marketAnalysis);
 
       // Apply custom configuration
       this.applyCustomConfig(options);
