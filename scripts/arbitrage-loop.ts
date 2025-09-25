@@ -450,8 +450,8 @@ Features:
 `);
 }
 
-// Run if this file is executed directly - CommonJS compatible
-if (require.main === module) {
+// Run if this file is executed directly - ESM compatible
+if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((error) => {
     console.error('💥 Loop controller failed:', error);
     process.exit(1);

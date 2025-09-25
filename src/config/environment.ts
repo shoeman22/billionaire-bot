@@ -44,7 +44,6 @@ export interface ApiConfig {
 
 export interface WalletConfig {
   address: string;
-  privateKey?: string; // Optional - prefer environment variables for security
   maxPositionSize?: number;
 }
 
@@ -85,12 +84,13 @@ export function validateEnvironment(): BotConfig {
   const productionTestMode = process.env.PRODUCTION_TEST_MODE === 'true';
   const nodeEnv = process.env.NODE_ENV || 'development';
 
-  // Validate private key is base64
+  // Validate private key format (hex or base64)
   const privateKey = process.env.WALLET_PRIVATE_KEY!;
-  try {
-    Buffer.from(privateKey, 'base64');
-  } catch (_error) {
-    throw new Error('WALLET_PRIVATE_KEY must be a valid base64 encoded key');
+  const isHexKey = privateKey.startsWith('0x') && /^0x[a-fA-F0-9]{64}$/.test(privateKey);
+  const isBase64Key = !isHexKey && /^[A-Za-z0-9+/]{43}=$/.test(privateKey);
+
+  if (!isHexKey && !isBase64Key) {
+    throw new Error('WALLET_PRIVATE_KEY must be a valid hex (0x...) or base64 encoded private key');
   }
 
   // Production test mode safety validations
@@ -135,7 +135,6 @@ export function validateEnvironment(): BotConfig {
     },
     wallet: {
       address: walletAddress,
-      privateKey: privateKey, // Added for dev script compatibility
     },
     development: {
       nodeEnv,
@@ -171,4 +170,26 @@ export function validateEnvironment(): BotConfig {
  */
 export function getConfig(): BotConfig {
   return validateEnvironment();
+}
+
+/**
+ * Securely get private key from environment - never store in memory
+ * @returns Private key as Buffer
+ */
+export function getPrivateKey(): Buffer {
+  const privateKey = process.env.WALLET_PRIVATE_KEY;
+  if (!privateKey) {
+    throw new Error('WALLET_PRIVATE_KEY environment variable is not set');
+  }
+
+  try {
+    // Handle hex format (0x...)
+    if (privateKey.startsWith('0x')) {
+      return Buffer.from(privateKey.slice(2), 'hex');
+    }
+    // Handle base64 format
+    return Buffer.from(privateKey, 'base64');
+  } catch (error) {
+    throw new Error('WALLET_PRIVATE_KEY must be a valid hex (0x...) or base64 encoded private key');
+  }
 }

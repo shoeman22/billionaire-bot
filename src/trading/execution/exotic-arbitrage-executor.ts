@@ -4,7 +4,7 @@
  */
 
 import { GSwap, PrivateKeySigner } from '@gala-chain/gswap-sdk';
-import { validateEnvironment } from '../../config/environment';
+import { validateEnvironment, getPrivateKey } from '../../config/environment';
 import { logger } from '../../utils/logger';
 import { TRADING_CONSTANTS, STRATEGY_CONSTANTS } from '../../config/constants';
 import { calculateMinOutputAmount, applySafetyMargin, getTokenDecimals } from '../../utils/slippage-calculator';
@@ -115,23 +115,14 @@ async function initializeGSwap(): Promise<{ gSwap: GSwap; env: ReturnType<typeof
   // TODO: Future enhancement - create adapter for SignerService when SDK supports it
   let signer: PrivateKeySigner;
   try {
-    // Validate private key before using it
-    if (!env.wallet.privateKey) {
-      throw new Error('Private key not found in environment');
-    }
+    // Get private key securely without storing it
+    const privateKey = process.env.WALLET_PRIVATE_KEY!;
 
-    // Validate key format without logging it
-    try {
-      Buffer.from(env.wallet.privateKey, 'base64');
-    } catch {
-      throw new Error('Invalid private key format - must be base64 encoded');
-    }
+    // GalaChain SDK expects the private key in its original format
+    signer = new PrivateKeySigner(privateKey);
 
-    signer = new PrivateKeySigner(env.wallet.privateKey);
-
-    // Clear the private key from memory as soon as possible
+    // Clear the private key string from memory as soon as possible
     // Note: This is a defensive measure, though the SDK may still hold references
-    (env.wallet as any).privateKey = undefined;
 
   } catch (error) {
     logger.error('🔒 Failed to initialize secure signer:', error);
