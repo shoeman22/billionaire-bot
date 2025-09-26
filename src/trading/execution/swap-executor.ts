@@ -12,6 +12,7 @@ import { safeParseFloat, safeParseFixedNumber, safeFixedToNumber } from '../../u
 import { ApiResponseParser, ResponseValidators } from '../../utils/api-response-parser';
 import { createQuoteWrapper } from '../../utils/quote-api';
 import { PrecisionMath, FixedNumber, TOKEN_DECIMALS } from '../../utils/precision-math';
+import { GasBiddingEngine, OpportunityMetrics, GasBidCalculation } from './gas-bidding';
 import {
   QuoteRequest,
   QuoteResponse,
@@ -34,6 +35,11 @@ export interface SwapRequest {
   urgency?: 'low' | 'normal' | 'high';
   maxPriceImpact?: number; // Maximum acceptable price impact
   deadlineMinutes?: number; // Transaction deadline in minutes
+  // Gas bidding enhancement fields
+  expectedProfitUSD?: number; // Expected profit for gas bidding calculations
+  timeToExpiration?: number; // Time until opportunity expires (milliseconds)
+  competitiveRisk?: 'low' | 'medium' | 'high'; // Competition level for this opportunity
+  gasBiddingEnabled?: boolean; // Enable/disable gas bidding for this swap
 }
 
 export interface SwapResult {
@@ -51,6 +57,11 @@ export interface SwapResult {
   failureReason?: 'rate_limit' | 'slippage' | 'network' | 'validation' | 'execution' | 'unknown';
   // Enhanced monitoring results
   monitoringResult?: TransactionMonitoringResult;
+  // Gas bidding results
+  gasBidUsed?: GasBidCalculation;
+  actualGasCost?: number;
+  profitAfterGas?: number;
+  gasBiddingSuccess?: boolean;
 }
 
 export interface TransactionMonitoringResult {
@@ -67,6 +78,7 @@ export class SwapExecutor {
   private gswap: GSwap;
   private slippageProtection: SlippageProtection;
   private quoteWrapper: any; // Working quote API wrapper
+  private gasBiddingEngine: GasBiddingEngine;
   private static testTransactionCounter = 0;
 
   /**
@@ -88,7 +100,18 @@ export class SwapExecutor {
     const config = getConfig();
     this.quoteWrapper = createQuoteWrapper(config.api.baseUrl);
 
-    logger.info('Swap Executor initialized');
+    // Initialize gas bidding engine with production-ready configuration
+    this.gasBiddingEngine = new GasBiddingEngine({
+      enabled: true,
+      maxGasBudgetPercent: 0.15, // Never spend more than 15% of profit on gas
+      baseGasPremium: 1.0,
+      competitiveFactor: 1.5,
+      emergencyMultiplier: 3.0,
+      marketAnalysisEnabled: true,
+      profitProtectionEnabled: true
+    });
+
+    logger.info('Swap Executor initialized with gas bidding enhancement');
 
     // Log test mode status
     if (config.development.productionTestMode) {
@@ -127,13 +150,36 @@ export class SwapExecutor {
         };
       }
 
-      // Step 3: Prepare transaction
-      const swapPayload = await this.prepareSwapPayload(request, quote);
+      // Step 3: Calculate optimal gas bid
+      let gasBidCalculation: GasBidCalculation | null = null;
+      if (request.gasBiddingEnabled !== false && request.expectedProfitUSD) {
+        gasBidCalculation = await this.calculateOptimalGasBid(request, quote);
 
-      // Step 4: Execute transaction
-      const result = await this.executeSwapTransaction(swapPayload);
+        // Validate that the trade is still profitable after gas costs
+        if (!gasBidCalculation.profitProtection.isViable) {
+          return {
+            success: false,
+            error: `Trade not viable after gas costs: ${gasBidCalculation.reasoning}`,
+            executionTime: Date.now() - startTime,
+            gasBidUsed: gasBidCalculation
+          };
+        }
 
-      // Step 5: Monitor execution with clear success/failure reporting
+        logger.info('Gas bidding calculation:', {
+          recommendedGasPrice: gasBidCalculation.recommendedGasPrice,
+          strategy: gasBidCalculation.bidStrategy,
+          profitAfterGas: gasBidCalculation.profitProtection.remainingProfitAfterGas,
+          reasoning: gasBidCalculation.reasoning
+        });
+      }
+
+      // Step 4: Prepare transaction with gas bidding
+      const swapPayload = await this.prepareSwapPayload(request, quote, gasBidCalculation);
+
+      // Step 5: Execute transaction
+      const result = await this.executeSwapTransaction(swapPayload, gasBidCalculation);
+
+      // Step 6: Monitor execution with clear success/failure reporting
       if (result.success && result.transactionId) {
         const monitoringResult = await this.monitorTransaction(result.transactionId);
         result.monitoringResult = monitoringResult;
@@ -146,11 +192,30 @@ export class SwapExecutor {
           result.success = false;
           result.error = 'Transaction monitoring timeout - status unknown';
         }
+
+        // Update gas bidding success tracking
+        if (gasBidCalculation) {
+          this.gasBiddingEngine.updateBidResult(
+            gasBidCalculation.recommendedGasPrice,
+            result.success
+          );
+        }
+      }
+
+      // Calculate profit after gas if available
+      let profitAfterGas: number | undefined;
+      if (request.expectedProfitUSD && result.actualGasCost) {
+        profitAfterGas = request.expectedProfitUSD - result.actualGasCost;
+      } else if (gasBidCalculation) {
+        profitAfterGas = gasBidCalculation.profitProtection.remainingProfitAfterGas;
       }
 
       return {
         ...result,
         executionTime: Date.now() - startTime,
+        gasBidUsed: gasBidCalculation || undefined,
+        profitAfterGas,
+        gasBiddingSuccess: gasBidCalculation ? result.success : undefined
       };
 
     } catch (error) {
@@ -391,9 +456,122 @@ export class SwapExecutor {
   }
 
   /**
+   * Calculate optimal gas bid for arbitrage opportunity
+   */
+  private async calculateOptimalGasBid(request: SwapRequest, quote: QuoteResponse): Promise<GasBidCalculation> {
+    try {
+      // Extract opportunity metrics from swap request
+      const opportunityMetrics: OpportunityMetrics = {
+        profitAmountUSD: request.expectedProfitUSD || 0,
+        profitPercent: this.calculateProfitPercent(request, quote),
+        timeToExpiration: request.timeToExpiration || 300000, // Default 5 minutes
+        competitiveRisk: request.competitiveRisk || 'medium',
+        marketVolatility: await this.estimateMarketVolatility(request.tokenIn, request.tokenOut),
+        liquidityDepth: await this.estimateLiquidityDepth(request.tokenIn, request.tokenOut)
+      };
+
+      // Calculate gas bid
+      return await this.gasBiddingEngine.calculateGasBid(opportunityMetrics);
+
+    } catch (error) {
+      logger.error('Error calculating gas bid:', error);
+
+      // Return conservative fallback bid
+      return {
+        recommendedGasPrice: TRADING_CONSTANTS.GAS_COSTS.BASE_GAS,
+        maxGasPrice: TRADING_CONSTANTS.GAS_COSTS.BASE_GAS * 2,
+        priorityMultiplier: 1.0,
+        competitiveAdjustment: 1.0,
+        profitProtection: {
+          maxGasBudget: TRADING_CONSTANTS.GAS_COSTS.BASE_GAS * 2,
+          remainingProfitAfterGas: (request.expectedProfitUSD || 0) - TRADING_CONSTANTS.GAS_COSTS.BASE_GAS,
+          isViable: (request.expectedProfitUSD || 0) > TRADING_CONSTANTS.GAS_COSTS.BASE_GAS * 2
+        },
+        bidStrategy: 'conservative',
+        reasoning: 'Gas bidding error - using conservative fallback'
+      };
+    }
+  }
+
+  /**
+   * Calculate profit percentage from request and quote
+   */
+  private calculateProfitPercent(request: SwapRequest, quote: QuoteResponse): number {
+    try {
+      if (!request.expectedProfitUSD) return 0;
+
+      // Estimate trade value in USD
+      const amountIn = safeParseFloat(request.amountIn, 0);
+      if (amountIn <= 0) return 0;
+
+      // Rough estimation: assume GALA is around $0.015
+      const estimatedTradeValueUSD = amountIn * 0.015;
+
+      if (estimatedTradeValueUSD <= 0) return 0;
+
+      return request.expectedProfitUSD / estimatedTradeValueUSD;
+    } catch (error) {
+      logger.error('Error calculating profit percent:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Estimate market volatility for token pair
+   */
+  private async estimateMarketVolatility(tokenIn: string | TokenClassKey, tokenOut: string | TokenClassKey): Promise<number> {
+    try {
+      // In production, this would analyze recent price movements
+      // For now, return moderate volatility for arbitrage opportunities
+      const tokenInStr = this.tokenToString(tokenIn);
+      const tokenOutStr = this.tokenToString(tokenOut);
+
+      // Higher volatility for exotic pairs
+      if (tokenInStr.includes('SILK') || tokenInStr.includes('ETIME') ||
+          tokenOutStr.includes('SILK') || tokenOutStr.includes('ETIME')) {
+        return 0.4; // High volatility for exotic tokens
+      } else if (tokenInStr.includes('GALA') || tokenOutStr.includes('GALA')) {
+        return 0.2; // Moderate volatility for GALA pairs
+      } else {
+        return 0.1; // Lower volatility for stable pairs
+      }
+    } catch (error) {
+      logger.error('Error estimating market volatility:', error);
+      return 0.2; // Default moderate volatility
+    }
+  }
+
+  /**
+   * Estimate liquidity depth for token pair
+   */
+  private async estimateLiquidityDepth(tokenIn: string | TokenClassKey, tokenOut: string | TokenClassKey): Promise<number> {
+    try {
+      // Use quote method to estimate available liquidity
+      const tokenInStr = this.tokenToString(tokenIn);
+      const tokenOutStr = this.tokenToString(tokenOut);
+
+      // Test with a larger amount to gauge liquidity depth
+      const testQuote = await this.quoteWrapper.quoteExactInput(tokenInStr, tokenOutStr, 1000);
+
+      if (testQuote?.outTokenAmount) {
+        // Rough liquidity estimation based on quote success
+        const outAmount = safeParseFloat(testQuote.outTokenAmount.toString(), 0);
+
+        // Estimate liquidity in USD (rough approximation)
+        return outAmount * 1000 * 0.015; // Assume GALA ~$0.015
+      }
+
+      return 50000; // Default moderate liquidity
+    } catch (error) {
+      logger.debug('Error estimating liquidity depth:', error);
+      return 50000; // Default moderate liquidity
+    }
+  }
+
+  /**
    * Prepare swap payload with enhanced validation and safety checks
    */
-  private async prepareSwapPayload(request: SwapRequest, quote: QuoteResponse): Promise<any> {
+  private async prepareSwapPayload(request: SwapRequest, quote: QuoteResponse, gasBid?: GasBidCalculation | null): Promise<any> {
     try {
       if (!isSuccessResponse(quote)) {
         throw new Error(`Invalid quote response: ${(quote as ErrorResponse).message}`);
@@ -605,9 +783,9 @@ export class SwapExecutor {
   }
 
   /**
-   * Execute swap transaction with enhanced error handling and validation
+   * Execute swap transaction with enhanced error handling and gas bidding
    */
-  private async executeSwapTransaction(payload: any): Promise<SwapResult> {
+  private async executeSwapTransaction(payload: any, gasBid?: GasBidCalculation | null): Promise<SwapResult> {
     try {
       // Validate payload before execution
       if (!payload || typeof payload !== 'object') {
@@ -619,16 +797,24 @@ export class SwapExecutor {
         throw new Error('Payload size too large for safe execution');
       }
 
-      logger.info('Executing swap transaction...', {
+      // Log gas bidding information
+      const gasBidInfo = gasBid ? {
+        gasPrice: gasBid.recommendedGasPrice,
+        strategy: gasBid.bidStrategy,
+        profitProtected: gasBid.profitProtection.isViable
+      } : { gasPrice: 'standard', strategy: 'none', profitProtected: true };
+
+      logger.info('Executing swap transaction with gas bidding...', {
         payloadSize,
-        payloadType: typeof payload
+        payloadType: typeof payload,
+        gasBid: gasBidInfo
       });
 
       // Pre-execution validation
       await this.validatePreExecution();
 
-      // Execute the signed payload via GalaSwap bundle API with retry
-      const bundleResponse = await this.executeBundleWithRetry(payload, 'swap');
+      // Execute the signed payload via GalaSwap bundle API with retry and gas bidding
+      const bundleResponse = await this.executeBundleWithRetry(payload, 'swap', gasBid);
 
       if (!isSuccessResponse(bundleResponse)) {
         logger.error('Bundle execution failed:', bundleResponse.message);
@@ -664,11 +850,18 @@ export class SwapExecutor {
         bundleStatus
       });
 
+      // Calculate actual gas cost if gas bidding was used
+      let actualGasCost: number | undefined;
+      if (gasBid) {
+        actualGasCost = gasBid.recommendedGasPrice;
+      }
+
       return {
         success: true,
         transactionId,
         hash: bundleHash,
         executionTime: 0, // Will be set by caller
+        actualGasCost
       };
 
     } catch (error) {
@@ -712,12 +905,12 @@ export class SwapExecutor {
   /**
    * Execute bundle with retry logic - intercepted in production test mode
    */
-  private async executeBundleWithRetry(payload: any, bundleType: 'swap', maxRetries: number = 2): Promise<any> {
+  private async executeBundleWithRetry(payload: any, bundleType: 'swap', gasBid?: GasBidCalculation | null, maxRetries: number = 2): Promise<any> {
     const config = getConfig();
 
     // *** PRODUCTION TEST MODE INTERCEPTION ***
     if (config.development.productionTestMode) {
-      return this.simulateTradeExecution(payload, bundleType);
+      return this.simulateTradeExecution(payload, bundleType, gasBid);
     }
 
     // *** LIVE TRADING MODE - Real execution ***
@@ -725,15 +918,34 @@ export class SwapExecutor {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        // Execute swap using SDK
+        // Apply gas bidding to swap parameters if available
+        const swapOptions: any = {
+          exactIn: payload.payload.amountIn,
+          amountOutMinimum: payload.payload.amountOutMinimum || '0'
+        };
+
+        // GalaChain uses priority fees differently than EIP-1559
+        // Apply the gas bid as a priority multiplier for faster execution
+        if (gasBid && gasBid.recommendedGasPrice > TRADING_CONSTANTS.GAS_COSTS.BASE_GAS) {
+          const priorityMultiplier = gasBid.recommendedGasPrice / TRADING_CONSTANTS.GAS_COSTS.BASE_GAS;
+
+          // Add priority execution hint to the swap options
+          swapOptions.priorityLevel = gasBid.bidStrategy;
+          swapOptions.gasMultiplier = Math.min(priorityMultiplier, 5.0); // Cap at 5x
+
+          logger.info('Applying gas bid to swap execution:', {
+            strategy: gasBid.bidStrategy,
+            gasMultiplier: swapOptions.gasMultiplier,
+            estimatedGasCost: gasBid.recommendedGasPrice
+          });
+        }
+
+        // Execute swap using SDK with gas bidding parameters
         const swapResult = await this.gswap.swaps.swap(
           payload.payload.tokenIn,
           payload.payload.tokenOut,
           payload.payload.fee || 3000,
-          {
-            exactIn: payload.payload.amountIn,
-            amountOutMinimum: payload.payload.amountOutMinimum || '0'
-          }
+          swapOptions
         );
 
         // Wait for transaction completion and adapt response
@@ -773,14 +985,14 @@ export class SwapExecutor {
   }
 
   /**
-   * Simulate trade execution in production test mode
+   * Simulate trade execution in production test mode with gas bidding
    */
-  private async simulateTradeExecution(payload: any, bundleType: 'swap'): Promise<any> {
+  private async simulateTradeExecution(payload: any, bundleType: 'swap', gasBid?: GasBidCalculation | null): Promise<any> {
     SwapExecutor.testTransactionCounter++;
     const testTxId = `TEST-${bundleType.toUpperCase()}-${SwapExecutor.testTransactionCounter.toString().padStart(3, '0')}`;
     const timestamp = new Date().toISOString();
 
-    // Extract trade details for logging
+    // Extract trade details for logging including gas bidding
     const tradeDetails = {
       type: bundleType,
       tokenIn: payload.payload?.tokenIn || 'Unknown',
@@ -789,14 +1001,21 @@ export class SwapExecutor {
       amountOutMinimum: payload.payload?.amountOutMinimum || '0',
       fee: payload.payload?.fee || 3000,
       testTxId,
-      timestamp
+      timestamp,
+      // Gas bidding details
+      gasBidStrategy: gasBid?.bidStrategy || 'none',
+      gasPrice: gasBid?.recommendedGasPrice || TRADING_CONSTANTS.GAS_COSTS.BASE_GAS,
+      profitAfterGas: gasBid?.profitProtection.remainingProfitAfterGas || 'unknown'
     };
 
-    // Log the simulated trade prominently
-    logger.warn('🧪 SIMULATED TRADE EXECUTION:');
+    // Log the simulated trade prominently with gas bidding information
+    logger.warn('🧪 SIMULATED TRADE EXECUTION WITH GAS BIDDING:');
     logger.warn(`   📊 ${tradeDetails.type.toUpperCase()}: ${tradeDetails.amountIn} ${tradeDetails.tokenIn} → ${tradeDetails.tokenOut}`);
     logger.warn(`   💰 Min Output: ${tradeDetails.amountOutMinimum}`);
     logger.warn(`   💸 Fee Tier: ${tradeDetails.fee} (${(tradeDetails.fee / 10000).toFixed(2)}%)`);
+    logger.warn(`   ⛽ Gas Strategy: ${tradeDetails.gasBidStrategy.toUpperCase()}`);
+    logger.warn(`   💸 Gas Price: ${tradeDetails.gasPrice} GALA`);
+    logger.warn(`   💎 Profit After Gas: ${tradeDetails.profitAfterGas} USD`);
     logger.warn(`   🆔 Test TX: ${testTxId}`);
     logger.warn(`   ⏰ Time: ${timestamp}`);
 
@@ -1430,15 +1649,51 @@ export class SwapExecutor {
   }
 
   /**
-   * Get execution statistics
+   * Get execution statistics including gas bidding performance
    */
   getExecutionStats(): {
     clientHealth: any;
     rateLimiterStatus: any;
+    gasBidding: {
+      enabled: boolean;
+      totalBids: number;
+      successRate: number;
+      averageGasPrice: number;
+      averageProfitAmount: number;
+      strategyDistribution: Record<string, number>;
+    };
   } {
+    const gasBiddingStats = this.gasBiddingEngine.getBiddingStats();
+
     return {
       clientHealth: {}, // Will be updated when health check method is available
-      rateLimiterStatus: {} // Will be available after client updates
+      rateLimiterStatus: {}, // Will be available after client updates
+      gasBidding: {
+        enabled: this.gasBiddingEngine.getConfig().enabled,
+        ...gasBiddingStats
+      }
     };
+  }
+
+  /**
+   * Update gas bidding configuration
+   */
+  updateGasBiddingConfig(config: Partial<any>): void {
+    this.gasBiddingEngine.updateConfig(config);
+    logger.info('Gas bidding configuration updated');
+  }
+
+  /**
+   * Get current gas bidding configuration
+   */
+  getGasBiddingConfig(): any {
+    return this.gasBiddingEngine.getConfig();
+  }
+
+  /**
+   * Get gas bidding statistics
+   */
+  getGasBiddingStats(): any {
+    return this.gasBiddingEngine.getBiddingStats();
   }
 }

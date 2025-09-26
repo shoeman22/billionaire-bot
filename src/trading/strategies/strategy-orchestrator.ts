@@ -21,6 +21,8 @@ import { logger } from '../../utils/logger';
 import { TRADING_CONSTANTS } from '../../config/constants';
 import { SwapExecutor } from '../execution/swap-executor';
 import { MarketAnalysis } from '../../monitoring/market-analysis';
+import { VolumeAnalyzer } from '../../monitoring/volume-analyzer';
+import { RiskMonitor } from '../risk/risk-monitor';
 import { poolDiscovery } from '../../services/pool-discovery';
 
 // Import all strategies
@@ -29,6 +31,12 @@ import { SmartArbitrageStrategy } from './smart-arbitrage';
 import { TriangleArbitrageStrategy } from './triangle-arbitrage';
 import { StablecoinArbitrageStrategy } from './stablecoin-arbitrage';
 import { CrossAssetMomentumStrategy } from './cross-asset-momentum';
+import { MultiPathArbitrageStrategy } from './multi-path-arbitrage';
+import { StatisticalArbitrageStrategy } from './statistical-arbitrage';
+import { TimeBasedPatternsStrategy } from './time-based-patterns';
+import { VolumeMomentumStrategy } from './volume-momentum';
+import { EventArbitrageStrategy } from './event-arbitrage';
+import { NFTArbitrageStrategy } from './nft-arbitrage';
 
 export interface StrategyConfig {
   name: string;
@@ -91,6 +99,8 @@ export class StrategyOrchestrator {
   private swapExecutor: SwapExecutor;
   private marketAnalysis: MarketAnalysis;
   private isActive: boolean = false;
+  private volumeAnalyzer: VolumeAnalyzer;
+  private riskMonitor: RiskMonitor;
 
   // Strategy instances
   private strategies: Map<string, any> = new Map();
@@ -139,13 +149,17 @@ export class StrategyOrchestrator {
     gswap: GSwap,
     config: TradingConfig,
     swapExecutor: SwapExecutor,
-    marketAnalysis: MarketAnalysis
+    marketAnalysis: MarketAnalysis,
+    volumeAnalyzer: VolumeAnalyzer,
+    riskMonitor: RiskMonitor
   ) {
     this.gswap = gswap;
     this.config = config;
     this.swapExecutor = swapExecutor;
     this.marketAnalysis = marketAnalysis;
 
+    this.volumeAnalyzer = volumeAnalyzer;
+    this.riskMonitor = riskMonitor;
     this.initializeStrategies();
     this.initializeStrategyConfigs();
 
@@ -184,6 +198,37 @@ export class StrategyOrchestrator {
     // Cross-asset momentum
     this.strategies.set('cross-asset-momentum', new CrossAssetMomentumStrategy(
       this.gswap, this.config, this.swapExecutor, this.marketAnalysis
+    ));
+
+    // Multi-path arbitrage (advanced)
+    this.strategies.set('multi-path-arbitrage', new MultiPathArbitrageStrategy(
+      this.gswap, this.config, this.swapExecutor, this.marketAnalysis
+    ));
+
+    // Statistical arbitrage (pairs trading)
+    this.strategies.set('statistical-arbitrage', new StatisticalArbitrageStrategy(
+      this.gswap, this.config, this.swapExecutor, this.marketAnalysis
+    ));
+
+    // Time-based patterns strategy
+    this.strategies.set('time-based-patterns', new TimeBasedPatternsStrategy(
+      this.gswap, this.config, this.swapExecutor, this.marketAnalysis
+    ));
+
+    // Volume Momentum Strategy - Gaming token momentum trading
+    this.strategies.set('volume-momentum', new VolumeMomentumStrategy(
+      this.gswap, this.config, this.swapExecutor, this.marketAnalysis,
+      this.volumeAnalyzer, this.riskMonitor
+    ));
+
+    // Event Arbitrage Strategy - Gaming event-driven trading
+    this.strategies.set('event-arbitrage', new EventArbitrageStrategy(
+      this.gswap, this.config, this.swapExecutor, this.marketAnalysis
+    ));
+
+    // NFT Arbitrage Strategy - Gaming NFT floor price arbitrage
+    this.strategies.set('nft-arbitrage', new NFTArbitrageStrategy(
+      this.gswap, this.config, this.swapExecutor, this.marketAnalysis, this.riskMonitor
     ));
 
     logger.info(`Initialized ${this.strategies.size} trading strategies`);
@@ -256,6 +301,83 @@ export class StrategyOrchestrator {
       minProfitThreshold: 1.0, // High threshold for experimental strategy
       cooldownPeriod: 120000, // 2 minute cooldown
       maxConcurrentTrades: 2
+    });
+
+    // Multi-Path Arbitrage - Advanced arbitrage with highest profit potential
+    this.strategyConfigs.set('multi-path-arbitrage', {
+      name: 'Multi-Path Arbitrage',
+      enabled: true,
+      priority: 10, // Highest priority due to advanced profit potential
+      maxCapitalAllocation: 35, // Large allocation for high-value opportunities
+      riskTolerance: 'medium',
+      marketConditions: ['volatile', 'bull', 'bear', 'sideways'],
+      minProfitThreshold: 2.0, // Higher threshold for multi-hop complexity
+      cooldownPeriod: 90000, // 90 second cooldown for complex execution
+      maxConcurrentTrades: 1 // Single execution due to complexity
+});
+    // Statistical Arbitrage - Pairs trading with mean reversion
+    this.strategyConfigs.set('statistical-arbitrage', {
+      name: 'Statistical Arbitrage',
+      enabled: true,
+      priority: 8, // High priority for proven statistical methods
+      maxCapitalAllocation: 20, // Moderate allocation for pairs trading
+      riskTolerance: 'medium',
+      marketConditions: ['bull', 'bear', 'sideways', 'volatile'], // Works in all conditions
+      minProfitThreshold: 2.0, // 2% minimum for statistical significance
+      cooldownPeriod: 30000, // 30 second cooldown
+      maxConcurrentTrades: 5 // Multiple pairs can trade simultaneously
+    });
+
+    // Time-Based Patterns - Gaming ecosystem pattern exploitation
+    this.strategyConfigs.set('time-based-patterns', {
+      name: 'Time-Based Patterns',
+      enabled: true,
+      priority: 7, // High priority for proven gaming patterns
+      maxCapitalAllocation: 15, // Conservative allocation for time-based strategy
+      riskTolerance: 'medium',
+      marketConditions: ['bull', 'bear', 'sideways', 'volatile'], // Works in all conditions
+      minProfitThreshold: 1.5, // 1.5% minimum for pattern-based trades
+      cooldownPeriod: 1800000, // 30 minute cooldown (patterns need time to develop)
+      maxConcurrentTrades: 3 // Multiple patterns can be active simultaneously
+    });
+
+    // Volume Momentum Strategy - Gaming token momentum trading
+    this.strategyConfigs.set('volume-momentum', {
+      name: 'Volume Momentum',
+      enabled: true,
+      priority: 8, // High priority for momentum trading
+      maxCapitalAllocation: 12, // 12% max (matches strategy limit)
+      riskTolerance: 'medium',
+      marketConditions: ['bull', 'bear', 'volatile'], // Momentum works in trending/volatile markets
+      minProfitThreshold: 5.0, // 5% minimum for momentum plays
+      cooldownPeriod: 30000, // 30 second cooldown
+      maxConcurrentTrades: 2 // Matches strategy MAX_CONCURRENT_POSITIONS
+    });
+
+    // Event Arbitrage Strategy - Gaming event-driven arbitrage trading
+    this.strategyConfigs.set('event-arbitrage', {
+      name: 'Event Arbitrage',
+      enabled: true,
+      priority: 9, // High priority for predictable event patterns
+      maxCapitalAllocation: 15, // 15% max (matches strategy limit)
+      riskTolerance: 'medium',
+      marketConditions: ['bull', 'bear', 'sideways', 'volatile'], // Works in all conditions
+      minProfitThreshold: 3.0, // 3% minimum for event-driven trades
+      cooldownPeriod: 14400000, // 4 hour cooldown (events need time to develop)
+      maxConcurrentTrades: 4 // Multiple event positions can be active
+    });
+
+    // NFT Arbitrage Strategy - Gaming NFT floor price arbitrage
+    this.strategyConfigs.set('nft-arbitrage', {
+      name: 'NFT Floor Price Arbitrage',
+      enabled: true,
+      priority: 8, // High priority for unique gaming NFT opportunities
+      maxCapitalAllocation: 10, // 10% max (matches strategy MAX_TOTAL_NFT_EXPOSURE)
+      riskTolerance: 'high', // NFT markets are inherently high risk
+      marketConditions: ['bull', 'bear', 'sideways', 'volatile'], // Works in all conditions with different strategies
+      minProfitThreshold: 10.0, // 10% minimum for NFT arbitrage (matches strategy MIN_PROFIT_THRESHOLD)
+      cooldownPeriod: 300000, // 5 minute cooldown (matches strategy scanInterval)
+      maxConcurrentTrades: 3 // Matches strategy MAX_CONCURRENT_POSITIONS
     });
 
     // Initialize performance tracking for each strategy
@@ -713,8 +835,8 @@ export class StrategyOrchestrator {
       } else if (strategy.execute && typeof strategy.execute === 'function') {
         result = await strategy.execute();
       } else if (strategy.start && typeof strategy.start === 'function') {
-        // For strategies that need to be started (like momentum)
-        if (!strategy.isActive) {
+        // For strategies that need to be started (like momentum and time-based patterns)
+        if (!strategy.isActive && !strategy.getIsActive?.()) {
           await strategy.start();
           return true;
         }
@@ -788,6 +910,7 @@ export class StrategyOrchestrator {
     if (config.name.includes('Triangle')) riskScore *= 1.2; // Higher complexity
     if (config.name.includes('Stablecoin')) riskScore *= 0.8; // Lower risk
     if (config.name.includes('Momentum')) riskScore *= 1.4; // Experimental
+    if (config.name.includes('NFT')) riskScore *= 1.6; // NFT markets are high risk
 
     return Math.min(1, riskScore);
   }
