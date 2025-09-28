@@ -219,23 +219,23 @@ export class WalletAnalyzer {
         marketTiming,
         copyTradingSuitability
       ] = await Promise.all([
-        this.calculateBasicMetrics(_transactions),
-        this.analyzeProfitability(_transactions),
-        this.assessRisk(_transactions),
-        this.identifyTradingPatterns(_transactions),
-        this.analyzeBehavior(_transactions),
-        this.analyzeMarketTiming(_transactions),
-        this.assessCopyTradingSuitability(_transactions)
+        this.calculateBasicMetrics(transactions),
+        this.analyzeProfitability(transactions),
+        this.assessRisk(transactions),
+        this.identifyTradingPatterns(transactions),
+        this.analyzeBehavior(transactions),
+        this.analyzeMarketTiming(transactions),
+        this.assessCopyTradingSuitability(transactions)
       ]);
 
       // Institutional/guild analysis
-      const institutionalAnalysis = await this.analyzeInstitutionalPatterns(_transactions);
+      const institutionalAnalysis = await this.analyzeInstitutionalPatterns(transactions);
 
       // Compile comprehensive analysis
       const analysis: WalletAnalysis = {
         address,
         analysisTimestamp: new Date(),
-        dataQuality: this.assessDataQuality(_transactions),
+        dataQuality: this.assessDataQuality(transactions),
         sampleSize: transactions.length,
 
         ...basicMetrics,
@@ -252,8 +252,8 @@ export class WalletAnalyzer {
           .map(tr => tr.hours),
 
         // Correlations and suspicious activity
-        correlatedAddresses: await this.findCorrelatedAddresses(address, _transactions),
-        suspiciousActivity: await this.detectSuspiciousActivity(_transactions)
+        correlatedAddresses: await this.findCorrelatedAddresses(address, transactions),
+        suspiciousActivity: await this.detectSuspiciousActivity(transactions)
       };
 
       // Cache the result
@@ -308,9 +308,9 @@ export class WalletAnalyzer {
         };
       }
 
-      const volume30d = this.calculateTotalVolume(_transactions);
-      const successRate = this.calculateQuickSuccessRate(_transactions);
-      const riskScore = this.calculateQuickRiskScore(_transactions);
+      const volume30d = this.calculateTotalVolume(transactions);
+      const successRate = this.calculateQuickSuccessRate(transactions);
+      const riskScore = this.calculateQuickRiskScore(transactions);
 
       const isWhaleCandidate = volume30d >= this.config.smartMoneyVolumeThreshold ||
                               (successRate >= this.config.smartMoneySuccessThreshold && volume30d >= 5000);
@@ -470,7 +470,7 @@ export class WalletAnalyzer {
     monthlyVolume: number;
   } {
     const totalTrades = transactions.length;
-    const totalVolume = this.calculateTotalVolume(_transactions);
+    const totalVolume = this.calculateTotalVolume(transactions);
     const averageTradeSize = totalTrades > 0 ? totalVolume / totalTrades : 0;
 
     // Calculate time span
@@ -628,10 +628,10 @@ export class WalletAnalyzer {
     }
 
     // Bot detection
-    const botAnalysis = this.detectBotBehavior(_transactions);
+    const botAnalysis = this.detectBotBehavior(transactions);
 
     // Trading style classification
-    const tradingStyle = this.classifyTradingStyle(_transactions);
+    const tradingStyle = this.classifyTradingStyle(transactions);
 
     return {
       isBot: botAnalysis.isBot,
@@ -658,7 +658,7 @@ export class WalletAnalyzer {
     const activityScore = Math.min(100, (recentTx.length / transactions.length) * 100);
 
     // Consistency score based on trade pattern regularity
-    const intervals = this.calculateTradingIntervals(_transactions);
+    const intervals = this.calculateTradingIntervals(transactions);
     const avgInterval = intervals.reduce((sum, int) => sum + int, 0) / intervals.length;
     const intervalVariance = intervals.reduce((sum, int) => sum + Math.pow(int - avgInterval, 2), 0) / intervals.length;
     const consistencyScore = Math.max(0, 100 - ((Math.sqrt(intervalVariance) / avgInterval) * 50));
@@ -667,10 +667,10 @@ export class WalletAnalyzer {
     const adaptabilityScore = 70;
 
     // Market timing score (simplified)
-    const marketTimingScore = this.calculateMarketTimingScore(_transactions);
+    const marketTimingScore = this.calculateMarketTimingScore(transactions);
 
     // Preferred tokens
-    const preferredTokens = this.calculatePreferredTokens(_transactions);
+    const preferredTokens = this.calculatePreferredTokens(transactions);
 
     return {
       activityScore,
@@ -752,7 +752,7 @@ export class WalletAnalyzer {
     }
 
     // Calculate profitability
-    const profitability = this.calculateQuickSuccessRate(_transactions);
+    const profitability = this.calculateQuickSuccessRate(transactions);
     if (profitability >= 70) {
       followWorthiness += 3;
       notes.push('High profitability');
@@ -762,7 +762,7 @@ export class WalletAnalyzer {
     }
 
     // Volume consistency
-    const volume = this.calculateTotalVolume(_transactions);
+    const volume = this.calculateTotalVolume(transactions);
     if (volume >= 10000) {
       followWorthiness += 2;
       notes.push('High volume trader');
@@ -807,7 +807,7 @@ export class WalletAnalyzer {
     }
 
     // Regular trading patterns
-    const intervals = this.calculateTradingIntervals(_transactions);
+    const intervals = this.calculateTradingIntervals(transactions);
     const regularityScore = this.calculateRegularityScore(intervals);
     if (regularityScore > 0.7) {
       institutionalProbability += 0.2;
@@ -818,8 +818,8 @@ export class WalletAnalyzer {
     const uniqueTokens = new Set();
     transactions.forEach(tx => {
       if (tx.swapData) {
-        uniqueTokens.add(tx.swapData._tokenIn);
-        uniqueTokens.add(tx.swapData._tokenOut);
+        uniqueTokens.add(tx.swapData.tokenIn);
+        uniqueTokens.add(tx.swapData.tokenOut);
       }
     });
 
@@ -865,7 +865,7 @@ export class WalletAnalyzer {
   private calculateTradeProfit(tx: GalaScanTransaction): number {
     if (!tx.swapData) return 0;
 
-    const { amountIn, _amountOut, _tokenIn, _tokenOut, slippage } = tx.swapData;
+    const { amountIn, amountOut: _amountOut, tokenIn: _tokenIn, tokenOut: _tokenOut, slippage } = tx.swapData;
 
     // Estimate profit based on slippage and gas costs
     let estimatedProfit = 0;
@@ -884,7 +884,7 @@ export class WalletAnalyzer {
     return estimatedProfit;
   }
 
-  private estimateTradeValueUSD(swapData: unknown): number {
+  private estimateTradeValueUSD(swapData: { amountIn: number; tokenIn: string; amountOut: number; tokenOut: string; slippage: number }): number {
     // Rough USD estimation for volume calculation
     const { amountIn, tokenIn } = swapData;
 
@@ -919,7 +919,7 @@ export class WalletAnalyzer {
     const features = [];
 
     // Regular intervals
-    const intervals = this.calculateTradingIntervals(_transactions);
+    const intervals = this.calculateTradingIntervals(transactions);
     const regularityScore = this.calculateRegularityScore(intervals);
     if (regularityScore > 0.8) {
       botScore += 0.3;
@@ -962,8 +962,8 @@ export class WalletAnalyzer {
   private classifyTradingStyle(transactions: GalaScanTransaction[]): 'scalper' | 'swing' | 'arbitrageur' | 'holder' | 'unknown' {
     if (transactions.length < 5) return 'unknown';
 
-    const avgTradeSize = this.calculateTotalVolume(_transactions) / transactions.length;
-    const intervals = this.calculateTradingIntervals(_transactions);
+    const avgTradeSize = this.calculateTotalVolume(transactions) / transactions.length;
+    const intervals = this.calculateTradingIntervals(transactions);
     const avgInterval = intervals.reduce((sum, int) => sum + int, 0) / intervals.length / (60 * 60 * 1000); // Hours
 
     // Classification logic
@@ -1019,8 +1019,8 @@ export class WalletAnalyzer {
 
     transactions.forEach(tx => {
       if (tx.swapData) {
-        tokenCounts.set(tx.swapData._tokenIn, (tokenCounts.get(tx.swapData._tokenIn) || 0) + 1);
-        tokenCounts.set(tx.swapData._tokenOut, (tokenCounts.get(tx.swapData._tokenOut) || 0) + 1);
+        tokenCounts.set(tx.swapData.tokenIn, (tokenCounts.get(tx.swapData.tokenIn) || 0) + 1);
+        tokenCounts.set(tx.swapData.tokenOut, (tokenCounts.get(tx.swapData.tokenOut) || 0) + 1);
       }
     });
 

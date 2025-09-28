@@ -287,7 +287,7 @@ export class WhaleCopyTradingStrategy extends EventEmitter {
     });
 
     // Handle whale exits
-    this.whaleTracker.on('whaleRemoved', async (whale: unknown) => {
+    this.whaleTracker.on('whaleRemoved', async (whale: { formatted: string }) => {
       await this.handleWhaleRemoval(whale.formatted);
     });
   }

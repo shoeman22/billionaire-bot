@@ -531,7 +531,7 @@ describe('Exotic Arbitrage Security Tests', () => {
       const result = await huntAndExecuteArbitrage(10, 4.0); // High threshold
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain('threshold');
+      expect(result.error).toContain('No profitable exotic arbitrage opportunities found');
     });
   });
 

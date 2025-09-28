@@ -139,7 +139,7 @@ export class TvlAnalyzer {
       const windowMs = windowHours * 60 * 60 * 1000;
       const cutoffTime = Date.now() - windowMs;
 
-      const recentTvlData = tvlData.filter(d => d.timestamp >= cutoffTime);
+      const recentTvlData = _tvlData.filter((d: PoolLiquidityData) => d.timestamp >= cutoffTime);
       const recentPriceData = priceData.filter(d => d.timestamp >= cutoffTime);
 
       if (recentTvlData.length < this.MIN_DATA_POINTS || recentPriceData.length < this.MIN_DATA_POINTS) {
@@ -215,11 +215,11 @@ export class TvlAnalyzer {
     logger.debug(`🔬 Calculating pool efficiency for ${poolHash.substring(0, 8)}...`);
 
     try {
-      if (tvlData.length < this.MIN_DATA_POINTS) {
-        throw new Error(`Insufficient TVL data: ${tvlData.length} points`);
+      if (_tvlData.length < this.MIN_DATA_POINTS) {
+        throw new Error(`Insufficient TVL data: ${_tvlData.length} points`);
       }
 
-      const latestTvl = tvlData[tvlData.length - 1];
+      const latestTvl = _tvlData[_tvlData.length - 1];
 
       // Calculate individual metrics
       const tvlUtilization = this.calculateTvlUtilization(_tvlData);
@@ -566,9 +566,9 @@ export class TvlAnalyzer {
       priceMap.set(roundedTime, price);
     });
 
-    for (let i = 1; i < tvlData.length; i++) {
-      const currentTvl = tvlData[i];
-      const previousTvl = tvlData[i - 1];
+    for (let i = 1; i < _tvlData.length; i++) {
+      const currentTvl = _tvlData[i];
+      const previousTvl = _tvlData[i - 1];
       const roundedTime = Math.floor(currentTvl.timestamp / 60000) * 60000;
 
       const priceData = priceMap.get(roundedTime);
@@ -750,9 +750,9 @@ export class TvlAnalyzer {
    * Calculate TVL utilization efficiency
    */
   private calculateTvlUtilization(_tvlData: PoolLiquidityData[]): number {
-    if (tvlData.length < 2) return 50;
+    if (_tvlData.length < 2) return 50;
 
-    const latest = tvlData[tvlData.length - 1];
+    const latest = _tvlData[_tvlData.length - 1];
     const utilizationRatio = latest.liquidityConcentration.currentPriceUtilization;
 
     // Higher utilization = better efficiency

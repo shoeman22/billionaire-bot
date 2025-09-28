@@ -24,8 +24,22 @@ const getBasePath = (): string => {
 export const getDatabaseConfig = (): DataSourceOptions => {
   const isProduction = process.env.NODE_ENV === 'production';
   const isDevelopment = process.env.NODE_ENV === 'development';
+  const isTest = process.env.NODE_ENV === 'test';
 
-  // For development and testing, use SQLite for simplicity
+  // For testing, use in-memory SQLite
+  if (isTest) {
+    return {
+      type: 'sqlite',
+      database: ':memory:', // In-memory database for tests
+      entities: [Position, ...AnalyticsEntities],
+      synchronize: true, // Auto-create tables in tests
+      logging: false, // Disable logging in tests
+      migrations: [],
+      migrationsRun: false,
+    };
+  }
+
+  // For development, use SQLite file
   if (isDevelopment || !process.env.DATABASE_URL) {
     const basePath = getBasePath();
     return {

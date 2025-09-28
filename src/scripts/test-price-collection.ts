@@ -42,7 +42,7 @@ async function testPriceCollectionSystem(): Promise<void> {
         logger.info(`⚠️ ${token}: No price data collected`);
       }
     }
-    logger.info();
+    logger.info('');
 
     // Test 3: Database statistics
     logger.info('📊 Test 3: Database Statistics');
@@ -52,7 +52,7 @@ async function testPriceCollectionSystem(): Promise<void> {
     logger.info(`✅ Statistics records: ${dbStats.statisticsCount}`);
     logger.info(`✅ Tokens tracked: ${dbStats.tokensTracked}`);
     logger.info(`✅ Date range: ${dbStats.oldestRecord?.toISOString()} to ${dbStats.newestRecord?.toISOString()}`);
-    logger.info();
+    logger.info('');
 
     // Test 4: Collection statistics
     logger.info('📊 Test 4: Collection Statistics');
@@ -62,7 +62,7 @@ async function testPriceCollectionSystem(): Promise<void> {
     logger.info(`✅ Failed: ${collectionStats.failedCollections}`);
     logger.info(`✅ Last collection: ${new Date(collectionStats.lastCollectionTime).toISOString()}`);
     logger.info(`✅ Average time: ${collectionStats.averageCollectionTime.toFixed(2)}ms`);
-    logger.info();
+    logger.info('');
 
     // Test 5: Price history retrieval
     logger.info('📊 Test 5: Price History Retrieval');
@@ -79,7 +79,7 @@ async function testPriceCollectionSystem(): Promise<void> {
         logger.info(`   Change: ${priceChange > 0 ? '+' : ''}${priceChange.toFixed(2)}%`);
       }
     }
-    logger.info();
+    logger.info('');
 
     // Test 6: Volatility calculation
     logger.info('📊 Test 6: Volatility Calculation');
@@ -89,7 +89,7 @@ async function testPriceCollectionSystem(): Promise<void> {
     } catch (error) {
       logger.info(`⚠️ Volatility calculation failed (insufficient data): ${error}`);
     }
-    logger.info();
+    logger.info('');
 
     // Test 7: OHLCV data (if available)
     logger.info('📊 Test 7: OHLCV Data Generation');
@@ -106,7 +106,7 @@ async function testPriceCollectionSystem(): Promise<void> {
     } catch (error) {
       logger.info(`⚠️ OHLCV data not available (insufficient data): ${error}`);
     }
-    logger.info();
+    logger.info('');
 
     // Test 8: Start/Stop collector (brief test)
     logger.info('📊 Test 8: Start/Stop Collector');
@@ -120,7 +120,7 @@ async function testPriceCollectionSystem(): Promise<void> {
 
     await priceCollector.stop();
     logger.info('✅ Price collector stopped');
-    logger.info();
+    logger.info('');
 
     // Test 9: Final statistics after collection run
     logger.info('📊 Test 9: Post-Collection Statistics');
@@ -136,7 +136,7 @@ async function testPriceCollectionSystem(): Promise<void> {
         logger.info(`   ${error.token}: ${error.error}`);
       });
     }
-    logger.info();
+    logger.info('');
 
     // Test 10: Data cleanup test (if in development)
     if (process.env.NODE_ENV === 'development') {
@@ -144,7 +144,7 @@ async function testPriceCollectionSystem(): Promise<void> {
       logger.info('⚠️ This would clean data older than configured retention period');
       logger.info('   Cleanup normally runs daily in production');
       logger.info('   To test manually: await timeSeriesDB.cleanupOldData(1); // 1 day');
-      logger.info();
+      logger.info('');
     }
 
     logger.info('🎉 All tests completed successfully!');

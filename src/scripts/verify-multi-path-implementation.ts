@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
  * Multi-Path Arbitrage Implementation Verification
@@ -117,11 +118,11 @@ async function testInterfaces(): Promise<boolean> {
     const optimizerPrototype = PathOptimizer.prototype;
 
     const strategyHasAllMethods = strategyMethods.every(method =>
-      typeof (strategyPrototype as Record<string, unknown>)[method] === 'function'
+      typeof (strategyPrototype as any)[method] === 'function'
     );
 
     const optimizerHasAllMethods = optimizerMethods.every(method =>
-      typeof (optimizerPrototype as Record<string, unknown>)[method] === 'function'
+      typeof (optimizerPrototype as any)[method] === 'function'
     );
 
     return strategyHasAllMethods && optimizerHasAllMethods;

@@ -153,6 +153,34 @@ const DEFAULT_CONFIG: WhaleTrackerConfig = {
   maxHoldTime: 24 // 24 hours maximum hold
 };
 
+interface WhaleTransaction {
+  hash: string;
+  type: string;
+  amount: number;
+  token: string;
+  priceUSD: number;
+  timestamp: number;
+  gasUsed?: number;
+  blockNumber?: number;
+  swapData?: {
+    tokenIn: string;
+    tokenOut: string;
+    amountIn: number;
+    amountOut: number;
+    slippage?: number;
+  };
+}
+
+interface TreasuryAnalysis {
+  isGuild: boolean;
+  governanceScore: number;
+  treasurySize: number;
+  memberCount?: number;
+  monthlyVolume?: number;
+  isBot?: boolean;
+  averageTradeSize?: number;
+}
+
 /**
  * Whale Tracker Service
  *
@@ -583,7 +611,18 @@ export class WhaleTracker extends EventEmitter {
 
           for (const tx of recentTransactions) {
             if (tx.status === 'success' && tx.swapData) {
-              await this.processWhaleTransaction(whale, tx);
+              const whaleTransaction: WhaleTransaction = {
+                hash: tx.hash,
+                type: 'swap',
+                amount: tx.swapData.amountIn,
+                token: tx.swapData.tokenIn,
+                priceUSD: tx.swapData.amountIn * 0.05, // Estimate
+                timestamp: new Date(tx.timestamp).getTime(),
+                gasUsed: tx.gasUsed,
+                blockNumber: tx.block || 0,
+                swapData: tx.swapData
+              };
+              await this.processWhaleTransaction(whale, whaleTransaction);
               newTransactionsFound++;
             }
           }
@@ -610,7 +649,7 @@ export class WhaleTracker extends EventEmitter {
   /**
    * Process a whale transaction and generate copy-trading signals
    */
-  private async processWhaleTransaction(whale: WhaleProfile, transaction: unknown): Promise<void> {
+  private async processWhaleTransaction(whale: WhaleProfile, transaction: WhaleTransaction): Promise<void> {
     if (!transaction.swapData || !this.config.copyTradingEnabled) return;
 
     const { tokenIn, tokenOut, amountIn, amountOut } = transaction.swapData;
@@ -634,7 +673,7 @@ export class WhaleTracker extends EventEmitter {
         amountIn,
         amountOut,
         valueUSD,
-        timestamp: transaction.timestamp,
+        timestamp: new Date(transaction.timestamp),
         type: this.classifyTransactionType(tokenIn, tokenOut),
         priceImpact: transaction.swapData.slippage || 0,
         copySignal: this.generateCopySignal(whale, transaction.swapData, valueUSD)
@@ -807,7 +846,14 @@ export class WhaleTracker extends EventEmitter {
         successRate: tradingAnalysis.profitabilityScore || 50,
         monthlyVolume: tradingAnalysis.monthlyVolume || 0,
 
-        isGuildTreasury: this.detectGuildTreasury(tradingAnalysis),
+        isGuildTreasury: this.detectGuildTreasury({
+          isGuild: false,
+          governanceScore: tradingAnalysis.profitabilityScore || 0,
+          treasurySize: tradingAnalysis.monthlyVolume || 0,
+          monthlyVolume: tradingAnalysis.monthlyVolume,
+          isBot: tradingAnalysis.isBot,
+          averageTradeSize: tradingAnalysis.averageTradeSize
+        }),
         guildSize: tradingAnalysis.isBot ? undefined : Math.floor(Math.random() * 500) + 50,
         governanceActivity: Math.floor(Math.random() * 20),
 
@@ -917,7 +963,7 @@ export class WhaleTracker extends EventEmitter {
     };
   }
 
-  private detectGuildTreasury(analysis: unknown): boolean {
+  private detectGuildTreasury(analysis: TreasuryAnalysis): boolean {
     // Simplified guild detection logic
     // Real implementation would look for:
     // - Multiple large gaming token holdings
@@ -925,12 +971,12 @@ export class WhaleTracker extends EventEmitter {
     // - Governance token voting
     // - Coordinated activities with other addresses
 
-    return analysis.monthlyVolume > 50000 &&
+    return (analysis.monthlyVolume || 0) > 50000 &&
            !analysis.isBot &&
-           analysis.averageTradeSize > 1000;
+           (analysis.averageTradeSize || 0) > 1000;
   }
 
-  private async updateWhaleStatistics(whale: WhaleProfile, transaction: unknown): Promise<void> {
+  private async updateWhaleStatistics(whale: WhaleProfile, transaction: WhaleTransaction): Promise<void> {
     // Update trading frequency
     whale.tradingFrequency = Math.min(whale.tradingFrequency + 0.1, 10);
 
@@ -938,7 +984,7 @@ export class WhaleTracker extends EventEmitter {
     whale.activityScore = Math.min(whale.activityScore + 5, 100);
 
     // Update success rate (simplified)
-    if (transaction.swapData && transaction.swapData.slippage < 0.02) {
+    if (transaction.swapData && (transaction.swapData.slippage || 0) < 0.02) {
       whale.successRate = Math.min(whale.successRate + 0.5, 100);
     }
 

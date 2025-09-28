@@ -18,7 +18,6 @@
 
 import axios from "axios";
 import { logger } from '../utils/logger';
-import { _BaseResponse, _ErrorResponse } from './types';
 
 // ===========================================
 // NFT MARKETPLACE TYPES
@@ -235,11 +234,70 @@ export interface GalaGamesNFTResponse {
 }
 
 // ===========================================
+// API RESPONSE INTERFACES
+// ===========================================
+
+interface OpenSeaAssetEvent {
+  asset?: {
+    token_id: string;
+  };
+  total_price: string;
+  total_price_usd?: string;
+  winner_account?: {
+    address: string;
+  };
+  seller?: {
+    address: string;
+  };
+  transaction?: {
+    transaction_hash: string;
+    block_number: number;
+  };
+  created_date: string;
+  payment_token?: {
+    symbol: string;
+    decimals: number;
+  };
+}
+
+interface MarketplaceActivity {
+  type: string;
+  price: number;
+  timestamp: number;
+  seller: string;
+  buyer: string;
+  blockTime?: string;
+  tokenMint?: string;
+  usdPrice?: number;
+  signature?: string;
+  slot?: number;
+}
+
+interface GamingInfo {
+  game: string;
+  utilityScore: number;
+  seasonalPatterns: string[];
+  craftingTokens: string[];
+  category?: string;
+  rarity?: string;
+  powerLevel?: number;
+  enhancement?: boolean;
+  gameFunction?: string;
+}
+
+interface AttributeData {
+  trait_type: string;
+  value: string | number;
+  rarity?: number;
+  trait_count?: number;
+}
+
+// ===========================================
 // NFT MARKETPLACE CLIENT
 // ===========================================
 
 export class NFTMarketplaceClient {
-  private axios: unknown;
+  private axios: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   private marketplaces: Map<string, MarketplaceConfig> = new Map();
   private rateLimiters: Map<string, { requests: number; resetTime: number }> = new Map();
   private priceCache: Map<string, { price: number; timestamp: number }> = new Map();
@@ -359,7 +417,7 @@ export class NFTMarketplaceClient {
    * Setup request/response interceptors
    */
   private setupInterceptors(): void {
-    this.axios.interceptors.request.use((config: unknown) => {
+    this.axios.interceptors.request.use((config: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
       const marketplace = this.getMarketplaceFromURL(config.url || '');
       if (marketplace && !this.checkRateLimit(marketplace)) {
         throw new Error(`Rate limit exceeded for ${marketplace}`);
@@ -368,8 +426,8 @@ export class NFTMarketplaceClient {
     });
 
     this.axios.interceptors.response.use(
-      (response: unknown) => response,
-      (error: unknown) => {
+      (response: any) => response, // eslint-disable-line @typescript-eslint/no-explicit-any
+      (error: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
         logger.error('NFT Marketplace API Error', {
           url: error.config?.url,
           status: error.response?.status,
@@ -589,7 +647,7 @@ export class NFTMarketplaceClient {
       }
     });
 
-    return response.data.asset_events?.map((event: unknown) => ({
+    return response.data.asset_events?.map((event: OpenSeaAssetEvent) => ({
       marketplace: 'opensea',
       contractAddress,
       tokenId: event.asset?.token_id || '',
@@ -619,10 +677,10 @@ export class NFTMarketplaceClient {
 
     const fromTimestamp = Date.now() - (days * 24 * 60 * 60 * 1000);
 
-    return response.data?.filter((activity: unknown) =>
+    return response.data?.filter((activity: MarketplaceActivity) =>
       activity.type === 'buyNow' &&
-      new Date(activity.blockTime).getTime() > fromTimestamp
-    ).map((activity: unknown) => ({
+      new Date(activity.blockTime || 0).getTime() > fromTimestamp
+    ).map((activity: MarketplaceActivity) => ({
       marketplace: 'magiceden',
       contractAddress,
       tokenId: activity.tokenMint || '',
@@ -632,7 +690,7 @@ export class NFTMarketplaceClient {
       seller: activity.seller || '',
       transactionHash: activity.signature || '',
       blockNumber: activity.slot || 0,
-      timestamp: new Date(activity.blockTime).getTime(),
+      timestamp: new Date(activity.blockTime || 0).getTime(),
       paymentToken: 'SOL'
     })) || [];
   }
@@ -724,7 +782,7 @@ export class NFTMarketplaceClient {
       })),
       game: data.metadata.game,
       collection: data.collection,
-      rarity: data.metadata.rarity as unknown || 'common',
+      rarity: (data.metadata.rarity as 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary' | 'mythic') || 'common',
       rarityRank: 0, // Will be calculated separately
       utilityScore: data.metadata.utility.powerLevel / 100 // Normalize to 0-1
     };
@@ -763,7 +821,7 @@ export class NFTMarketplaceClient {
   /**
    * Calculate utility score for gaming NFTs
    */
-  private calculateUtilityScore(metadata: NFTMetadata, gamingInfo: unknown): number {
+  private calculateUtilityScore(metadata: NFTMetadata, gamingInfo: GamingInfo): number {
     let score = gamingInfo.utilityScore; // Base game utility
 
     // Adjust for rarity
@@ -790,7 +848,7 @@ export class NFTMarketplaceClient {
   /**
    * Calculate attribute utility for gaming context
    */
-  private calculateAttributeUtility(attribute: unknown): number {
+  private calculateAttributeUtility(attribute: AttributeData): number {
     const utilityTraits = ['power', 'strength', 'speed', 'durability', 'rarity', 'enhancement'];
     const traitName = attribute.trait_type.toLowerCase();
 
@@ -806,8 +864,8 @@ export class NFTMarketplaceClient {
   /**
    * Infer rarity from OpenSea traits
    */
-  private inferRarityFromTraits(traits: unknown[]): 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary' | 'mythic' {
-    const avgRarity = traits.reduce((sum, trait) => sum + trait.trait_count, 0) / traits.length;
+  private inferRarityFromTraits(traits: AttributeData[]): 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary' | 'mythic' {
+    const avgRarity = traits.reduce((sum, trait) => sum + (trait.trait_count || 0), 0) / traits.length;
 
     if (avgRarity < 1) return 'mythic';
     if (avgRarity < 5) return 'legendary';
@@ -984,7 +1042,7 @@ export class NFTMarketplaceClient {
   private calculateConfidence(
     floorPrices: Map<string, number>,
     recentSales: NFTSale[],
-    gamingInfo: unknown
+    gamingInfo: GamingInfo
   ): number {
     let confidence = 0.5; // Base confidence
 

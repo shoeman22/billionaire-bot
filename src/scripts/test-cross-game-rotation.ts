@@ -1,5 +1,6 @@
 #!/usr/bin/env tsx
 
+
 /**
  * Cross-Game Asset Rotation Strategy Demonstration
  * Tests the migration tracking and portfolio rotation system
@@ -7,6 +8,13 @@
 
 import { GameMigrationTracker } from '../analytics/game-migration-tracker';
 import { logger } from '../utils/logger';
+
+interface GameInfo {
+  name: string;
+  stage: string;
+  dailyActiveUsers: number;
+  socialSentiment: number;
+}
 
 interface TestResults {
   migrationTracker: {
@@ -46,7 +54,8 @@ async function testGameMigrationTracker(): Promise<TestResults['migrationTracker
 
     // Display game information
     for (const [symbol, data] of gameData.entries()) {
-      logger.info(`📊 ${data.name} (${symbol}): Stage=${data.stage}, DAU=${data.dailyActiveUsers}, Sentiment=${data.socialSentiment.toFixed(2)}`);
+      const gameInfo = data as GameInfo;
+      logger.info(`📊 ${gameInfo.name} (${symbol}): Stage=${gameInfo.stage}, DAU=${gameInfo.dailyActiveUsers}, Sentiment=${gameInfo.socialSentiment.toFixed(2)}`);
     }
 
     // Update game data

@@ -341,7 +341,7 @@ export class PriceCollector {
 
       if (quote?.outTokenAmount) {
         // Price = 1 GUSDC / amount of tokens received for 1 GUSDC
-        const calculatedPrice = 1 / safeParseFloat(quote.outTokenAmount.toString(), 0);
+        const calculatedPrice = 1 / parseFloat(quote.outTokenAmount.toString());
 
         if (calculatedPrice > 0 && isFinite(calculatedPrice)) {
           return {

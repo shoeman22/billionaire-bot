@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * NFT Arbitrage Strategy Integration Test
  *
@@ -18,6 +19,7 @@ import { MarketAnalysis } from '../monitoring/market-analysis';
 import { RiskMonitor } from '../trading/risk/risk-monitor';
 import { StrategyOrchestrator } from '../trading/strategies/strategy-orchestrator';
 import { VolumeAnalyzer } from '../monitoring/volume-analyzer';
+import { logger } from '../utils/logger';
 
 async function testNFTMarketplaceClient() {
   logger.info('\n🎮 Testing NFT Marketplace Client...');
@@ -72,17 +74,17 @@ async function testNFTArbitrageStrategy() {
 
   try {
     // Initialize dependencies
-    const config = { maxPositionSize: 1000 } as Record<string, unknown>;
+    const config = { maxPositionSize: 1000 } as any;
     const gswap = new GSwap({ baseUrl: "https://dex-backend-prod1.defi.gala.com" });
-    const slippageProtection = { analyzeSlippage: () => ({ expectedSlippage: 0.01 }) } as Record<string, unknown>;
+    const slippageProtection = { analyzeSlippage: () => ({ expectedSlippage: 0.01 }) } as any;
     const swapExecutor = new SwapExecutor(gswap, slippageProtection);
-    const priceTracker = { getPrice: () => ({ priceUsd: 0.05 }) } as Record<string, unknown>;
-    const marketAnalysis = new MarketAnalysis(priceTracker, gswap);
-    const riskMonitor = new RiskMonitor(config, gswap);
+    const priceTracker = { getPrice: () => ({ priceUsd: 0.05 }) } as any;
+    const marketAnalysis = new MarketAnalysis(priceTracker as any, gswap);
+    const riskMonitor = new RiskMonitor(config as any, gswap);
 
     // Initialize NFT strategy
     const nftStrategy = new NFTArbitrageStrategy(
-      gswap, config, swapExecutor, marketAnalysis, riskMonitor
+      gswap, config as any, swapExecutor, marketAnalysis, riskMonitor
     );
 
     // Test 1: Strategy initialization
@@ -146,14 +148,14 @@ async function testStrategyOrchestrator() {
 
   try {
     // Initialize dependencies
-    const config = { maxPositionSize: 1000 } as Record<string, unknown>;
+    const config = { maxPositionSize: 1000 } as any;
     const gswap = new GSwap({ baseUrl: "https://dex-backend-prod1.defi.gala.com" });
-    const slippageProtection = { analyzeSlippage: () => ({ expectedSlippage: 0.01 }) } as Record<string, unknown>;
-    const priceTracker = { getPrice: () => ({ priceUsd: 0.05 }) } as Record<string, unknown>;
+    const slippageProtection = { analyzeSlippage: () => ({ expectedSlippage: 0.01 }) } as any;
+    const priceTracker = { getPrice: () => ({ priceUsd: 0.05 }) } as any;
     const swapExecutor = new SwapExecutor(gswap, slippageProtection);
-    const marketAnalysis = new MarketAnalysis(priceTracker, gswap);
-    const volumeAnalyzer = new VolumeAnalyzer(gswap as unknown);
-    const riskMonitor = new RiskMonitor(config, gswap);
+    const marketAnalysis = new MarketAnalysis(priceTracker as any, gswap);
+    const volumeAnalyzer = new VolumeAnalyzer(priceTracker as any);
+    const riskMonitor = new RiskMonitor(config as any, gswap);
 
     // Initialize orchestrator (includes NFT strategy)
     const orchestrator = new StrategyOrchestrator(

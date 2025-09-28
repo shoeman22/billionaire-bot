@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
  * Liquidity Migration Analysis System Test
@@ -42,7 +43,11 @@ class LiquiditySystemTester {
   constructor() {
     this.liquidityMonitor = createLiquidityMonitor();
     this.tvlAnalyzer = createTvlAnalyzer();
-    this.priceTracker = new PriceTracker({} as Record<string, unknown>); // Mock for testing
+    // Create mock IGSwapLike for PriceTracker
+    const mockGSwap = {
+      quoting: {} as any // Mock quoting property required by IGSwapLike
+    } as any;
+    this.priceTracker = new PriceTracker(mockGSwap);
   }
 
   /**

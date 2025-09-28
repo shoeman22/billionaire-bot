@@ -57,7 +57,7 @@ export class VolumeGraphData {
   @CreateDateColumn()
   createdAt!: Date;
 
-  @Column('timestamp', { default: () => 'CURRENT_TIMESTAMP' })
+  @Column('datetime', { default: () => 'CURRENT_TIMESTAMP' })
   fetchedAt!: Date;
 
   /**

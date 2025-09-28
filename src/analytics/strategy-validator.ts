@@ -19,6 +19,7 @@
 // BacktestResults, ValidationResults imports removed - not used
 import { TimeSeriesDB } from '../data/storage/timeseries-db';
 import { logger } from '../utils/logger';
+import { BacktestEngine, BacktestConfig, BacktestTrade } from '../testing/backtest-engine';
 // TRADING_CONSTANTS import removed - not used
 
 export interface ValidationConfig {
@@ -264,7 +265,7 @@ export class StrategyValidator {
   async validateStrategy(
     strategyName: string,
     backtestConfig: BacktestConfig,
-    _validationConfig: ValidationConfig
+    validationConfig: ValidationConfig
   ): Promise<StrategyValidationResult> {
     logger.info(`🔬 Starting comprehensive validation for strategy: ${strategyName}`);
     
@@ -273,29 +274,29 @@ export class StrategyValidator {
       const backtestResults = await this.backtestEngine.runBacktest(backtestConfig);
       
       // Extract trades for this strategy
-      const strategyTrades = backtestResults.trades.filter(_t => t.strategyName === strategyName);
+      const strategyTrades = backtestResults.trades.filter(_t => _t.strategyName === strategyName);
       
       if (strategyTrades.length < validationConfig.minSampleSize) {
         throw new Error(`Insufficient trades (${strategyTrades.length}) for statistical validation`);
       }
       
       // Run validation tests
-      const outOfSampleResults = await this.runOutOfSampleTest(strategyName, backtestConfig, _validationConfig);
-      const crossValidationResults = await this.runCrossValidation(strategyName, backtestConfig, _validationConfig);
-      const bootstrapResults = await this.runBootstrapAnalysis(strategyTrades, _validationConfig);
-      const stabilityResults = await this.analyzeStability(strategyTrades, _validationConfig);
-      const statisticalTests = await this.runStatisticalTests(strategyTrades, _validationConfig);
-      const riskMetrics = await this.assessRisk(strategyTrades, _validationConfig);
+      const outOfSampleResults = await this.runOutOfSampleTest(strategyName, backtestConfig, validationConfig);
+      const crossValidationResults = await this.runCrossValidation(strategyName, backtestConfig, validationConfig);
+      const bootstrapResults = await this.runBootstrapAnalysis(strategyTrades, validationConfig);
+      const stabilityResults = await this.analyzeStability(strategyTrades, validationConfig);
+      const statisticalTests = await this.runStatisticalTests(strategyTrades, validationConfig);
+      const riskMetrics = await this.assessRisk(strategyTrades, validationConfig);
       
       // Gaming-specific validation
       let gamingValidationResults: GamingValidationResult | undefined;
       if (validationConfig.seasonalValidation || validationConfig.eventValidation) {
-        gamingValidationResults = await this.validateGamingPerformance(strategyTrades, _validationConfig);
+        gamingValidationResults = await this.validateGamingPerformance(strategyTrades, validationConfig);
       }
       
       // Calculate confidence intervals
       const returnCI = this.calculateConfidenceInterval(
-        strategyTrades.map(_t => t.actualProfit),
+        strategyTrades.map(_t => _t.actualProfit),
         validationConfig.confidenceLevel
       );
       
@@ -313,7 +314,7 @@ export class StrategyValidator {
         stabilityResults,
         statisticalTests,
         riskMetrics
-      }, _validationConfig);
+      }, validationConfig);
       
       // Generate recommendations
       const recommendations = this.generateRecommendations({
@@ -322,6 +323,7 @@ export class StrategyValidator {
         bootstrapResults,
         stabilityResults,
         riskMetrics,
+        statisticalTests,
         validationScore
       });
       
@@ -329,8 +331,9 @@ export class StrategyValidator {
         outOfSampleResults,
         riskMetrics,
         statisticalTests,
+        stabilityResults,
         validationScore
-      }, _validationConfig);
+      }, validationConfig);
       
       const result: StrategyValidationResult = {
         strategyName,
@@ -414,10 +417,10 @@ export class StrategyValidator {
   private async runOutOfSampleTest(
     strategyName: string,
     backtestConfig: BacktestConfig,
-    _validationConfig: ValidationConfig
+    validationConfig: ValidationConfig
   ): Promise<OutOfSampleResult> {
     logger.info(`📈 Running out-of-sample test for ${strategyName}...`);
-    
+
     const totalPeriod = backtestConfig.endTime - backtestConfig.startTime;
     const splitPoint = backtestConfig.startTime + (totalPeriod * (1 - validationConfig.holdoutRatio));
     
@@ -443,8 +446,8 @@ export class StrategyValidator {
     
     // Statistical significance test
     const pValue = this.calculatePValue(
-      inSampleResults.trades.filter(_t => t.strategyName === strategyName),
-      outSampleResults.trades.filter(_t => t.strategyName === strategyName)
+      inSampleResults.trades.filter(_t => _t.strategyName === strategyName),
+      outSampleResults.trades.filter(_t => _t.strategyName === strategyName)
     );
     
     return {
@@ -462,14 +465,14 @@ export class StrategyValidator {
   private async runCrossValidation(
     strategyName: string,
     backtestConfig: BacktestConfig,
-    _validationConfig: ValidationConfig
+    validationConfig: ValidationConfig
   ): Promise<CrossValidationResult> {
     logger.info(`🔄 Running ${validationConfig.kFolds}-fold cross validation for ${strategyName}...`);
-    
+
     const foldResults: FoldResult[] = [];
     const totalPeriod = backtestConfig.endTime - backtestConfig.startTime;
     const foldSize = totalPeriod / validationConfig.kFolds;
-    
+
     for (let fold = 0; fold < validationConfig.kFolds; fold++) {
       const testStart = backtestConfig.startTime + (fold * foldSize);
       const testEnd = testStart + foldSize;
@@ -543,12 +546,12 @@ export class StrategyValidator {
    */
   private async runBootstrapAnalysis(
     trades: BacktestTrade[],
-    _validationConfig: ValidationConfig
+    validationConfig: ValidationConfig
   ): Promise<BootstrapResult> {
     logger.info(`🎲 Running bootstrap analysis with ${validationConfig.bootstrapSamples} samples...`);
-    
+
     const bootstrapReturns: number[] = [];
-    
+
     for (let i = 0; i < validationConfig.bootstrapSamples; i++) {
       // Bootstrap sample (sample with replacement)
       const bootstrapSample: BacktestTrade[] = [];
@@ -558,7 +561,7 @@ export class StrategyValidator {
       }
       
       // Calculate return for this bootstrap sample
-      const totalReturn = bootstrapSample.reduce((sum, _t) => sum + t.actualProfit, 0) / bootstrapSample.length;
+      const totalReturn = bootstrapSample.reduce((sum, _t) => sum + _t.actualProfit, 0) / bootstrapSample.length;
       bootstrapReturns.push(totalReturn);
     }
     
@@ -588,10 +591,10 @@ export class StrategyValidator {
    */
   private async analyzeStability(
     trades: BacktestTrade[],
-    _validationConfig: ValidationConfig
+    validationConfig: ValidationConfig
   ): Promise<StabilityResult> {
     logger.info('📊 Analyzing strategy stability...');
-    
+
     // Calculate rolling returns
     const rollingReturns = await this.calculateRollingReturns(trades, validationConfig.stabilityWindow);
     const rollingVolatility = await this.calculateRollingVolatility(trades, validationConfig.stabilityWindow);
@@ -647,8 +650,8 @@ export class StrategyValidator {
       const eventTrades = trades.filter(_t => Math.random() < 0.3); // Mock event trades
       
       if (eventTrades.length > 0) {
-        const avgReturn = eventTrades.reduce((sum, _t) => sum + t.actualProfit, 0) / eventTrades.length;
-        const successRate = eventTrades.filter(_t => t.success).length / eventTrades.length;
+        const avgReturn = eventTrades.reduce((sum, _t) => sum + _t.actualProfit, 0) / eventTrades.length;
+        const successRate = eventTrades.filter(_t => _t.success).length / eventTrades.length;
         
         eventPerformance.push({
           eventType,
@@ -662,17 +665,17 @@ export class StrategyValidator {
     
     // Weekend effect analysis
     const weekendTrades = trades.filter(_t => {
-      const dayOfWeek = new Date(t.timestamp).getDay();
+      const dayOfWeek = new Date(_t.timestamp).getDay();
       return dayOfWeek === 5 || dayOfWeek === 6 || dayOfWeek === 0;
     });
     
     const weekdayTrades = trades.filter(_t => {
-      const dayOfWeek = new Date(t.timestamp).getDay();
+      const dayOfWeek = new Date(_t.timestamp).getDay();
       return dayOfWeek > 0 && dayOfWeek < 5;
     });
     
-    const weekendAvgReturn = weekendTrades.reduce((sum, _t) => sum + t.actualProfit, 0) / weekendTrades.length;
-    const weekdayAvgReturn = weekdayTrades.reduce((sum, _t) => sum + t.actualProfit, 0) / weekdayTrades.length;
+    const weekendAvgReturn = weekendTrades.reduce((sum, _t) => sum + _t.actualProfit, 0) / weekendTrades.length;
+    const weekdayAvgReturn = weekdayTrades.reduce((sum, _t) => sum + _t.actualProfit, 0) / weekdayTrades.length;
     const weekendEffect = weekendAvgReturn - weekdayAvgReturn;
     
     // Game-specific analysis
@@ -680,22 +683,22 @@ export class StrategyValidator {
     const gameSpecificResults: Record<string, number> = {};
     
     for (const token of gameTokens) {
-      const tokenTrades = trades.filter(_t => t.tokenIn === token || t.tokenOut === token);
+      const tokenTrades = trades.filter(_t => _t.tokenIn === token || _t.tokenOut === token);
       if (tokenTrades.length > 0) {
-        gameSpecificResults[token] = tokenTrades.reduce((sum, _t) => sum + t.actualProfit, 0) / tokenTrades.length;
+        gameSpecificResults[token] = tokenTrades.reduce((sum, _t) => sum + _t.actualProfit, 0) / tokenTrades.length;
       }
     }
     
     // Seasonal consistency (quarterly analysis)
     const seasonalReturns: number[] = [];
     const quarterMs = 90 * 24 * 60 * 60 * 1000;
-    const minTimestamp = Math.min(...trades.map(_t => t.timestamp));
-    const maxTimestamp = Math.max(...trades.map(_t => t.timestamp));
+    const minTimestamp = Math.min(...trades.map(_t => _t.timestamp));
+    const maxTimestamp = Math.max(...trades.map(_t => _t.timestamp));
     
     for (let time = minTimestamp; time < maxTimestamp; time += quarterMs) {
-      const quarterTrades = trades.filter(_t => t.timestamp >= time && t.timestamp < time + quarterMs);
+      const quarterTrades = trades.filter(_t => _t.timestamp >= time && _t.timestamp < time + quarterMs);
       if (quarterTrades.length > 0) {
-        const quarterReturn = quarterTrades.reduce((sum, _t) => sum + t.actualProfit, 0) / quarterTrades.length;
+        const quarterReturn = quarterTrades.reduce((sum, _t) => sum + _t.actualProfit, 0) / quarterTrades.length;
         seasonalReturns.push(quarterReturn);
       }
     }
@@ -721,16 +724,16 @@ export class StrategyValidator {
     _validationConfig: ValidationConfig
   ): Promise<RiskAssessment> {
     logger.info('⚠️ Assessing risk metrics...');
-    
-    const returns = trades.map(_t => t.actualProfit);
-    const amounts = trades.map(_t => t.amountIn);
+
+    const returns = trades.map(_t => _t.actualProfit);
+    const amounts = trades.map(_t => _t.amountIn);
     
     // Concentration risk
-    const tokenCount = new Set([...trades.map(_t => t.tokenIn), ...trades.map(_t => t.tokenOut)]).size;
+    const tokenCount = new Set([...trades.map(_t => _t.tokenIn), ...trades.map(_t => _t.tokenOut)]).size;
     const concentrationRisk = 1 - (tokenCount / 10); // Normalize to 0-1
-    
+
     // Liquidity risk
-    const avgLiquidityScore = trades.reduce((sum, _t) => sum + t.liquidityScore, 0) / trades.length;
+    const avgLiquidityScore = trades.reduce((sum, _t) => sum + _t.liquidityScore, 0) / trades.length;
     const liquidityRisk = 1 - avgLiquidityScore;
     
     // Volatility risk
@@ -794,8 +797,8 @@ export class StrategyValidator {
     _validationConfig: ValidationConfig
   ): Promise<StatisticalTestResults> {
     logger.info('📈 Running statistical tests...');
-    
-    const returns = trades.map(_t => t.actualProfit);
+
+    const returns = trades.map(_t => _t.actualProfit);
     
     // T-test for returns vs zero
     const tTest = this.performTTest(returns, 0);
@@ -857,7 +860,7 @@ export class StrategyValidator {
     
     for (let i = window; i <= trades.length; i++) {
       const windowTrades = trades.slice(i - window, i);
-      const returns = windowTrades.map(_t => t.actualProfit);
+      const returns = windowTrades.map(_t => _t.actualProfit);
       
       const mean = returns.reduce((sum, r) => sum + r, 0) / returns.length;
       const std = Math.sqrt(returns.reduce((sum, r) => sum + Math.pow(r - mean, 2), 0) / returns.length);
@@ -897,7 +900,7 @@ export class StrategyValidator {
     
     for (let i = window; i <= trades.length; i++) {
       const windowTrades = trades.slice(i - window, i);
-      const totalReturn = windowTrades.reduce((sum, _t) => sum + t.actualProfit, 0) / windowTrades.length;
+      const totalReturn = windowTrades.reduce((sum, _t) => sum + _t.actualProfit, 0) / windowTrades.length;
       rollingReturns.push(totalReturn);
     }
     
@@ -909,7 +912,7 @@ export class StrategyValidator {
     
     for (let i = window; i <= trades.length; i++) {
       const windowTrades = trades.slice(i - window, i);
-      const returns = windowTrades.map(_t => t.actualProfit);
+      const returns = windowTrades.map(_t => _t.actualProfit);
       
       const mean = returns.reduce((sum, r) => sum + r, 0) / returns.length;
       const variance = returns.reduce((sum, r) => sum + Math.pow(r - mean, 2), 0) / returns.length;
@@ -950,8 +953,8 @@ export class StrategyValidator {
 
   private calculatePValue(sample1: BacktestTrade[], sample2: BacktestTrade[]): number {
     // Simplified p-value calculation (would use proper statistical test)
-    const returns1 = sample1.map(_t => t.actualProfit);
-    const returns2 = sample2.map(_t => t.actualProfit);
+    const returns1 = sample1.map(_t => _t.actualProfit);
+    const returns2 = sample2.map(_t => _t.actualProfit);
     
     const mean1 = returns1.reduce((sum, r) => sum + r, 0) / returns1.length;
     const mean2 = returns2.reduce((sum, r) => sum + r, 0) / returns2.length;
@@ -969,8 +972,8 @@ export class StrategyValidator {
   }
 
   private calculateSignificance(eventTrades: BacktestTrade[], allTrades: BacktestTrade[]): number {
-    const eventReturn = eventTrades.reduce((sum, _t) => sum + t.actualProfit, 0) / eventTrades.length;
-    const overallReturn = allTrades.reduce((sum, _t) => sum + t.actualProfit, 0) / allTrades.length;
+    const eventReturn = eventTrades.reduce((sum, _t) => sum + _t.actualProfit, 0) / eventTrades.length;
+    const overallReturn = allTrades.reduce((sum, _t) => sum + _t.actualProfit, 0) / allTrades.length;
     
     // Simplified significance calculation
     return Math.abs(eventReturn - overallReturn) / Math.abs(overallReturn);
@@ -1058,7 +1061,14 @@ export class StrategyValidator {
     };
   }
 
-  private calculateValidationScore(results: unknown, _config: ValidationConfig): number {
+  private calculateValidationScore(results: {
+    outOfSampleResults: OutOfSampleResult;
+    crossValidationResults: CrossValidationResult;
+    bootstrapResults: BootstrapResult;
+    stabilityResults: StabilityResult;
+    statisticalTests: StatisticalTestResults;
+    riskMetrics: RiskAssessment;
+  }, _config: ValidationConfig): number {
     let score = 0;
     
     // Out-of-sample performance (25 points)
@@ -1083,7 +1093,15 @@ export class StrategyValidator {
     return Math.min(100, Math.max(0, score));
   }
 
-  private generateRecommendations(results: unknown): string[] {
+  private generateRecommendations(results: {
+    validationScore: number;
+    bootstrapResults: BootstrapResult;
+    stabilityResults: StabilityResult;
+    outOfSampleResults: OutOfSampleResult;
+    crossValidationResults: CrossValidationResult;
+    riskMetrics: RiskAssessment;
+    statisticalTests: StatisticalTestResults;
+  }): string[] {
     const recommendations: string[] = [];
     
     if (results.validationScore >= 80) {
@@ -1111,7 +1129,13 @@ export class StrategyValidator {
     return recommendations;
   }
 
-  private generateWarnings(results: unknown, _config: ValidationConfig): string[] {
+  private generateWarnings(results: {
+    outOfSampleResults: OutOfSampleResult;
+    riskMetrics: RiskAssessment;
+    statisticalTests: StatisticalTestResults;
+    stabilityResults: StabilityResult;
+    validationScore: number;
+  }, _config: ValidationConfig): string[] {
     const warnings: string[] = [];
     
     if (!results.outOfSampleResults.isStable) {
@@ -1168,7 +1192,7 @@ export class StrategyValidator {
     
     // Set ranks
     rankings.forEach((ranking, _index) => {
-      ranking.rank = index + 1;
+      ranking.rank = _index + 1;
     });
     
     return rankings;

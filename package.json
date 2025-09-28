@@ -158,6 +158,7 @@
     "@types/elliptic": "^6.4.18",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.5.2",
+    "@types/node-fetch": "^2.6.13",
     "@typescript-eslint/eslint-plugin": "^8.44.0",
     "@typescript-eslint/parser": "^8.44.0",
     "eslint": "^9.36.0",

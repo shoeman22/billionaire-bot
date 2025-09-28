@@ -8,6 +8,7 @@
 import { Command } from 'commander';
 import { priceCollector, timeSeriesDB } from '../data';
 import { logger } from '../utils/logger';
+import { IntervalType } from '../entities/analytics';
 
 const program = new Command();
 
@@ -258,7 +259,7 @@ program
         // Show OHLCV data
         const interval = typeof options.ohlcv === 'string' ? options.ohlcv : '1h';
         const ohlcvData = await timeSeriesDB.getOHLCV(tokenSymbol, {
-          intervalType: interval as 'minute' | 'hour' | 'day',
+          intervalType: interval as IntervalType,
           startTime: Date.now() - (hours * 60 * 60 * 1000),
           orderBy: 'DESC',
           limit

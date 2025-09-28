@@ -106,7 +106,7 @@ export class VolumePattern {
   @UpdateDateColumn()
   updatedAt!: Date;
 
-  @Column('timestamp', { nullable: true })
+  @Column('datetime', { nullable: true })
   completedAt?: Date;
 
   /**

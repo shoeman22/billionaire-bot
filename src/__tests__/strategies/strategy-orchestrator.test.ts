@@ -8,11 +8,15 @@ import { GSwap } from '../../services/gswap-simple';
 import { TradingConfig } from '../../config/environment';
 import { SwapExecutor } from '../../trading/execution/swap-executor';
 import { MarketAnalysis } from '../../monitoring/market-analysis';
+import { VolumeAnalyzer } from '../../monitoring/volume-analyzer';
+import { RiskMonitor } from '../../trading/risk/risk-monitor';
 
 // Mock all strategy dependencies
 jest.mock('../../services/gswap-simple');
 jest.mock('../../trading/execution/swap-executor');
 jest.mock('../../monitoring/market-analysis');
+jest.mock('../../monitoring/volume-analyzer');
+jest.mock('../../trading/risk/risk-monitor');
 jest.mock('../../trading/strategies/arbitrage');
 jest.mock('../../trading/strategies/smart-arbitrage');
 jest.mock('../../trading/strategies/triangle-arbitrage');
@@ -88,6 +92,38 @@ const createMockStrategy = (name: string) => ({
   priority: name === 'triangle-arbitrage' ? 9 : 6
 });
 
+const createMockVolumeAnalyzer = () => ({
+  analyzeVolumePatterns: jest.fn().mockResolvedValue([]),
+  detectAnomalies: jest.fn().mockResolvedValue([]),
+  getVolumeMetrics: jest.fn().mockReturnValue({
+    averageVolume: 1000,
+    volumeChangePercent: 5.0,
+    volumeSpike: false
+  }),
+  isRunning: false,
+  start: jest.fn(),
+  stop: jest.fn()
+}) as unknown as jest.Mocked<VolumeAnalyzer>;
+
+const createMockRiskMonitor = () => ({
+  assessRisk: jest.fn().mockReturnValue({
+    riskScore: 0.3,
+    riskLevel: 'low' as const,
+    maxPositionSize: 5000,
+    recommendations: []
+  }),
+  isWithinLimits: jest.fn().mockReturnValue(true),
+  updateRiskParameters: jest.fn(),
+  getRiskMetrics: jest.fn().mockReturnValue({
+    totalExposure: 1000,
+    riskScore: 0.3,
+    maxDrawdown: 0.05
+  }),
+  isActive: true,
+  start: jest.fn(),
+  stop: jest.fn()
+}) as unknown as jest.Mocked<RiskMonitor>;
+
 // Mock all strategy constructors
 jest.mock('../../trading/strategies/arbitrage', () => ({
   ArbitrageStrategy: jest.fn().mockImplementation(() => createMockStrategy('arbitrage'))
@@ -115,6 +151,8 @@ describe('StrategyOrchestrator', () => {
   let mockConfig: TradingConfig;
   let mockSwapExecutor: jest.Mocked<SwapExecutor>;
   let mockMarketAnalysis: jest.Mocked<MarketAnalysis>;
+  let mockVolumeAnalyzer: jest.Mocked<VolumeAnalyzer>;
+  let mockRiskMonitor: jest.Mocked<RiskMonitor>;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -124,12 +162,16 @@ describe('StrategyOrchestrator', () => {
     mockConfig = createMockConfig();
     mockSwapExecutor = createMockSwapExecutor();
     mockMarketAnalysis = createMockMarketAnalysis();
+    mockVolumeAnalyzer = createMockVolumeAnalyzer();
+    mockRiskMonitor = createMockRiskMonitor();
 
     orchestrator = new StrategyOrchestrator(
       mockGSwap,
       mockConfig,
       mockSwapExecutor,
-      mockMarketAnalysis
+      mockMarketAnalysis,
+      mockVolumeAnalyzer,
+      mockRiskMonitor
     );
   });
 

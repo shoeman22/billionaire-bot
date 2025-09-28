@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
  * Test Time-Based Pattern Strategy
@@ -48,13 +49,13 @@ async function testTimeBasedPatterns() {
     };
 
     // Initialize mock services
-    const gswap = new MockGSwap() as unknown;
-    const swapExecutor = new MockSwapExecutor() as unknown;
-    const marketAnalysis = new MockMarketAnalysis() as unknown;
+    const gswap = new MockGSwap() as any;
+    const swapExecutor = new MockSwapExecutor() as any;
+    const marketAnalysis = new MockMarketAnalysis() as any;
 
     // Test 1: Strategy Initialization
     logger.info('📋 Test 1: Strategy Initialization');
-    const strategy = new TimeBasedPatternsStrategy(gswap, mockConfig, swapExecutor, marketAnalysis);
+    const strategy = new TimeBasedPatternsStrategy(gswap as any, mockConfig, swapExecutor as any, marketAnalysis as any);
 
     const stats = strategy.getStats();
     logger.info('✅ Strategy initialized successfully', {

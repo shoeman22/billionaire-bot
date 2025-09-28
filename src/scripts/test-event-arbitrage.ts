@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Event Arbitrage Strategy Test
  *
@@ -131,7 +132,7 @@ async function testEventArbitrageStrategy(): Promise<void> {
       mockGSwap,
       mockConfig,
       mockSwapExecutor,
-      mockMarketAnalysis as unknown
+      mockMarketAnalysis as any
     );
 
     // Test strategy initialization

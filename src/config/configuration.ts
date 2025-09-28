@@ -8,6 +8,8 @@
 import { logger } from '../utils/logger';
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 
 // Type definitions for configuration structures
 export interface WhaleConfig {
@@ -329,7 +331,8 @@ export class ConfigurationManager {
     }
 
     // Get current directory in ESM compatible way
-    const currentDir = path.dirname(new URL(import.meta.url).pathname);
+    const __filename = fileURLToPath(import.meta.url);
+    const currentDir = dirname(__filename);
 
     // Check common locations
     const possiblePaths = [

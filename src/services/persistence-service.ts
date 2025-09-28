@@ -6,7 +6,7 @@
  * batch operations, and performance optimization for trading bot analytics.
  */
 
-import { Repository, DataSource, FindManyOptions, In } from 'typeorm';
+import { Repository, DataSource, FindManyOptions, In, MoreThanOrEqual, LessThanOrEqual } from 'typeorm';
 import { logger } from '../utils/logger';
 import { getDataSource } from '../config/database';
 import {
@@ -149,6 +149,11 @@ export class PersistenceService {
     copyTrading: boolean = false,
     profitabilityScore: number = 0.5
   ): Promise<WhaleWatchlist> {
+    // Validate inputs
+    if (!whaleAddress || whaleAddress.trim() === '') {
+      throw new PersistenceError('Whale address cannot be empty', 'addWhaleToWatchlist');
+    }
+
     try {
       let whale = await this.whaleWatchlistRepo.findOne({
         where: { whaleAddress }
@@ -164,6 +169,7 @@ export class PersistenceService {
         // Create new whale entry
         whale = this.whaleWatchlistRepo.create({
           whaleAddress,
+          notes: `Added whale with ${priority} priority`,
           priority,
           copyTrading,
           profitabilityScore,
@@ -356,11 +362,12 @@ export class PersistenceService {
       if (query.poolHash) whereConditions.poolHash = query.poolHash;
       if (query.duration) whereConditions.duration = query.duration;
 
-      // Time range filters
-      if (query.startTime !== undefined || query.endTime !== undefined) {
-        whereConditions.startTime = {};
-        if (query.startTime !== undefined) (whereConditions.startTime as Record<string, unknown>).gte = query.startTime;
-        if (query.endTime !== undefined) (whereConditions.endTime as Record<string, unknown>).lte = query.endTime;
+      // Time range filters - find overlapping time ranges
+      if (query.startTime !== undefined) {
+        whereConditions.endTime = MoreThanOrEqual(query.startTime);
+      }
+      if (query.endTime !== undefined) {
+        whereConditions.startTime = LessThanOrEqual(query.endTime);
       }
 
       options.where = Object.keys(whereConditions).length > 0 ? whereConditions : undefined;

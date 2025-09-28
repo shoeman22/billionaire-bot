@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Backtesting Engine for GalaSwap V3 Trading Bot
  *
@@ -16,10 +17,17 @@
  * - Comprehensive performance attribution
  */
 
-import { TimeSeriesDB, _PricePoint, _OHLCVData } from '../data/storage/timeseries-db';
-import { PriceHistory, _PriceOHLCV, _IntervalType, _StatisticType, _StatisticPeriod } from '../entities/analytics';
+import { TimeSeriesDB } from '../data/storage/timeseries-db';
+import { PriceHistory } from '../entities/analytics';
 import { logger } from '../utils/logger';
 // TRADING_CONSTANTS import removed - not used
+
+interface BacktestStrategy {
+  name: string;
+  parameters: Record<string, unknown>;
+  priority: number;
+  findOpportunities: (condition: MarketCondition, historicalData: Map<string, PriceHistory[]>) => BacktestTrade[];
+}
 
 export interface BacktestConfig {
   // Time period
@@ -242,25 +250,28 @@ export class BacktestEngine {
       await this.initializeBacktest(config);
       
       // Load historical data and gaming events
-      
+      const historicalData = await this.loadHistoricalData(config);
+      const gamingEvents = await this.loadGamingEvents(config);
+      const marketConditions = await this.analyzeMarketConditions(historicalData, gamingEvents);
+
       // Main backtest execution
       let mainResults: BacktestResults;
       
       if (config.portfolioMode) {
-        mainResults = await this.runPortfolioBacktest(_config, _historicalData, _marketConditions, _gamingEvents);
+        mainResults = await this.runPortfolioBacktest(config, historicalData, marketConditions, gamingEvents);
       } else {
-        mainResults = await this.runIndividualStrategyBacktests(_config, _historicalData, _marketConditions, _gamingEvents);
+        mainResults = await this.runIndividualStrategyBacktests(config, historicalData, marketConditions, gamingEvents);
       }
-      
+
       // Validation testing
-      const validationResults = await this.runValidationTests(_config, _historicalData, _marketConditions, _gamingEvents);
-      
+      const validationResults = await this.runValidationTests(config, historicalData, marketConditions, gamingEvents);
+
       // Calculate comprehensive metrics
-      const results = await this.calculateFinalResults(_config, mainResults, validationResults, startTime);
+      const results = await this.calculateFinalResults(config, mainResults, validationResults, startTime);
       
       // Gaming-specific analysis
       if (config.includeGamingEvents) {
-        results.gamingMetrics = await this.calculateGamingMetrics(results.trades, _gamingEvents);
+        results.gamingMetrics = await this.calculateGamingMetrics(results.trades, gamingEvents);
       }
       
       logger.info(`✅ Backtest completed in ${Date.now() - startTime}ms with ${results.totalTrades} trades`);
@@ -472,8 +483,7 @@ export class BacktestEngine {
         condition,
         strategies,
         strategyCapital,
-        _historicalData,
-
+        historicalData
       );
       
       allTrades.push(...dayTrades);
@@ -490,7 +500,7 @@ export class BacktestEngine {
     }
     
     return {
-      _config,
+      config,
       executionTime: 0,
       totalTrades: allTrades.length,
       totalReturn: this.calculateTotalReturn(),
@@ -560,7 +570,7 @@ export class BacktestEngine {
           condition,
           strategies,
           strategyCapital,
-          _historicalData,
+          historicalData,
 
         );
         strategyTrades.push(...dayTrades);
@@ -574,7 +584,7 @@ export class BacktestEngine {
     
     // Aggregate results
     return {
-      _config,
+      config,
       executionTime: 0,
       totalTrades: allTrades.length,
       totalReturn: this.calculateTotalReturn(),
@@ -609,7 +619,7 @@ export class BacktestEngine {
   }
 
   // Initialize trading strategies based on configuration
-  private initializeStrategies(strategyConfigs: StrategyBacktestConfig[]): Map<string, unknown> {
+  private initializeStrategies(strategyConfigs: StrategyBacktestConfig[]): Map<string, BacktestStrategy> {
     const strategies = new Map();
     
     // This would initialize actual strategy instances
@@ -747,7 +757,7 @@ export class BacktestEngine {
     
     // Each strategy looks for opportunities
     for (const [strategyName, strategy] of strategies) {
-      const opportunities = strategy.findOpportunities(condition, historicalData);
+      const opportunities = (strategy as any).findOpportunities(condition, historicalData);
       
       for (const trade of opportunities) {
         // Check if we have enough capital
@@ -829,15 +839,15 @@ export class BacktestEngine {
     logger.info('🔬 Running validation tests...');
     
     const walkForwardResults = await this.runWalkForwardAnalysis(
-      _config
+      config
     );
     
     const monteCarloResults = await this.runMonteCarloAnalysis(
-      _config, _historicalData, _marketConditions, gamingEvents
+      config, historicalData, marketConditions, gamingEvents
     );
     
     const stressTestResults = await this.runStressTests(
-      _config, _historicalData, _marketConditions, gamingEvents
+      config, historicalData, marketConditions, gamingEvents
     );
     
     // Calculate overfitting risk
@@ -884,11 +894,11 @@ export class BacktestEngine {
       const trainingEnd = periodStart + (periodLength * trainTestRatio);
       
       // Training period backtest
-      const _trainingConfig = { ..._config, startTime: periodStart, endTime: trainingEnd };
+      const _trainingConfig = { ...config, startTime: periodStart, endTime: trainingEnd };
       // Note: In a real implementation, you would optimize parameters here
       
       // Testing period backtest
-      const _testingConfig = { ..._config, startTime: trainingEnd, endTime: periodEnd };
+      const _testingConfig = { ...config, startTime: trainingEnd, endTime: periodEnd };
       // Note: In a real implementation, you would test with optimized parameters
       
       // Simulate results (placeholder)
@@ -1178,7 +1188,7 @@ export class BacktestEngine {
       ...mainResults,
       validationResults,
       executionTime: Date.now() - startTime,
-      monthlyBreakdown: await this.calculateMonthlyBreakdown(_config, mainResults.trades)
+      monthlyBreakdown: await this.calculateMonthlyBreakdown(config, mainResults.trades)
     };
   }
 

@@ -76,6 +76,12 @@ export interface LiquidityGap {
   proximityToCurrentPrice: number; // Distance in ticks from current price
 }
 
+interface PoolDetailResponse {
+  tvl?: number;
+  token0TvlUsd?: number;
+  token1TvlUsd?: number;
+}
+
 /**
  * Primary Pools for High-Frequency Monitoring
  */
@@ -391,10 +397,10 @@ export class LiquidityMonitor {
         fee,
         currentTick: 0, // Would need additional API call to get current tick
         sqrtPriceX96: '0', // Would need additional API call
-        totalTvl: poolDetailResponse.tvl,
-        totalTvlUsd: poolDetailResponse.tvl, // Assuming TVL is already in USD
-        token0Tvl: poolDetailResponse.token0TvlUsd,
-        token1Tvl: poolDetailResponse.token1TvlUsd,
+        totalTvl: (poolDetailResponse as PoolDetailResponse).tvl || 0,
+        totalTvlUsd: (poolDetailResponse as PoolDetailResponse).tvl || 0, // Assuming TVL is already in USD
+        token0Tvl: (poolDetailResponse as PoolDetailResponse).token0TvlUsd || 0,
+        token1Tvl: (poolDetailResponse as PoolDetailResponse).token1TvlUsd || 0,
         liquidityConcentration: await this.calculateLiquidityConcentration(),
         activeLiquidity: BigInt(0), // Would need positions API
         timestamp: Date.now(),

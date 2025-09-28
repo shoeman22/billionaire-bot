@@ -1,6 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Test Statistical Arbitrage Strategy
- * 
+ *
  * Tests the statistical arbitrage implementation including:
  * - Pairs correlation analysis
  * - Signal generation
@@ -152,7 +153,7 @@ async function testStatisticalArbitrage() {
         mockGSwap,
         mockConfig,
         mockSwapExecutor,
-        mockMarketAnalysis
+        mockMarketAnalysis as any
       );
 
       logger.info('✅ Statistical arbitrage strategy created');

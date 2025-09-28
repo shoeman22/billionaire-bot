@@ -42,6 +42,7 @@ interface OrchestratorOptions {
   duration?: number;
   continuous: boolean;
   rebalance?: number; // minutes between rebalancing
+  all: boolean; // run all available strategies
   help: boolean;
 }
 
@@ -69,7 +70,8 @@ class StrategyOrchestratorRunner {
       this.displayModeBanner(isLiveMode, isDemoMode, options);
 
       // Parse strategy selection
-      const enabledStrategies = this.parseStrategies(options.strategies);
+      const strategiesToUse = options.all ? 'all' : options.strategies;
+      const enabledStrategies = this.parseStrategies(strategiesToUse);
 
       // Initialize core systems
       const signer = isLiveMode ? new PrivateKeySigner(config.wallet.privateKey) : {} as any;
@@ -216,7 +218,8 @@ EXAMPLES:
       logger.warn('');
 
       logger.warn('🎯 ACTIVE STRATEGIES:');
-      const strategies = this.parseStrategies(options.strategies);
+      const strategiesToUse = options.all ? 'all' : options.strategies;
+      const strategies = this.parseStrategies(strategiesToUse);
       strategies.forEach(strategy => {
         logger.warn(`   • ${strategy.toUpperCase()}: Real execution enabled`);
       });
@@ -234,7 +237,8 @@ EXAMPLES:
       logger.info('🚫 NO real trades across any strategy');
       logger.info('💡 Use --live flag for real orchestrated trading');
 
-      const strategies = this.parseStrategies(options.strategies);
+      const strategiesToUse = options.all ? 'all' : options.strategies;
+      const strategies = this.parseStrategies(strategiesToUse);
       logger.info('\n🎯 DEMO STRATEGIES:');
       strategies.forEach((strategy, index) => {
         logger.info(`   ${index + 1}. ${strategy.toUpperCase()}: Analysis mode`);
@@ -429,6 +433,7 @@ program
   .option('--rebalance <minutes>', 'Minutes between rebalancing (default: 15)', parseInt)
   .option('--duration <minutes>', 'Run for specified minutes', parseInt)
   .option('--continuous', 'Run continuously until stopped', false)
+  .option('--all', 'Run all available strategies with optimal allocation', false)
   .option('--help', 'Show detailed help information', false)
   .action(async (options: OrchestratorOptions) => {
     const runner = new StrategyOrchestratorRunner();

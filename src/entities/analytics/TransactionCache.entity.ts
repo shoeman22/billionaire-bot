@@ -68,7 +68,7 @@ export class TransactionCache {
   @Column('boolean', { default: true })
   isComplete!: boolean; // Whether this represents a complete result set
 
-  @Column('timestamp')
+  @Column('datetime')
   expiresAt!: Date;
 
   @Column('bigint')
@@ -83,7 +83,7 @@ export class TransactionCache {
   @UpdateDateColumn()
   updatedAt!: Date;
 
-  @Column('timestamp')
+  @Column('datetime')
   lastAccessedAt!: Date;
 
   /**

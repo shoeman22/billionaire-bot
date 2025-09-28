@@ -459,7 +459,7 @@ export class PairsCorrelation {
    */
   private calculateCorrelation(data: Array<{ price1: number; price2: number }>): number {
     const _n = data.length;
-    if (n < 2) return 0;
+    if (_n < 2) return 0;
 
     const prices1 = data.map(d => d.price1);
     const prices2 = data.map(d => d.price2);
@@ -471,7 +471,7 @@ export class PairsCorrelation {
     let sum1Sq = 0;
     let sum2Sq = 0;
 
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < _n; i++) {
       const diff1 = prices1[i] - mean1;
       const diff2 = prices2[i] - mean2;
       
@@ -553,7 +553,7 @@ export class PairsCorrelation {
 
     // Standard error calculation (simplified)
     const residuals = diffs.map((diff, i) => diff - (alpha + beta * lagged[i]));
-    const mse = residuals.reduce((sum, r) => sum + r * r, 0) / (n - 2);
+    const mse = residuals.reduce((sum, r) => sum + r * r, 0) / (diffs.length - 2);
     const seBeta = Math.sqrt(mse / lagged.reduce((sum, x) => sum + (x - this.mean(lagged)) ** 2, 0));
     
     // Test statistic
