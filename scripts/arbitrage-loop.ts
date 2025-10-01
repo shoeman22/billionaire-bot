@@ -116,10 +116,17 @@ class ArbitrageLoopController {
     logger.info(`   Max consecutive errors: ${this.config.maxConsecutiveErrors}`);
     logger.info(`   Max run duration: ${this.config.maxRunDuration ? this.config.maxRunDuration + 'm' : 'infinite'}`);
 
-    // Start stats reporting
+    // Adaptive stats reporting based on loop speed
+    // Fast loops (<=10s): report every 30s
+    // Medium loops (11-30s): report every 60s
+    // Slow loops (>30s): report every 2 minutes
+    const statsIntervalMs = this.config.delayBetweenRuns <= 10 ? 30000 :
+                           this.config.delayBetweenRuns <= 30 ? 60000 : 120000;
+    logger.info(`   Stats reporting: every ${statsIntervalMs / 1000}s`);
+
     const statsInterval = setInterval(() => {
       this.logStats();
-    }, 60000); // Every minute
+    }, statsIntervalMs);
 
     // Main loop
     try {
@@ -202,7 +209,7 @@ class ArbitrageLoopController {
           }
         } else {
           this.stats.errorRuns++;
-          this.stats.consecutiveErrors++;
+          // Don't increment consecutiveErrors for "no opportunities" - that's normal, not an error
           logger.info(`📭 Run #${this.stats.totalRuns} found no profitable exotic opportunities`);
           if (result.error) {
             logger.debug(`Details: ${result.error}`);
@@ -236,7 +243,7 @@ class ArbitrageLoopController {
           }
         } else {
           this.stats.errorRuns++;
-          this.stats.consecutiveErrors++;
+          // Don't increment consecutiveErrors for "no opportunities" - that's normal, not an error
           logger.info(`📭 Run #${this.stats.totalRuns} found no profitable opportunities`);
           if (result.error) {
             logger.debug(`Details: ${result.error}`);
