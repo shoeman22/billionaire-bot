@@ -593,7 +593,8 @@ export class StablecoinArbitrageStrategy {
     } catch (error) {
       logger.error('❌ Stablecoin Arbitrage Execution Failed', {
         path: opportunity.path.symbol,
-        error,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
         executionTime: `${Date.now() - startTime}ms`
       });
 

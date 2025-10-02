@@ -38,9 +38,10 @@ export class CredentialService {
         throw new Error('Wallet address not configured');
       }
 
-      // Validate address format
-      if (!address.startsWith('eth|0x') || address.length !== 46) {
-        throw new Error('Invalid wallet address format');
+      // Validate address format (eth|HEXADDRESS without 0x)
+      // Example: eth|5AD173F004990940b20e7A5C64C72E8b6B91a783
+      if (!address.startsWith('eth|') || address.length !== 44) {
+        throw new Error(`Invalid wallet address format. Expected 'eth|HEXADDRESS' (44 chars), got: ${address.substring(0, 10)}... (${address.length} chars)`);
       }
 
       this.cachedAddress = address;
@@ -51,8 +52,11 @@ export class CredentialService {
 
       return this.cachedAddress;
     } catch (error) {
-      logger.error('Failed to resolve wallet address', { error: 'Address resolution failed' });
-      throw new Error('Wallet address resolution failed');
+      logger.error('Failed to resolve wallet address', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      throw new Error(`Wallet address resolution failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
