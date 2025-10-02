@@ -514,7 +514,7 @@ export class TriangleArbitrageStrategy {
         return null; // Silently skip known illiquid pairs
       }
 
-      const result = await this.quoteWrapper.quoteExactInput(tokenInClass, tokenOutClass, Math.floor(amountIn).toString());
+      const result = await this.quoteWrapper.quoteExactInput(tokenInClass, tokenOutClass, amountIn.toString());
 
       // ✅ FIX: Quote API returns 'outTokenAmount', not 'amountOut'
       const outputAmount = parseFloat(result.outTokenAmount || '0');
