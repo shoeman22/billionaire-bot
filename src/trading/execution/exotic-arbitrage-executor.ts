@@ -88,7 +88,7 @@ export interface ExoticArbitrageResult {
 }
 
 export interface ExoticArbitrageConfig {
-  mode: 'triangular' | 'cross-pair' | 'hunt-execute';
+  mode: 'triangular' | 'cross-pair' | 'hunt-execute' | 'multi-hop-4' | 'multi-hop-5' | 'multi-hop-6';
   inputAmount?: number;
   minProfitThreshold?: number;
   maxHops?: number;
@@ -783,6 +783,266 @@ export async function discoverCrossPairOpportunities(
 }
 
 /**
+ * Discover advanced multi-hop arbitrage opportunities (4-6 hops)
+ * Uses recursive route building with intelligent pruning to find exotic price inefficiencies
+ *
+ * Supports routes like:
+ * - 4-hop: GALA → A → B → C → GALA
+ * - 5-hop: GALA → A → B → C → D → GALA
+ * - 6-hop: GALA → A → B → C → D → E → GALA
+ *
+ * Features:
+ * - Recursive route building with backtracking
+ * - Early profit checking (skips unprofitable intermediate paths)
+ * - Dynamic position sizing based on liquidity
+ * - Combinatorial explosion prevention (max routes limit)
+ * - Token set reduction for deeper routes
+ */
+export async function discoverMultiHopOpportunities(
+  inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
+  minProfitThreshold: number = 2.0, // Higher threshold for complex routes
+  maxHops: number = 4, // 4, 5, or 6 hops supported
+  useMultiFeeTier: boolean = true,
+  useDynamicSizing: boolean = true,
+  maxRoutesToExplore: number = 150 // Limit combinatorial explosion
+): Promise<ExoticRoute[]> {
+  // Validate maxHops parameter
+  if (maxHops < 4 || maxHops > 6) {
+    throw new Error('maxHops must be between 4 and 6');
+  }
+
+  logger.info(`🔍 Discovering ${maxHops}-hop arbitrage opportunities`);
+  logger.info(`   Max routes to explore: ${maxRoutesToExplore}`);
+  if (useDynamicSizing) {
+    logger.info(`💡 Dynamic position sizing enabled (adapts to pool liquidity)`);
+  }
+
+  let gSwap: GSwap;
+  let signerService: SignerService;
+  let circuitBreakers: { quote: CircuitBreaker; swap: CircuitBreaker; transaction: CircuitBreaker };
+  try {
+    const initialized = await initializeGSwap();
+    gSwap = initialized.gSwap;
+    signerService = initialized.signerService;
+    circuitBreakers = initialized.circuitBreakers;
+  } catch (error) {
+    logger.error(`Failed to initialize GSwap for ${maxHops}-hop discovery:`, error);
+    return [];
+  }
+
+  const opportunities: ExoticRoute[] = [];
+  let routesExplored = 0;
+
+  // Ensure cleanup of signer service and WebSocket connection on function exit
+  const cleanup = () => {
+    signerService?.destroy();
+    try {
+      GSwap.events?.disconnectEventSocket();
+    } catch (error) {
+      // Ignore cleanup errors to avoid masking original errors
+    }
+  };
+
+  // Use token set - for deeper routes, use top liquid tokens only
+  const allTokens = [...TRADING_CONSTANTS.FALLBACK_TOKENS];
+  const liquidPairs = liquidityFilter.getLiquidPairs(allTokens.map(t => t.tokenClass));
+  logger.info(`🔍 Multi-hop discovery: ${liquidPairs.length} liquid pairs from ${allTokens.length} tokens`);
+
+  // For deep routes (5-6 hops), use only top 6 most liquid tokens to prevent explosion
+  const tokenSet = maxHops >= 5 ? [
+    { symbol: 'GALA', tokenClass: 'GALA|Unit|none|none' },
+    { symbol: 'GUSDC', tokenClass: 'GUSDC|Unit|none|none' },
+    { symbol: 'GUSDT', tokenClass: 'GUSDT|Unit|none|none' },
+    { symbol: 'GWETH', tokenClass: 'GWETH|Unit|none|none' },
+    { symbol: 'GWBTC', tokenClass: 'GWBTC|Unit|none|none' },
+    { symbol: 'ETIME', tokenClass: 'ETIME|Unit|none|none' }
+  ] : allTokens;
+
+  /**
+   * Recursive route builder with early termination
+   * @param currentPath - Tokens in current route (starts with GALA)
+   * @param currentSymbols - Token symbols for logging
+   * @param currentAmount - Amount of tokens at current step
+   * @param currentQuotes - Quote results for fee tier tracking
+   * @param usedTokens - Set of tokens already used (prevent cycles)
+   * @param depth - Current recursion depth
+   */
+  async function exploreRoute(
+    currentPath: string[],
+    currentSymbols: string[],
+    currentAmount: number,
+    currentQuotes: { outputAmount: number; feeTier: number }[],
+    usedTokens: Set<string>,
+    depth: number
+  ): Promise<void> {
+    // Stop if we've explored enough routes
+    if (routesExplored >= maxRoutesToExplore) {
+      return;
+    }
+
+    // Base case: Reached target depth, return to GALA
+    if (depth === maxHops) {
+      try {
+        // Final hop: current token → GALA
+        const finalQuote = await getSmartQuote(
+          useMultiFeeTier,
+          gSwap,
+          circuitBreakers.quote,
+          currentPath[currentPath.length - 1],
+          'GALA|Unit|none|none',
+          currentAmount
+        );
+
+        if (!finalQuote) return;
+
+        routesExplored++;
+        const finalAmount = finalQuote.outputAmount;
+
+        // Calculate optimal position size for this route
+        let tradeSize = inputAmount;
+        if (useDynamicSizing) {
+          tradeSize = await calculateOptimalPositionSize(
+            gSwap,
+            circuitBreakers.quote,
+            'GALA|Unit|none|none',
+            currentPath[1], // First intermediate token
+            useMultiFeeTier
+          );
+        }
+
+        // Use precision math for profit calculations
+        const inputAmountFixed = PrecisionMath.fromToken(tradeSize, TOKEN_DECIMALS.GALA);
+        const finalAmountFixed = PrecisionMath.fromToken(finalAmount, TOKEN_DECIMALS.GALA);
+        const profitFixed = PrecisionMath.subtract(finalAmountFixed, inputAmountFixed);
+        const profitPercentFixed = PrecisionMath.calculatePercentageChange(inputAmountFixed, finalAmountFixed);
+
+        const profit = safeFixedToNumber(profitFixed);
+        const profitPercent = safeFixedToNumber(profitPercentFixed);
+
+        // Calculate gas costs
+        const fullPath = [...currentSymbols, 'GALA'];
+        const gasEstimate = calculateDynamicGas(fullPath, tradeSize);
+        const estimatedGasFixed = PrecisionMath.fromToken(gasEstimate.totalGas, TOKEN_DECIMALS.GALA);
+        const netProfitFixed = PrecisionMath.subtract(profitFixed, estimatedGasFixed);
+
+        const estimatedGas = safeFixedToNumber(estimatedGasFixed);
+        const netProfit = safeFixedToNumber(netProfitFixed);
+
+        const netProfitPercentFixed = PrecisionMath.calculatePercentage(
+          PrecisionMath.divide(netProfitFixed, inputAmountFixed),
+          PrecisionMath.fromNumber(100, PrecisionMath.PERCENTAGE_DECIMALS)
+        );
+        const netProfitPercent = safeFixedToNumber(netProfitPercentFixed);
+
+        logger.debug(`   ${maxHops}-hop route: ${fullPath.join('→')} = ${netProfitPercent.toFixed(2)}% net`);
+
+        // Check if profitable
+        if (netProfitPercent >= minProfitThreshold) {
+          const allFeeTiers = [...currentQuotes.map(q => q.feeTier), finalQuote.feeTier];
+
+          opportunities.push({
+            tokens: [...currentPath, 'GALA|Unit|none|none'],
+            symbols: fullPath,
+            inputAmount: tradeSize,
+            expectedOutput: finalAmount,
+            profitPercent: netProfitPercent,
+            profitAmount: netProfit,
+            estimatedGas,
+            netProfit,
+            confidence: netProfitPercent > (minProfitThreshold * 2) ? 'high' :
+                       netProfitPercent > (minProfitThreshold * 1.5) ? 'medium' : 'low',
+            feeTiers: allFeeTiers,
+            _precisionValues: {
+              inputAmountFixed,
+              expectedOutputFixed: finalAmountFixed,
+              profitAmountFixed: netProfitFixed,
+              estimatedGasFixed,
+              netProfitFixed
+            }
+          });
+
+          logger.info(`   ✅ Found ${maxHops}-hop opportunity: ${fullPath.join('→')} (${netProfitPercent.toFixed(2)}%)`);
+        }
+
+      } catch (error) {
+        logger.debug(`Error completing ${maxHops}-hop route:`, error);
+      }
+      return;
+    }
+
+    // Recursive case: Explore next hops
+    for (const nextToken of tokenSet) {
+      // Skip if already used (prevent cycles, except final GALA)
+      if (usedTokens.has(nextToken.tokenClass)) continue;
+      // Skip GALA as intermediate token
+      if (nextToken.symbol === 'GALA') continue;
+
+      // Stop if we've explored enough routes
+      if (routesExplored >= maxRoutesToExplore) return;
+
+      try {
+        // Get quote for current → next
+        const quote = await getSmartQuote(
+          useMultiFeeTier,
+          gSwap,
+          circuitBreakers.quote,
+          currentPath[currentPath.length - 1],
+          nextToken.tokenClass,
+          currentAmount
+        );
+
+        if (!quote) continue;
+
+        // Early termination: Skip if we're losing money at this step
+        // (Allows small losses if overall route might be profitable)
+        const stepProfitPercent = ((quote.outputAmount - currentAmount) / currentAmount) * 100;
+        if (stepProfitPercent < -5) {
+          // Skip routes with >5% loss at any intermediate step
+          continue;
+        }
+
+        // Recurse to next depth
+        await exploreRoute(
+          [...currentPath, nextToken.tokenClass],
+          [...currentSymbols, nextToken.symbol],
+          quote.outputAmount,
+          [...currentQuotes, quote],
+          new Set([...usedTokens, nextToken.tokenClass]),
+          depth + 1
+        );
+
+        // Small delay to avoid overwhelming API
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+      } catch (error) {
+        logger.debug(`Error exploring hop to ${nextToken.symbol}:`, error);
+      }
+    }
+  }
+
+  // Start recursive exploration from GALA
+  try {
+    await exploreRoute(
+      ['GALA|Unit|none|none'],
+      ['GALA'],
+      inputAmount,
+      [],
+      new Set(['GALA|Unit|none|none']),
+      1 // Start at depth 1
+    );
+  } catch (error) {
+    logger.error(`Multi-hop discovery failed:`, error);
+  }
+
+  logger.info(`🔍 Explored ${routesExplored} ${maxHops}-hop routes, found ${opportunities.length} profitable opportunities`);
+
+  // Clean up before returning
+  cleanup();
+
+  return opportunities.sort((a, b) => b.profitPercent - a.profitPercent);
+}
+
+/**
  * Execute exotic route with multi-hop trading
  */
 async function executeExoticRoute(route: ExoticRoute): Promise<ExoticArbitrageResult> {
@@ -1097,6 +1357,84 @@ export async function huntAndExecuteArbitrage(
 }
 
 /**
+ * Execute 4-hop multi-path arbitrage (GALA → A → B → C → GALA)
+ */
+async function executeMultiHop4Arbitrage(
+  inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
+  minProfitThreshold: number = 2.0,
+  useMultiFeeTier: boolean = true
+): Promise<ExoticArbitrageResult> {
+  logger.info('🔍 Executing 4-hop Multi-Path Arbitrage');
+
+  const opportunities = await discoverMultiHopOpportunities(inputAmount, minProfitThreshold, 4, useMultiFeeTier);
+
+  if (opportunities.length === 0) {
+    return {
+      success: false,
+      error: 'No profitable 4-hop arbitrage opportunities found',
+      executedTrades: 0
+    };
+  }
+
+  const bestRoute = opportunities[0];
+  logger.info(`🏆 Best 4-hop route: ${bestRoute.symbols.join(' → ')} (${bestRoute.profitPercent.toFixed(2)}%)`);
+
+  return await executeExoticRoute(bestRoute);
+}
+
+/**
+ * Execute 5-hop multi-path arbitrage (GALA → A → B → C → D → GALA)
+ */
+async function executeMultiHop5Arbitrage(
+  inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
+  minProfitThreshold: number = 2.5,
+  useMultiFeeTier: boolean = true
+): Promise<ExoticArbitrageResult> {
+  logger.info('🔍 Executing 5-hop Multi-Path Arbitrage');
+
+  const opportunities = await discoverMultiHopOpportunities(inputAmount, minProfitThreshold, 5, useMultiFeeTier);
+
+  if (opportunities.length === 0) {
+    return {
+      success: false,
+      error: 'No profitable 5-hop arbitrage opportunities found',
+      executedTrades: 0
+    };
+  }
+
+  const bestRoute = opportunities[0];
+  logger.info(`🏆 Best 5-hop route: ${bestRoute.symbols.join(' → ')} (${bestRoute.profitPercent.toFixed(2)}%)`);
+
+  return await executeExoticRoute(bestRoute);
+}
+
+/**
+ * Execute 6-hop multi-path arbitrage (GALA → A → B → C → D → E → GALA)
+ */
+async function executeMultiHop6Arbitrage(
+  inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
+  minProfitThreshold: number = 3.0,
+  useMultiFeeTier: boolean = true
+): Promise<ExoticArbitrageResult> {
+  logger.info('🔍 Executing 6-hop Multi-Path Arbitrage');
+
+  const opportunities = await discoverMultiHopOpportunities(inputAmount, minProfitThreshold, 6, useMultiFeeTier);
+
+  if (opportunities.length === 0) {
+    return {
+      success: false,
+      error: 'No profitable 6-hop arbitrage opportunities found',
+      executedTrades: 0
+    };
+  }
+
+  const bestRoute = opportunities[0];
+  logger.info(`🏆 Best 6-hop route: ${bestRoute.symbols.join(' → ')} (${bestRoute.profitPercent.toFixed(2)}%)`);
+
+  return await executeExoticRoute(bestRoute);
+}
+
+/**
  * Execute exotic arbitrage based on configuration
  */
 export async function executeExoticArbitrage(config: ExoticArbitrageConfig): Promise<ExoticArbitrageResult> {
@@ -1121,6 +1459,12 @@ export async function executeExoticArbitrage(config: ExoticArbitrageConfig): Pro
         return await executeCrossPairArbitrage(inputAmount, config.minProfitThreshold || 1.5, useMultiFeeTier);
       case 'hunt-execute':
         return await huntAndExecuteArbitrage(inputAmount, config.minProfitThreshold || 3.0, useMultiFeeTier);
+      case 'multi-hop-4':
+        return await executeMultiHop4Arbitrage(inputAmount, config.minProfitThreshold || 2.0, useMultiFeeTier);
+      case 'multi-hop-5':
+        return await executeMultiHop5Arbitrage(inputAmount, config.minProfitThreshold || 2.5, useMultiFeeTier);
+      case 'multi-hop-6':
+        return await executeMultiHop6Arbitrage(inputAmount, config.minProfitThreshold || 3.0, useMultiFeeTier);
       default:
         throw new Error(`Invalid arbitrage mode: ${config.mode}`);
     }
