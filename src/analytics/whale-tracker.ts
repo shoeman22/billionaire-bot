@@ -914,7 +914,28 @@ export class WhaleTracker {
 
 /**
  * Create a whale tracker with default configuration
+ *
+ * NOTE: Whale tracking disabled - transaction history API not available on GalaSwap
+ * Returns a no-op instance to prevent initialization errors
  */
 export function createWhaleTracker(): WhaleTracker {
-  return new WhaleTracker();
+  // Return disabled instance to prevent transaction history API errors
+  const disabledTracker = Object.create(WhaleTracker.prototype);
+  disabledTracker.watchlist = new Map();
+  disabledTracker.recentAlerts = [];
+  disabledTracker.portfolioCache = new Map();
+
+  // No-op methods to prevent errors
+  disabledTracker.checkForAlerts = async () => [];
+  disabledTracker.getWatchlist = () => [];
+  disabledTracker.getRecentAlerts = () => [];
+  disabledTracker.getStats = () => ({
+    watchlistSize: 0,
+    activeWhales: 0,
+    totalAlerts: 0,
+    recentAlerts: 0,
+    cacheSize: 0
+  });
+
+  return disabledTracker;
 }
