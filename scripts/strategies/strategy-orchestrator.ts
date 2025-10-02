@@ -4,10 +4,17 @@
  * STRATEGY ORCHESTRATOR RUNNER 🎭
  * Intelligent coordination of multiple trading strategies
  *
- * Manages multiple strategies simultaneously:
+ * Manages 10+ advanced strategies simultaneously:
+ * - Basic Arbitrage (GALA ↔ GUSDC)
+ * - Smart Learning Arbitrage (ML-enhanced)
  * - Triangle Arbitrage (3-hop cycles)
  * - Stablecoin Arbitrage (GUSDC ↔ GUSDT)
- * - Cross-Asset Momentum (correlation breakdowns)
+ * - Multi-Path Arbitrage (4+ hop exotic routes)
+ * - Statistical Arbitrage (pairs trading)
+ * - Time-Based Patterns (daily/weekly cycles)
+ * - Volume Momentum (surge detection)
+ * - Event Arbitrage (game updates, tournaments)
+ * - NFT Floor Price Arbitrage (NFT-token pairs)
  * - Resource allocation and conflict resolution
  *
  * Usage:
@@ -120,28 +127,44 @@ class StrategyOrchestratorRunner {
     logger.info(`
 🎭 STRATEGY ORCHESTRATOR - Multi-Strategy Trading Coordinator
 
-AVAILABLE STRATEGIES:
-  triangle     - Triangle Arbitrage (3-hop cycles)
-  stablecoin   - Stablecoin Arbitrage (GUSDC ↔ GUSDT)
-  momentum     - Cross-Asset Momentum (correlation breakdowns)
+AVAILABLE STRATEGIES (10+ Advanced Strategies):
+
+  CORE ARBITRAGE:
+    arbitrage      - Basic Arbitrage (GALA ↔ GUSDC)
+    smart          - Smart Learning Arbitrage (ML-enhanced)
+    triangle       - Triangle Arbitrage (3-hop cycles)
+    stablecoin     - Stablecoin Arbitrage (GUSDC ↔ GUSDT)
+    multi-path     - Multi-Path Arbitrage (4+ hop exotic routes)
+
+  ADVANCED STRATEGIES:
+    statistical    - Statistical Arbitrage (pairs trading, mean reversion)
+    time-based     - Time-Based Patterns (daily rewards, weekend peaks)
+    volume         - Volume Momentum (surge detection, 200-800%+)
+    event          - Event Arbitrage (game updates, tournaments)
+    nft            - NFT Floor Price Arbitrage (NFT-token pairs)
 
 USAGE EXAMPLES:
   npm run strategy:orchestrator                    # Demo all strategies
   npm run strategy:orchestrator:live               # Live all strategies
   npm run strategy:all                             # All strategies (demo)
 
+  # Run specific advanced strategies
+  npm run strategy:orchestrator -- --strategies statistical,time-based,volume
+  npm run strategy:orchestrator -- --strategies multi-path,event,nft
+
   # Custom configurations
-  npm run strategy:orchestrator -- --strategies triangle,stablecoin
-  npm run strategy:orchestrator -- --allocation 40,30,30 --amount 10000
+  npm run strategy:orchestrator -- --strategies triangle,stablecoin --allocation 60,40
+  npm run strategy:orchestrator -- --allocation 20,20,20,20,20 --amount 10000
   npm run strategy:orchestrator -- --rebalance 30 --duration 120
 
 PARAMETERS:
-  --strategies <list>     Comma-separated strategy list (default: all)
+  --strategies <list>     Comma-separated strategy list (default: all enabled)
   --allocation <percent>  Capital allocation per strategy (e.g., 40,30,30)
   --amount <number>       Total capital to allocate across strategies
   --rebalance <minutes>   Minutes between portfolio rebalancing (default: 15)
   --duration <minutes>    Run for specified time
   --continuous           Run until manually stopped
+  --all                  Run ALL available strategies with optimal allocation
 
 MODES:
   --demo         Safe demo mode - no real trades (default)
@@ -149,37 +172,55 @@ MODES:
   --dry-run      Analysis only mode
 
 EXAMPLES:
-  # Conservative setup with focus on arbitrage
-  npm run strategy:orchestrator -- --strategies triangle,stablecoin --allocation 60,40
+  # Conservative arbitrage focus
+  npm run strategy:orchestrator -- --strategies triangle,stablecoin,statistical
 
-  # Aggressive momentum with frequent rebalancing
-  npm run strategy:orchestrator -- --strategies momentum --rebalance 5 --amount 50000
+  # Aggressive multi-strategy with high capital
+  npm run strategy:orchestrator -- --strategies multi-path,volume,event --amount 50000
 
-  # Balanced multi-strategy approach
-  npm run strategy:orchestrator -- --allocation 35,35,30 --rebalance 20
+  # Balanced approach with frequent rebalancing
+  npm run strategy:orchestrator -- --all --rebalance 10 --continuous
+
+  # Time-based + volume momentum for volatile markets
+  npm run strategy:orchestrator -- --strategies time-based,volume --rebalance 5
 `);
   }
 
   private parseStrategies(strategiesStr?: string): string[] {
+    // All available strategies
+    const allStrategies = [
+      'arbitrage',      // Basic arbitrage
+      'smart',          // Smart learning arbitrage
+      'triangle',       // Triangle arbitrage
+      'stablecoin',     // Stablecoin arbitrage
+      'multi-path',     // Multi-path arbitrage
+      'statistical',    // Statistical arbitrage
+      'time-based',     // Time-based patterns
+      'volume',         // Volume momentum
+      'event',          // Event arbitrage
+      'nft'             // NFT arbitrage
+    ];
+
     if (!strategiesStr) {
-      return ['triangle', 'stablecoin', 'momentum']; // Default: all strategies
+      // Default: Core arbitrage strategies (most reliable)
+      return ['arbitrage', 'smart', 'triangle', 'stablecoin', 'multi-path'];
     }
 
     // Handle special case for "all"
     if (strategiesStr.toLowerCase().trim() === 'all') {
-      return ['triangle', 'stablecoin', 'momentum'];
+      return allStrategies;
     }
 
     const strategies = strategiesStr.split(',').map(s => s.trim().toLowerCase());
-    const valid = ['triangle', 'stablecoin', 'momentum'];
 
-    const invalid = strategies.filter(s => !valid.includes(s));
+    const invalid = strategies.filter(s => !allStrategies.includes(s));
     if (invalid.length > 0) {
       logger.warn(`⚠️  Invalid strategies ignored: ${invalid.join(', ')}`);
+      logger.info(`💡 Valid strategies: ${allStrategies.join(', ')}`);
     }
 
-    const validStrategies = strategies.filter(s => valid.includes(s));
-    return validStrategies.length > 0 ? validStrategies : ['triangle', 'stablecoin', 'momentum'];
+    const validStrategies = strategies.filter(s => allStrategies.includes(s));
+    return validStrategies.length > 0 ? validStrategies : ['arbitrage', 'smart', 'triangle', 'stablecoin', 'multi-path'];
   }
 
   private parseAllocation(allocationStr?: string, strategyCount: number): number[] {
