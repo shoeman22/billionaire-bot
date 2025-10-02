@@ -60,6 +60,16 @@ export class LiquidityFilter {
     'GTON$Unit$none$none→GWETH$Unit$none$none',
     'GWBTC$Unit$none$none→GTON$Unit$none$none',
     'GTON$Unit$none$none→GWBTC$Unit$none$none',
+
+    // ✅ FIX: TOWN combinations (consistently no liquidity)
+    'GALA$Unit$none$none→TOWN$Unit$none$none',
+    'TOWN$Unit$none$none→GALA$Unit$none$none',
+    'GUSDC$Unit$none$none→TOWN$Unit$none$none',
+    'TOWN$Unit$none$none→GUSDC$Unit$none$none',
+    'GUSDT$Unit$none$none→TOWN$Unit$none$none',
+    'TOWN$Unit$none$none→GUSDT$Unit$none$none',
+    'ETIME$Unit$none$none→TOWN$Unit$none$none',
+    'TOWN$Unit$none$none→ETIME$Unit$none$none',
   ]);
 
   // Known liquid pairs that should always be allowed
