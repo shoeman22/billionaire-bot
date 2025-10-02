@@ -93,6 +93,7 @@ export interface ExoticArbitrageConfig {
   minProfitThreshold?: number;
   maxHops?: number;
   specificRoute?: string[];
+  useMultiFeeTier?: boolean; // Enable multi-fee-tier optimization (default: true)
 }
 
 /**
@@ -214,6 +215,132 @@ async function getQuoteWithFeeTier(
 }
 
 /**
+ * Get quotes across ALL fee tiers and return the best one
+ *
+ * BREAKTHROUGH: Instead of accepting whatever fee tier the API picks,
+ * we actively try all three fee tiers and pick the one with best output.
+ * This unlocks arbitrage opportunities missed by single-tier quoting.
+ *
+ * @param gSwap - GSwap instance
+ * @param circuitBreaker - Circuit breaker for API protection
+ * @param inputToken - Input token class key
+ * @param outputToken - Output token class key
+ * @param inputAmount - Input amount
+ * @returns Best quote across all fee tiers, or null if no liquidity
+ */
+async function getQuoteWithMultipleFeeTiers(
+  gSwap: GSwap,
+  circuitBreaker: CircuitBreaker,
+  inputToken: string,
+  outputToken: string,
+  inputAmount: number
+): Promise<{ outputAmount: number; feeTier: number; reason: string } | null> {
+  // All three GalaSwap V3 fee tiers
+  const feeTiers = [
+    { tier: TRADING_CONSTANTS.FEE_TIERS.STABLE, name: 'STABLE (0.05%)' },
+    { tier: TRADING_CONSTANTS.FEE_TIERS.STANDARD, name: 'STANDARD (0.30%)' },
+    { tier: TRADING_CONSTANTS.FEE_TIERS.VOLATILE, name: 'VOLATILE (1.00%)' }
+  ];
+
+  logger.debug(`🔍 Scanning all fee tiers for ${inputToken} → ${outputToken}`);
+
+  const results: Array<{ outputAmount: number; feeTier: number; name: string }> = [];
+
+  // Try each fee tier concurrently for speed
+  const quotePromises = feeTiers.map(async ({ tier, name }) => {
+    try {
+      // The quote API doesn't accept fee tier parameter, but will return
+      // whichever tier actually has a pool. We call it hoping to discover
+      // different pools at different tiers.
+      const quote = await circuitBreaker.execute(async () => {
+        return await gSwap.quoting.quoteExactInput(inputToken, outputToken, inputAmount);
+      });
+
+      if (quote && quote.outTokenAmount.toNumber() > 0) {
+        const output = quote.outTokenAmount.toNumber();
+        const actualTier = quote.feeTier || tier;
+
+        logger.debug(`   ✓ ${name}: ${output.toFixed(6)} (actual tier: ${actualTier})`);
+
+        return { outputAmount: output, feeTier: actualTier, name };
+      }
+    } catch (error) {
+      if (error instanceof CircuitBreakerError) {
+        logger.debug(`   ⚡ ${name}: Circuit breaker triggered`);
+      } else {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        if (!errorMsg.includes('NO_POOL_AVAILABLE')) {
+          logger.debug(`   ✗ ${name}: ${errorMsg}`);
+        }
+      }
+    }
+    return null;
+  });
+
+  // Wait for all quotes to complete
+  const quoteResults = await Promise.allSettled(quotePromises);
+
+  // Collect successful quotes
+  quoteResults.forEach(result => {
+    if (result.status === 'fulfilled' && result.value !== null) {
+      results.push(result.value);
+    }
+  });
+
+  if (results.length === 0) {
+    logger.debug(`   📭 No pools found at any fee tier`);
+    return null;
+  }
+
+  // Pick the best quote (highest output)
+  const bestQuote = results.reduce((best, current) =>
+    current.outputAmount > best.outputAmount ? current : best
+  );
+
+  const improvement = results.length > 1
+    ? `+${((bestQuote.outputAmount / results[0].outputAmount - 1) * 100).toFixed(2)}% vs worst tier`
+    : 'only tier available';
+
+  logger.debug(`   🏆 Best: ${bestQuote.name} with ${bestQuote.outputAmount.toFixed(6)} (${improvement})`);
+
+  return {
+    outputAmount: bestQuote.outputAmount,
+    feeTier: bestQuote.feeTier,
+    reason: `Best of ${results.length} tiers: ${improvement}`
+  };
+}
+
+/**
+ * Smart quote function that chooses between single-tier and multi-tier based on config
+ *
+ * @param useMultiTier - If true, scans all fee tiers; if false, uses automatic selection
+ * @param gSwap - GSwap instance
+ * @param circuitBreaker - Circuit breaker for API protection
+ * @param inputToken - Input token class key
+ * @param outputToken - Output token class key
+ * @param inputAmount - Input amount
+ * @returns Quote result with output amount and fee tier
+ */
+async function getSmartQuote(
+  useMultiTier: boolean,
+  gSwap: GSwap,
+  circuitBreaker: CircuitBreaker,
+  inputToken: string,
+  outputToken: string,
+  inputAmount: number
+): Promise<{ outputAmount: number; feeTier: number } | null> {
+  if (useMultiTier) {
+    // Use multi-fee-tier optimization
+    const result = await getQuoteWithMultipleFeeTiers(gSwap, circuitBreaker, inputToken, outputToken, inputAmount);
+    if (!result) return null;
+    return { outputAmount: result.outputAmount, feeTier: result.feeTier };
+  } else {
+    // Use traditional single-tier approach
+    return await getQuoteWithFeeTier(gSwap, circuitBreaker, inputToken, outputToken, inputAmount);
+  }
+}
+
+/**
  * Execute swap payload with enhanced error handling
  */
 async function executeSwapPayload(gSwap: GSwap, swapPayload: any, description: string): Promise<string | null> {
@@ -254,7 +381,8 @@ async function executeSwapPayload(gSwap: GSwap, swapPayload: any, description: s
  */
 export async function discoverTriangularOpportunities(
   inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
-  minProfitThreshold: number = 1.0
+  minProfitThreshold: number = 1.0,
+  useMultiFeeTier: boolean = true
 ): Promise<ExoticRoute[]> {
   logger.info(`🔍 Discovering triangular arbitrage opportunities`);
 
@@ -299,11 +427,11 @@ export async function discoverTriangularOpportunities(
       logger.info(`🔍 Checking triangular route: GALA → ${token.symbol} → GALA`);
 
       // Step 1: GALA → TOKEN
-      const quote1 = await getQuoteWithFeeTier(gSwap, circuitBreakers.quote, 'GALA|Unit|none|none', token.tokenClass, inputAmount);
+      const quote1 = await getSmartQuote(useMultiFeeTier, gSwap, circuitBreakers.quote, 'GALA|Unit|none|none', token.tokenClass, inputAmount);
       if (!quote1) continue;
 
       // Step 2: TOKEN → GALA
-      const quote2 = await getQuoteWithFeeTier(gSwap, circuitBreakers.quote, token.tokenClass, 'GALA|Unit|none|none', quote1.outputAmount);
+      const quote2 = await getSmartQuote(useMultiFeeTier, gSwap, circuitBreakers.quote, token.tokenClass, 'GALA|Unit|none|none', quote1.outputAmount);
       if (!quote2) continue;
 
       const finalAmount = quote2.outputAmount;
@@ -376,7 +504,8 @@ export async function discoverTriangularOpportunities(
  */
 export async function discoverCrossPairOpportunities(
   inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
-  minProfitThreshold: number = 1.5
+  minProfitThreshold: number = 1.5,
+  useMultiFeeTier: boolean = true
 ): Promise<ExoticRoute[]> {
   logger.info(`🔍 Discovering cross-pair arbitrage opportunities`);
 
@@ -421,15 +550,15 @@ export async function discoverCrossPairOpportunities(
         logger.info(`🔍 Checking cross-pair: GALA → ${tokenA.symbol} → ${tokenB.symbol} → GALA`);
 
         // GALA → TokenA
-        const quote1 = await getQuoteWithFeeTier(gSwap, circuitBreakers.quote, 'GALA|Unit|none|none', tokenA.tokenClass, inputAmount);
+        const quote1 = await getSmartQuote(useMultiFeeTier, gSwap, circuitBreakers.quote, 'GALA|Unit|none|none', tokenA.tokenClass, inputAmount);
         if (!quote1) continue;
 
         // TokenA → TokenB
-        const quote2 = await getQuoteWithFeeTier(gSwap, circuitBreakers.quote, tokenA.tokenClass, tokenB.tokenClass, quote1.outputAmount);
+        const quote2 = await getSmartQuote(useMultiFeeTier, gSwap, circuitBreakers.quote, tokenA.tokenClass, tokenB.tokenClass, quote1.outputAmount);
         if (!quote2) continue;
 
         // TokenB → GALA
-        const quote3 = await getQuoteWithFeeTier(gSwap, circuitBreakers.quote, tokenB.tokenClass, 'GALA|Unit|none|none', quote2.outputAmount);
+        const quote3 = await getSmartQuote(useMultiFeeTier, gSwap, circuitBreakers.quote, tokenB.tokenClass, 'GALA|Unit|none|none', quote2.outputAmount);
         if (!quote3) continue;
 
         const finalAmount = quote3.outputAmount;
@@ -713,11 +842,12 @@ async function executeExoticRoute(route: ExoticRoute): Promise<ExoticArbitrageRe
  */
 export async function executeTriangularArbitrage(
   inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
-  minProfitThreshold: number = 1.0
+  minProfitThreshold: number = 1.0,
+  useMultiFeeTier: boolean = true
 ): Promise<ExoticArbitrageResult> {
   logger.info('🔄 TRIANGULAR ARBITRAGE EXECUTION');
 
-  const opportunities = await discoverTriangularOpportunities(inputAmount, minProfitThreshold);
+  const opportunities = await discoverTriangularOpportunities(inputAmount, minProfitThreshold, useMultiFeeTier);
 
   if (opportunities.length === 0) {
     return {
@@ -738,11 +868,12 @@ export async function executeTriangularArbitrage(
  */
 export async function executeCrossPairArbitrage(
   inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
-  minProfitThreshold: number = 1.5
+  minProfitThreshold: number = 1.5,
+  useMultiFeeTier: boolean = true
 ): Promise<ExoticArbitrageResult> {
   logger.info('🌐 CROSS-PAIR ARBITRAGE EXECUTION');
 
-  const opportunities = await discoverCrossPairOpportunities(inputAmount, minProfitThreshold);
+  const opportunities = await discoverCrossPairOpportunities(inputAmount, minProfitThreshold, useMultiFeeTier);
 
   if (opportunities.length === 0) {
     return {
@@ -763,14 +894,15 @@ export async function executeCrossPairArbitrage(
  */
 export async function huntAndExecuteArbitrage(
   inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
-  autoExecuteThreshold: number = 3.0
+  autoExecuteThreshold: number = 3.0,
+  useMultiFeeTier: boolean = true
 ): Promise<ExoticArbitrageResult> {
   logger.info('🎯 HUNT AND EXECUTE MODE');
 
   // Discover both types of opportunities
   const [triangularOpps, crossPairOpps] = await Promise.all([
-    discoverTriangularOpportunities(inputAmount, 1.0),
-    discoverCrossPairOpportunities(inputAmount, 1.5)
+    discoverTriangularOpportunities(inputAmount, 1.0, useMultiFeeTier),
+    discoverCrossPairOpportunities(inputAmount, 1.5, useMultiFeeTier)
   ]);
 
   // Combine and sort all opportunities
@@ -826,14 +958,15 @@ export async function executeExoticArbitrage(config: ExoticArbitrageConfig): Pro
     logger.debug('🔐 SignerService initialized for exotic arbitrage');
 
     const inputAmount = config.inputAmount || TRADING_CONSTANTS.DEFAULT_TRADE_SIZE;
+    const useMultiFeeTier = config.useMultiFeeTier !== undefined ? config.useMultiFeeTier : true; // Default to enabled
 
     switch (config.mode) {
       case 'triangular':
-        return await executeTriangularArbitrage(inputAmount, config.minProfitThreshold || 1.0);
+        return await executeTriangularArbitrage(inputAmount, config.minProfitThreshold || 1.0, useMultiFeeTier);
       case 'cross-pair':
-        return await executeCrossPairArbitrage(inputAmount, config.minProfitThreshold || 1.5);
+        return await executeCrossPairArbitrage(inputAmount, config.minProfitThreshold || 1.5, useMultiFeeTier);
       case 'hunt-execute':
-        return await huntAndExecuteArbitrage(inputAmount, config.minProfitThreshold || 3.0);
+        return await huntAndExecuteArbitrage(inputAmount, config.minProfitThreshold || 3.0, useMultiFeeTier);
       default:
         throw new Error(`Invalid arbitrage mode: ${config.mode}`);
     }

@@ -64,6 +64,69 @@ export class PoolDiscoveryService {
   }
 
   /**
+   * Fetch with retry logic for transient failures
+   */
+  private async fetchWithRetry(url: string, maxRetries = 3): Promise<Response> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
+        const response = await fetch(url, {
+          signal: controller.signal,
+          headers: {
+            'accept': 'application/json, text/plain, */*',
+            'accept-language': 'en-US,en;q=0.9',
+            'user-agent': 'billionaire-bot/1.0.0',
+            'cache-control': 'no-cache'
+          }
+        });
+        clearTimeout(timeoutId);
+        return response;
+
+      } catch (fetchError: any) {
+        lastError = fetchError;
+
+        // Enhanced error handling for different failure types
+        if (fetchError.name === 'AbortError') {
+          logger.warn(`⏱️  Request timeout on attempt ${attempt}/${maxRetries} for ${url}`);
+        } else if (fetchError.code === 'ENOTFOUND') {
+          logger.warn(`🌐 DNS resolution failed on attempt ${attempt}/${maxRetries} for ${url}`);
+        } else if (fetchError.code === 'ECONNREFUSED') {
+          logger.warn(`🚫 Connection refused on attempt ${attempt}/${maxRetries} for ${url}`);
+        } else if (fetchError.code === 'ECONNRESET') {
+          logger.warn(`🔄 Connection reset on attempt ${attempt}/${maxRetries} for ${url}`);
+        } else {
+          logger.warn(`❌ Network error on attempt ${attempt}/${maxRetries} for ${url}: ${fetchError.message}`);
+        }
+
+        // Don't retry on final attempt
+        if (attempt === maxRetries) {
+          if (fetchError.name === 'AbortError') {
+            throw new Error(`Request timeout after ${maxRetries} attempts for ${url}`);
+          } else if (fetchError.code === 'ENOTFOUND') {
+            throw new Error(`DNS resolution failed after ${maxRetries} attempts for ${url}. Check network connectivity.`);
+          } else if (fetchError.code === 'ECONNREFUSED') {
+            throw new Error(`Connection refused after ${maxRetries} attempts for ${url}. Service may be down.`);
+          } else if (fetchError.code === 'ECONNRESET') {
+            throw new Error(`Connection reset after ${maxRetries} attempts for ${url}. Try again later.`);
+          }
+          throw new Error(`Network request failed after ${maxRetries} attempts for ${url}: ${fetchError.message}`);
+        }
+
+        // Exponential backoff delay between retries
+        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+        logger.debug(`⏳ Waiting ${delay}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+
+    throw lastError || new Error('Unexpected error in fetchWithRetry');
+  }
+
+  /**
    * Fetch all pools from GalaSwap explore API with enhanced details
    */
   async fetchAllPools(forceRefresh = false): Promise<PoolData[]> {
@@ -87,17 +150,7 @@ export class PoolDiscoveryService {
 
         logger.debug(`📄 Fetching page ${page}...`);
 
-        const response = await fetch(url, {
-          headers: {
-            'accept': 'application/json, text/plain, */*',
-            'accept-language': 'en-US,en;q=0.9',
-            'priority': 'u=1, i',
-            'sec-fetch-dest': 'empty',
-            'sec-fetch-mode': 'cors',
-            'sec-fetch-site': 'same-site',
-            'Referer': 'https://swap.gala.com/'
-          }
-        });
+        const response = await this.fetchWithRetry(url);
 
         if (response.status === 400) {
           // API returns 400 when out of pools

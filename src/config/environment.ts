@@ -44,6 +44,7 @@ export interface ApiConfig {
 
 export interface WalletConfig {
   address: string;
+  privateKey: string;
   maxPositionSize?: number;
 }
 
@@ -135,6 +136,7 @@ export function validateEnvironment(): BotConfig {
     },
     wallet: {
       address: walletAddress,
+      privateKey: privateKey,
     },
     development: {
       nodeEnv,

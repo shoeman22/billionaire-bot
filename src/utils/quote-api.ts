@@ -6,6 +6,7 @@
 
 import { logger } from './logger';
 import { safeParseFloat } from './safe-parse';
+import { liquidityFilter } from './liquidity-filter';
 
 export interface QuoteResult {
   outTokenAmount: string;
@@ -222,6 +223,11 @@ export class QuoteApi {
         throw new NonRetryableError(`Invalid token pair: cannot swap identical tokens (${apiTokenIn})`, 'VALIDATION_ERROR');
       }
 
+      // Check liquidity filter to avoid known illiquid pairs
+      if (liquidityFilter.shouldFilterPair(tokenIn, tokenOut)) {
+        throw new NonRetryableError(`Filtered illiquid pair: ${apiTokenIn} → ${apiTokenOut} - known to lack sufficient liquidity`, 'LIQUIDITY_FILTERED');
+      }
+
       logger.debug(`🔄 Quote request: ${amountIn} ${apiTokenIn} → ${apiTokenOut}`);
 
       // Use working /v1/trade/quote endpoint
@@ -284,6 +290,11 @@ export class QuoteApi {
       const data = await response.json() as QuoteApiResponse;
 
       if (data.error || !data.data) {
+        // Check if this is a liquidity error and update blacklist
+        if (data.message && data.message.includes('No pools found with sufficient liquidity')) {
+          liquidityFilter.addToBlacklist(tokenIn, tokenOut, 'api_insufficient_liquidity');
+        }
+
         // API returned error - likely non-retryable (bad token pair, insufficient liquidity)
         throw new NonRetryableError(`Quote API error: ${data.message}`, 'API_ERROR');
       }

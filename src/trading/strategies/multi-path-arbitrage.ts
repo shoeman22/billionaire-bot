@@ -18,6 +18,7 @@
 import { GSwap } from '../../services/gswap-simple';
 import { TradingConfig, getConfig } from '../../config/environment';
 import { logger } from '../../utils/logger';
+import { liquidityFilter } from '../../utils/liquidity-filter';
 import { TRADING_CONSTANTS } from '../../config/constants';
 import { SwapExecutor, SwapRequest, SwapResult } from '../execution/swap-executor';
 import { MarketAnalysis } from '../../monitoring/market-analysis';
@@ -170,7 +171,8 @@ export class MultiPathArbitrageStrategy {
 
   // High-value token combinations for arbitrage
   private readonly PRIMARY_TOKENS = ['GALA', 'GUSDC', 'GUSDT', 'GWETH', 'GWBTC'];
-  private readonly INTERMEDIATE_TOKENS = ['ETIME', 'SILK', 'GTON']; // Good intermediate tokens
+  // Only use intermediate tokens with confirmed liquidity (ETIME and SILK have good GALA pairs)
+  private readonly INTERMEDIATE_TOKENS = ['ETIME', 'SILK']; // GTON removed due to liquidity issues
 
   // Pre-computed optimal paths (will be updated from pool discovery)
   private triangularPaths: string[][] = [];
