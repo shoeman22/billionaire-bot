@@ -1,5 +1,5 @@
 import { logger } from '../utils/logger';
-import { validateEnvironment } from '../config/environment';
+import { ENV } from '../config/environment';
 import { createPoolDetailClient, PoolDetailClient } from '../api/pool-detail-client';
 
 export interface PoolData {
@@ -51,15 +51,9 @@ export class PoolDiscoveryService {
   private readonly poolDetailClient: PoolDetailClient;
 
   constructor() {
-    try {
-      const config = validateEnvironment();
-      this.baseUrl = config.api.baseUrl;
-    } catch (error) {
-      // Use default API URL if environment validation fails (for demo mode)
-      logger.warn('⚠️  Environment validation failed, using default API URL for demo mode');
-      this.baseUrl = 'https://dex-backend-prod1.defi.gala.com';
-    }
-
+    // ✅ FIX: Use lazy-loaded ENV instead of calling validateEnvironment() again
+    // ENV is a Proxy that validates on first access, avoiding double validation
+    this.baseUrl = ENV.api.baseUrl || 'https://dex-backend-prod1.defi.gala.com';
     this.poolDetailClient = createPoolDetailClient(this.baseUrl);
   }
 
