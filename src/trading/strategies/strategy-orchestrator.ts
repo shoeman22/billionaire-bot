@@ -702,7 +702,11 @@ export class StrategyOrchestrator {
         performance.riskScore = this.calculateDynamicRiskScore(performance);
 
       } catch (error) {
-        logger.warn(`Failed to update performance for strategy ${name}`, { error });
+        logger.warn(`Failed to update performance for strategy ${name}`, {
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+          name
+        });
       }
     }
   }
