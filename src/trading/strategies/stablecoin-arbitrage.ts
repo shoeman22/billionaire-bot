@@ -225,7 +225,10 @@ export class StablecoinArbitrageStrategy {
       });
 
     } catch (error) {
-      logger.warn('⚠️  Failed to initialize stablecoin paths', { error });
+      logger.warn('⚠️  Failed to initialize stablecoin paths', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
       // Create fallback path if pool discovery fails
       this.createFallbackPaths();
     }
@@ -325,7 +328,10 @@ export class StablecoinArbitrageStrategy {
       try {
         await this.scanForOpportunities();
       } catch (error) {
-        logger.error('Error in stablecoin arbitrage scan', { error });
+        logger.error('Error in stablecoin arbitrage scan', {
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined
+        });
       }
 
       // Schedule next scan
@@ -369,7 +375,11 @@ export class StablecoinArbitrageStrategy {
           opportunities.push(opportunity);
         }
       } catch (error) {
-        logger.warn(`Failed to analyze path ${pathSymbol}`, { error });
+        logger.warn(`Failed to analyze path ${pathSymbol}`, {
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+          path: pathSymbol
+        });
       }
     }
 
@@ -494,7 +504,11 @@ export class StablecoinArbitrageStrategy {
       };
 
     } catch (error) {
-      logger.warn(`Error analyzing path ${path.symbol}`, { error });
+      logger.warn(`Error analyzing path ${path.symbol}`, {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        path: path.symbol
+      });
       return null;
     }
   }
@@ -735,7 +749,11 @@ export class StablecoinArbitrageStrategy {
       return enhancedOpportunity;
 
     } catch (error) {
-      logger.warn(`Analytics enhancement failed for ${path.symbol}`, { error });
+      logger.warn(`Analytics enhancement failed for ${path.symbol}`, {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        path: path.symbol
+      });
       // Fallback to base analysis
       return this.analyzePath(path);
     }
@@ -827,7 +845,11 @@ export class StablecoinArbitrageStrategy {
       };
 
     } catch (error) {
-      logger.warn(`Analytics enhancement failed for pool ${primaryPool.substring(0, 8)}:`, error);
+      logger.warn(`Analytics enhancement failed for pool ${primaryPool.substring(0, 8)}`, {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        pool: primaryPool.substring(0, 8)
+      });
       return {
         score: 0.5,
         confidenceMultiplier: 1.0,
