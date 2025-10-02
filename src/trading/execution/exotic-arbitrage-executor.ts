@@ -16,6 +16,16 @@ import { CircuitBreaker, CircuitBreakerFactory, CircuitBreakerManager, CircuitBr
 import type { TokenInfo } from '../../types/galaswap';
 import { PrecisionMath, FixedNumber, TOKEN_DECIMALS } from '../../utils/precision-math';
 import { safeParseFixedNumber, safeFixedToNumber } from '../../utils/safe-parse';
+import {
+  recordTradeOutcome,
+  recordVolatility,
+  calculateMarketVolatility,
+  calculateAdaptiveThreshold,
+  prioritizeRoutes,
+  logLearningStats,
+  identifyParallelRoutes,
+  getParallelExecutionStats
+} from '../enhancements/arbitrage-enhancements';
 
 /**
  * Dynamic Gas Estimation System
@@ -88,12 +98,13 @@ export interface ExoticArbitrageResult {
 }
 
 export interface ExoticArbitrageConfig {
-  mode: 'triangular' | 'cross-pair' | 'hunt-execute' | 'multi-hop-4' | 'multi-hop-5' | 'multi-hop-6' | 'comprehensive-triangular' | 'comprehensive-cross-pair' | 'comprehensive-all';
+  mode: 'triangular' | 'cross-pair' | 'hunt-execute' | 'multi-hop-4' | 'multi-hop-5' | 'multi-hop-6' | 'comprehensive-triangular' | 'comprehensive-cross-pair' | 'comprehensive-all' | 'parallel';
   inputAmount?: number;
   minProfitThreshold?: number;
   maxHops?: number;
   specificRoute?: string[];
   useMultiFeeTier?: boolean; // Enable multi-fee-tier optimization (default: true)
+  maxParallelRoutes?: number; // Maximum parallel routes for parallel mode (default: 3)
 }
 
 /**
@@ -1358,6 +1369,9 @@ async function executeExoticRoute(route: ExoticRoute): Promise<ExoticArbitrageRe
     logger.info(`   Final amount: ${currentAmount.toFixed(6)} GALA`);
     logger.info(`   Actual profit: ${actualProfit.toFixed(6)} GALA (${actualProfitPercent.toFixed(2)}%)`);
 
+    // 📊 PHASE 7: Record successful trade for learning
+    recordTradeOutcome(route, true, actualProfitPercent);
+
     // Clean up before returning
     cleanup();
 
@@ -1373,6 +1387,9 @@ async function executeExoticRoute(route: ExoticRoute): Promise<ExoticArbitrageRe
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     logger.error(`❌ Exotic arbitrage execution failed:`, errorMessage);
+
+    // 📊 PHASE 7: Record failed trade for learning
+    recordTradeOutcome(route, false);
 
     // Clean up before returning error
     cleanup();
@@ -1447,7 +1464,7 @@ export async function huntAndExecuteArbitrage(
   autoExecuteThreshold: number = 3.0,
   useMultiFeeTier: boolean = true
 ): Promise<ExoticArbitrageResult> {
-  logger.info('🎯 HUNT AND EXECUTE MODE');
+  logger.info('🎯 HUNT AND EXECUTE MODE (with Phase 7 enhancements)');
 
   // Discover both types of opportunities
   const [triangularOpps, crossPairOpps] = await Promise.all([
@@ -1455,9 +1472,8 @@ export async function huntAndExecuteArbitrage(
     discoverCrossPairOpportunities(inputAmount, 1.5, useMultiFeeTier)
   ]);
 
-  // Combine and sort all opportunities
-  const allOpportunities = [...triangularOpps, ...crossPairOpps]
-    .sort((a, b) => b.profitPercent - a.profitPercent);
+  // Combine all opportunities
+  const allOpportunities = [...triangularOpps, ...crossPairOpps];
 
   if (allOpportunities.length === 0) {
     return {
@@ -1467,26 +1483,40 @@ export async function huntAndExecuteArbitrage(
     };
   }
 
-  const bestRoute = allOpportunities[0];
+  // 📊 PHASE 7: Calculate and record market volatility
+  const marketVolatility = calculateMarketVolatility(allOpportunities);
+  recordVolatility(marketVolatility);
+  logger.info(`📊 Market volatility: ${marketVolatility.toFixed(2)}%`);
+
+  // 📊 PHASE 7: Smart route prioritization using historical performance
+  const prioritized = prioritizeRoutes(allOpportunities);
+  const bestRoute = prioritized[0];
+
+  // 📊 PHASE 7: Calculate adaptive threshold
+  const adaptiveThreshold = calculateAdaptiveThreshold(autoExecuteThreshold, bestRoute);
+  logger.info(`🎯 Adaptive threshold: ${adaptiveThreshold.finalThreshold.toFixed(2)}% (base: ${autoExecuteThreshold}%)`);
+  logger.info(`   Volatility adjustment: ${adaptiveThreshold.volatilityAdjustment.toFixed(2)}%`);
+  logger.info(`   Confidence bonus: ${adaptiveThreshold.confidenceBonus.toFixed(2)}%`);
 
   logger.info(`🏆 BEST OPPORTUNITY FOUND:`);
   logger.info(`   Route: ${bestRoute.symbols.join(' → ')}`);
   logger.info(`   Profit: ${bestRoute.profitPercent.toFixed(2)}%`);
   logger.info(`   Confidence: ${bestRoute.confidence.toUpperCase()}`);
 
-  // Auto-execute high-confidence opportunities
-  if (bestRoute.profitPercent >= autoExecuteThreshold && bestRoute.confidence === 'high') {
+  // 📊 PHASE 7: Use adaptive threshold instead of fixed threshold
+  if (bestRoute.profitPercent >= adaptiveThreshold.finalThreshold && bestRoute.confidence === 'high') {
     logger.info('🚀 AUTO-EXECUTING HIGH-CONFIDENCE OPPORTUNITY!');
+    logLearningStats(); // Show learning stats before execution
     return await executeExoticRoute(bestRoute);
   } else {
-    logger.info('⚠️ Opportunity found but below auto-execution threshold');
-    logger.info(`   Required: ${autoExecuteThreshold}% profit with high confidence`);
+    logger.info('⚠️ Opportunity found but below adaptive auto-execution threshold');
+    logger.info(`   Required: ${adaptiveThreshold.finalThreshold.toFixed(2)}% profit with high confidence`);
     logger.info(`   Found: ${bestRoute.profitPercent.toFixed(2)}% profit with ${bestRoute.confidence} confidence`);
 
     return {
       success: false,
       route: bestRoute,
-      error: `Opportunity below auto-execution threshold (${bestRoute.profitPercent.toFixed(2)}% < ${autoExecuteThreshold}%)`,
+      error: `Opportunity below adaptive threshold (${bestRoute.profitPercent.toFixed(2)}% < ${adaptiveThreshold.finalThreshold.toFixed(2)}%)`,
       executedTrades: 0
     };
   }
@@ -1669,6 +1699,123 @@ async function executeComprehensiveAllArbitrage(
 }
 
 /**
+ * 🚀 PHASE 7: Parallel Opportunity Execution
+ * Execute multiple non-conflicting routes simultaneously for maximum throughput
+ */
+export async function executeParallelArbitrage(
+  inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
+  minProfitThreshold: number = 2.0,
+  useMultiFeeTier: boolean = true,
+  maxParallelRoutes: number = 3
+): Promise<ExoticArbitrageResult> {
+  logger.info('🎯 PARALLEL ARBITRAGE EXECUTION MODE');
+  logger.info(`   Max parallel routes: ${maxParallelRoutes}`);
+
+  // Discover all opportunity types
+  const [triangularOpps, crossPairOpps] = await Promise.all([
+    discoverTriangularOpportunities(inputAmount, minProfitThreshold, useMultiFeeTier),
+    discoverCrossPairOpportunities(inputAmount, minProfitThreshold * 1.5, useMultiFeeTier)
+  ]);
+
+  const allOpportunities = [...triangularOpps, ...crossPairOpps];
+
+  if (allOpportunities.length === 0) {
+    return {
+      success: false,
+      error: 'No profitable opportunities found for parallel execution',
+      executedTrades: 0
+    };
+  }
+
+  logger.info(`📊 Found ${allOpportunities.length} total opportunities`);
+
+  // Calculate market volatility
+  const marketVolatility = calculateMarketVolatility(allOpportunities);
+  recordVolatility(marketVolatility);
+
+  // Prioritize routes using historical performance
+  const prioritized = prioritizeRoutes(allOpportunities);
+
+  // Identify non-conflicting routes that can run in parallel
+  const batches = identifyParallelRoutes(prioritized);
+  const stats = getParallelExecutionStats(batches);
+
+  logger.info(`🔄 Parallelization analysis:`);
+  logger.info(`   Total batches: ${stats.totalBatches}`);
+  logger.info(`   Total routes: ${stats.parallelRoutes}`);
+  logger.info(`   Max parallelism: ${stats.maxParallelism}`);
+  logger.info(`   Avg parallelism: ${stats.avgParallelism.toFixed(1)}`);
+
+  if (batches.length === 0) {
+    return {
+      success: false,
+      error: 'No non-conflicting routes identified',
+      executedTrades: 0
+    };
+  }
+
+  // Execute the first batch (highest priority non-conflicting routes)
+  const firstBatch = batches[0].slice(0, maxParallelRoutes);
+  logger.info(`\n🚀 Executing batch of ${firstBatch.length} non-conflicting routes:`);
+  firstBatch.forEach((route, idx) => {
+    logger.info(`   ${idx + 1}. ${route.symbols.join(' → ')} - ${route.profitPercent.toFixed(2)}%`);
+  });
+
+  // Execute all routes in parallel
+  const startTime = Date.now();
+  const results = await Promise.allSettled(
+    firstBatch.map(route => executeExoticRoute(route))
+  );
+  const executionTime = Date.now() - startTime;
+
+  // Analyze results
+  let successfulRoutes = 0;
+  let failedRoutes = 0;
+  let totalProfit = 0;
+  const transactionIds: string[] = [];
+
+  results.forEach((result, idx) => {
+    if (result.status === 'fulfilled' && result.value.success) {
+      successfulRoutes++;
+      totalProfit += result.value.profitAmount || 0;
+      if (result.value.transactionIds) {
+        transactionIds.push(...result.value.transactionIds);
+      }
+      logger.info(`✅ Route ${idx + 1}: SUCCESS - ${result.value.profitPercent?.toFixed(2)}% profit`);
+    } else {
+      failedRoutes++;
+      const error = result.status === 'rejected' ? result.reason : result.value.error;
+      logger.warn(`❌ Route ${idx + 1}: FAILED - ${error}`);
+    }
+  });
+
+  logger.info(`\n📊 PARALLEL EXECUTION RESULTS:`);
+  logger.info(`   Execution time: ${executionTime}ms`);
+  logger.info(`   Successful: ${successfulRoutes}/${firstBatch.length}`);
+  logger.info(`   Failed: ${failedRoutes}/${firstBatch.length}`);
+  logger.info(`   Total profit: ${totalProfit.toFixed(6)} GALA`);
+  logger.info(`   Avg profit per route: ${(totalProfit / Math.max(successfulRoutes, 1)).toFixed(6)} GALA`);
+
+  logLearningStats();
+
+  if (successfulRoutes === 0) {
+    return {
+      success: false,
+      error: 'All parallel routes failed',
+      executedTrades: 0
+    };
+  }
+
+  return {
+    success: true,
+    executedTrades: successfulRoutes,
+    transactionIds,
+    profitAmount: totalProfit,
+    profitPercent: (totalProfit / (inputAmount * firstBatch.length)) * 100
+  };
+}
+
+/**
  * Execute exotic arbitrage based on configuration
  */
 export async function executeExoticArbitrage(config: ExoticArbitrageConfig): Promise<ExoticArbitrageResult> {
@@ -1705,6 +1852,8 @@ export async function executeExoticArbitrage(config: ExoticArbitrageConfig): Pro
         return await executeComprehensiveCrossPairArbitrage(inputAmount, config.minProfitThreshold || 1.5, useMultiFeeTier);
       case 'comprehensive-all':
         return await executeComprehensiveAllArbitrage(inputAmount, config.minProfitThreshold || 1.0, useMultiFeeTier);
+      case 'parallel':
+        return await executeParallelArbitrage(inputAmount, config.minProfitThreshold || 2.0, useMultiFeeTier, config.maxParallelRoutes || 3);
       default:
         throw new Error(`Invalid arbitrage mode: ${config.mode}`);
     }
