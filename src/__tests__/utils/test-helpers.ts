@@ -30,8 +30,9 @@ export class TestHelpers {
         wsUrl: 'http://localhost:3001/ws'
       },
       wallet: {
-        address: 'client|0x1234567890123456789012345678901234567890'
+        address: 'client|0x1234567890123456789012345678901234567890',
         // Private key should come from environment variables, not config objects
+        privateKey: 'test-private-key-placeholder'
       },
       trading: {
         maxPositionSize: 1000,

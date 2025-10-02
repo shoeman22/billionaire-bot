@@ -230,6 +230,10 @@ class DevTestSuite {
       try {
         const fullConfig = {
           ...this.env,
+          wallet: {
+            ...this.env.wallet,
+            privateKey: this.env.wallet.privateKey || 'test-private-key-placeholder'
+          },
           api: {
             ...this.env.api,
             wsUrl: this.env.api.baseUrl.replace('http', 'ws') + '/ws'

@@ -356,7 +356,8 @@ describe('Liquidity Integration Tests', () => {
     mockConfig = {
       wallet: {
         address: 'eth|test-wallet-address',
-        maxPositionSize: 10000
+        maxPositionSize: 10000,
+        privateKey: 'test-private-key'
       },
       api: {
         baseUrl: 'https://test-api.example.com',
