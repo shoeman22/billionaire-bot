@@ -23,6 +23,7 @@ import { calculateArbitrageSlippage } from '../../utils/slippage-calculator';
 import { createQuoteWrapper } from '../../utils/quote-api';
 import { credentialService } from '../../security/credential-service';
 import { poolDiscovery, TriangularPath, PoolData } from '../../services/pool-discovery';
+import { liquidityFilter } from '../../utils/liquidity-filter';
 
 export interface TriangleArbitragePath {
   tokenA: string; // Start token
@@ -508,12 +509,18 @@ export class TriangleArbitrageStrategy {
     const tokenOutClass = this.getTokenClass(tokenOut);
 
     try {
+      // Pre-filter using liquidity blacklist to avoid unnecessary API calls
+      if (liquidityFilter.shouldFilterPair(tokenInClass, tokenOutClass)) {
+        return null; // Silently skip known illiquid pairs
+      }
+
       const result = await this.quoteWrapper.quoteExactInput(tokenInClass, tokenOutClass, Math.floor(amountIn).toString());
 
-      const outputAmount = parseFloat(result.amountOut || '0');
-      if (isNaN(outputAmount) || outputAmount <= 0 || !result.amountOut) {
+      // ✅ FIX: Quote API returns 'outTokenAmount', not 'amountOut'
+      const outputAmount = parseFloat(result.outTokenAmount || '0');
+      if (isNaN(outputAmount) || outputAmount <= 0 || !result.outTokenAmount) {
         logger.warn(`Invalid/missing output amount for ${tokenIn} → ${tokenOut}`, {
-          amountOut: result.amountOut,
+          outTokenAmount: result.outTokenAmount,
           parsed: outputAmount,
           resultKeys: Object.keys(result)
         });
