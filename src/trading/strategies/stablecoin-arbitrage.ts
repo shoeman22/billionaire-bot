@@ -560,26 +560,68 @@ export class StablecoinArbitrageStrategy {
     });
 
     try {
-      const result = await this.swapExecutor.executeSwap({
+      // Execute 2-hop trade: inputToken → bridgeToken → outputToken
+
+      // HOP 1: inputToken → bridgeToken
+      logger.info(`🔄 Hop 1/2: ${opportunity.inputToken} → ${opportunity.bridgeToken}`, {
+        amount: opportunity.inputAmount,
+        expectedOutput: opportunity.hop1Output
+      });
+
+      const hop1Result = await this.swapExecutor.executeSwap({
         tokenIn: this.getTokenClass(opportunity.inputToken),
-        tokenOut: this.getTokenClass(opportunity.outputToken),
+        tokenOut: this.getTokenClass(opportunity.bridgeToken),
         amountIn: opportunity.inputAmount.toString(),
         userAddress: credentialService.getWalletAddress(),
         slippageTolerance: this.MAX_SLIPPAGE_PERCENT / 100
       });
 
-      if (!result.success) {
-        logger.warn('Stablecoin arbitrage trade failed', {
+      if (!hop1Result.success) {
+        logger.warn('Hop 1 failed', {
           path: opportunity.path.symbol,
-          error: result.error
+          error: hop1Result.error
         });
         return false;
       }
 
-      // Calculate actual profit
-      const actualOutput = parseFloat(result.amountOut || '0');
+      const hop1ActualOutput = parseFloat(hop1Result.amountOut || '0');
+      logger.info(`✅ Hop 1 complete: received ${hop1ActualOutput} ${opportunity.bridgeToken}`);
+
+      // HOP 2: bridgeToken → outputToken
+      logger.info(`🔄 Hop 2/2: ${opportunity.bridgeToken} → ${opportunity.outputToken}`, {
+        amount: hop1ActualOutput,
+        expectedOutput: opportunity.hop2Output
+      });
+
+      const hop2Result = await this.swapExecutor.executeSwap({
+        tokenIn: this.getTokenClass(opportunity.bridgeToken),
+        tokenOut: this.getTokenClass(opportunity.outputToken),
+        amountIn: hop1ActualOutput.toString(),
+        userAddress: credentialService.getWalletAddress(),
+        slippageTolerance: this.MAX_SLIPPAGE_PERCENT / 100
+      });
+
+      if (!hop2Result.success) {
+        logger.warn('Hop 2 failed', {
+          path: opportunity.path.symbol,
+          error: hop2Result.error,
+          note: `Stuck with ${hop1ActualOutput} ${opportunity.bridgeToken}`
+        });
+        return false;
+      }
+
+      // Calculate actual profit from final output
+      const actualOutput = parseFloat(hop2Result.amountOut || '0');
       const actualProfit = actualOutput - opportunity.inputAmount;
       const actualProfitPercent = (actualProfit / opportunity.inputAmount) * 100;
+
+      logger.info(`✅ 2-hop arbitrage complete!`, {
+        inputAmount: opportunity.inputAmount,
+        hop1Output: hop1ActualOutput,
+        finalOutput: actualOutput,
+        profit: actualProfit.toFixed(4),
+        profitPercent: actualProfitPercent.toFixed(2) + '%'
+      });
 
       // Update statistics
       this.stats.successfulTrades++;
