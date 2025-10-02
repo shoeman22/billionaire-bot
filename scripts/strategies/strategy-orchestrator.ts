@@ -84,7 +84,7 @@ class StrategyOrchestratorRunner {
       const enabledStrategies = this.parseStrategies(strategiesToUse);
 
       // Initialize core systems
-      const signer = isLiveMode ? new PrivateKeySigner(config.wallet.privateKey) : {} as any;
+      const signer = isLiveMode ? new PrivateKeySigner(process.env.WALLET_PRIVATE_KEY!) : {} as any;
       const gswap = new GSwap({
         signer,
         baseUrl: config.api.baseUrl
