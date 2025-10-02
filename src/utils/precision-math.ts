@@ -60,7 +60,16 @@ export class PrecisionMath {
   static fromToken(amount: string | number, decimals: number = 18): FixedNumber {
     try {
       // Convert to string first to avoid precision issues
-      const amountStr = typeof amount === 'number' ? amount.toString() : amount;
+      let amountStr = typeof amount === 'number' ? amount.toString() : amount;
+
+      // ✅ FIX: Round to correct decimal places before conversion
+      // Prevents "too many decimals for format" error
+      const parts = amountStr.split('.');
+      if (parts.length === 2 && parts[1].length > decimals) {
+        // Round to the correct number of decimals
+        const numValue = parseFloat(amountStr);
+        amountStr = numValue.toFixed(decimals);
+      }
 
       // Parse with specified decimal places
       return FixedNumber.fromString(amountStr, decimals);
