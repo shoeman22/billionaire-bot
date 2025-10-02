@@ -12,7 +12,10 @@
  * Run with: npm run demo:strategies
  */
 
+// ✅ CRITICAL: Load .env BEFORE any imports that validate environment variables
 import dotenv from 'dotenv';
+dotenv.config();
+
 import { logger } from '../src/utils/logger';
 import { validateEnvironment } from '../src/config/environment';
 import { GSwap } from '../src/services/gswap-simple';
@@ -25,9 +28,6 @@ import { TriangleArbitrageStrategy } from '../src/trading/strategies/triangle-ar
 import { StablecoinArbitrageStrategy } from '../src/trading/strategies/stablecoin-arbitrage';
 import { CrossAssetMomentumStrategy } from '../src/trading/strategies/cross-asset-momentum';
 import { StrategyOrchestrator } from '../src/trading/strategies/strategy-orchestrator';
-
-// Load environment
-dotenv.config();
 
 class NewStrategiesDemo {
   private gswap: GSwap;

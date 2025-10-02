@@ -86,34 +86,34 @@ export class PoolDiscoveryService {
         clearTimeout(timeoutId);
         return response;
 
-      } catch (fetchError: any) {
-        lastError = fetchError;
-
+      } catch (fetchError: unknown) {
         // Enhanced error handling for different failure types
-        if (fetchError.name === 'AbortError') {
+        const error = fetchError as Error & { code?: string };
+        lastError = error;
+        if (error.name === 'AbortError') {
           logger.warn(`⏱️  Request timeout on attempt ${attempt}/${maxRetries} for ${url}`);
-        } else if (fetchError.code === 'ENOTFOUND') {
+        } else if (error.code === 'ENOTFOUND') {
           logger.warn(`🌐 DNS resolution failed on attempt ${attempt}/${maxRetries} for ${url}`);
-        } else if (fetchError.code === 'ECONNREFUSED') {
+        } else if (error.code === 'ECONNREFUSED') {
           logger.warn(`🚫 Connection refused on attempt ${attempt}/${maxRetries} for ${url}`);
-        } else if (fetchError.code === 'ECONNRESET') {
+        } else if (error.code === 'ECONNRESET') {
           logger.warn(`🔄 Connection reset on attempt ${attempt}/${maxRetries} for ${url}`);
         } else {
-          logger.warn(`❌ Network error on attempt ${attempt}/${maxRetries} for ${url}: ${fetchError.message}`);
+          logger.warn(`❌ Network error on attempt ${attempt}/${maxRetries} for ${url}: ${error.message}`);
         }
 
         // Don't retry on final attempt
         if (attempt === maxRetries) {
-          if (fetchError.name === 'AbortError') {
+          if (error.name === 'AbortError') {
             throw new Error(`Request timeout after ${maxRetries} attempts for ${url}`);
-          } else if (fetchError.code === 'ENOTFOUND') {
+          } else if (error.code === 'ENOTFOUND') {
             throw new Error(`DNS resolution failed after ${maxRetries} attempts for ${url}. Check network connectivity.`);
-          } else if (fetchError.code === 'ECONNREFUSED') {
+          } else if (error.code === 'ECONNREFUSED') {
             throw new Error(`Connection refused after ${maxRetries} attempts for ${url}. Service may be down.`);
-          } else if (fetchError.code === 'ECONNRESET') {
+          } else if (error.code === 'ECONNRESET') {
             throw new Error(`Connection reset after ${maxRetries} attempts for ${url}. Try again later.`);
           }
-          throw new Error(`Network request failed after ${maxRetries} attempts for ${url}: ${fetchError.message}`);
+          throw new Error(`Network request failed after ${maxRetries} attempts for ${url}: ${error.message}`);
         }
 
         // Exponential backoff delay between retries

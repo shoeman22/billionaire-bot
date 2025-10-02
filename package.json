@@ -171,6 +171,7 @@
     "ethers": "^6.15.0",
     "js-sha3": "^0.9.3",
     "json-stringify-deterministic": "^1.0.12",
+    "proper-lockfile": "^4.1.2",
     "reflect-metadata": "^0.2.2",
     "sqlite3": "^5.1.7",
     "typeorm": "^0.3.27"
@@ -182,6 +183,7 @@
     "@types/jest": "^30.0.0",
     "@types/node": "^24.5.2",
     "@types/node-fetch": "^2.6.13",
+    "@types/proper-lockfile": "^4.1.4",
     "@typescript-eslint/eslint-plugin": "^8.44.0",
     "@typescript-eslint/parser": "^8.44.0",
     "eslint": "^9.36.0",

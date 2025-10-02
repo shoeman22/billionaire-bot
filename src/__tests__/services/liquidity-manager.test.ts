@@ -3,6 +3,12 @@
  * Comprehensive testing for liquidity position management
  */
 
+// ✅ FIX: Set environment variables BEFORE importing modules
+process.env.WALLET_PRIVATE_KEY = '0x' + '0'.repeat(64); // Valid 64-char hex private key
+process.env.WALLET_ADDRESS = 'eth|test-wallet-address';
+process.env.GALASWAP_API_URL = 'https://dex-backend-prod1.defi.gala.com';
+process.env.GALASWAP_WS_URL = 'wss://bundle-backend-prod1.defi.gala.com';
+
 import { LiquidityManager } from '../../services/liquidity-manager';
 import { GSwap } from '../../services/gswap-simple';
 import { TRADING_CONSTANTS } from '../../config/constants';

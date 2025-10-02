@@ -3,15 +3,17 @@
  * End-to-end testing of the complete liquidity infrastructure
  */
 
+// ✅ FIX: Set environment variables BEFORE importing environment.ts
+process.env.WALLET_PRIVATE_KEY = '0x' + '0'.repeat(64); // Valid 64-char hex private key
+process.env.WALLET_ADDRESS = 'eth|test-wallet-address';
+process.env.GALASWAP_API_URL = 'https://dex-backend-prod1.defi.gala.com';
+process.env.GALASWAP_WS_URL = 'wss://bundle-backend-prod1.defi.gala.com';
+
 import { TradingEngine } from '../../trading/TradingEngine';
 import { BotConfig } from '../../config/environment';
 import { TRADING_CONSTANTS } from '../../config/constants';
 import { RetryHelper } from '../../utils/retry-helper';
 import { GasEstimator } from '../../utils/gas-estimator';
-
-// Mock environment variables
-process.env.WALLET_PRIVATE_KEY = 'test-private-key-base64';
-process.env.WALLET_ADDRESS = 'eth|test-wallet-address';
 
 // Mock the database initialization and repositories
 jest.mock('../../config/database', () => ({
@@ -356,8 +358,8 @@ describe('Liquidity Integration Tests', () => {
     mockConfig = {
       wallet: {
         address: 'eth|test-wallet-address',
-        maxPositionSize: 10000,
-        privateKey: 'test-private-key'
+        maxPositionSize: 10000
+        // ✅ SECURITY: Private key should come from environment variables
       },
       api: {
         baseUrl: 'https://test-api.example.com',

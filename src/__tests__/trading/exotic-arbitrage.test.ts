@@ -59,6 +59,11 @@ jest.mock('../../utils/circuit-breaker', () => ({
   CircuitBreakerError: class extends Error {}
 }));
 
+// ✅ FIX: Mock wallet balance to allow trades to execute
+jest.mock('../../utils/wallet-balance', () => ({
+  getMaxSafeTradeSize: jest.fn(() => Promise.resolve(1000000)) // Always return high balance for testing
+}));
+
 // Mock slippage calculator
 jest.mock('../../utils/slippage-calculator', () => ({
   calculateMinOutputAmount: jest.fn((amount: any) => (amount as number) * 0.995)

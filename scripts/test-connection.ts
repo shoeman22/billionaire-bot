@@ -3,15 +3,15 @@
  * Validates environment configuration and tests API connectivity
  */
 
+// ✅ CRITICAL: Load .env BEFORE any imports that validate environment variables
 import dotenv from 'dotenv';
+dotenv.config();
+
 import fs from 'fs';
 import { validateEnvironment } from '../src/config/environment';
 import { GalaSwapClient } from '../src/api/GalaSwapClient';
 import { logger } from '../src/utils/logger';
 import { InputValidator } from '../src/utils/validation';
-
-// Load environment variables
-dotenv.config();
 
 async function testConnection(): Promise<void> {
   try {

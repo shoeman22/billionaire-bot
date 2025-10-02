@@ -3,6 +3,12 @@
  * Comprehensive test suite for multi-strategy coordination
  */
 
+// ✅ FIX: Set environment variables BEFORE importing environment.ts
+process.env.WALLET_PRIVATE_KEY = '0x' + '0'.repeat(64); // Valid 64-char hex private key
+process.env.WALLET_ADDRESS = 'eth|test-wallet-address';
+process.env.GALASWAP_API_URL = 'https://dex-backend-prod1.defi.gala.com';
+process.env.GALASWAP_WS_URL = 'wss://bundle-backend-prod1.defi.gala.com';
+
 import { StrategyOrchestrator } from '../../trading/strategies/strategy-orchestrator';
 import { GSwap } from '../../services/gswap-simple';
 import { TradingConfig } from '../../config/environment';

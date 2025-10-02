@@ -241,7 +241,8 @@ export class GalaScanClient {
     const baseUrl = process.env.GALASWAP_API_URL || 'https://dex-backend-prod1.defi.gala.com';
     const encodedAddress = encodeURIComponent(walletAddress);
 
-    const response = await fetch(`${baseUrl}/user/assets?address=${encodedAddress}&page=1&limit=50`, {
+    // ✅ FIX: API limit is 20 max, not 50
+    const response = await fetch(`${baseUrl}/user/assets?address=${encodedAddress}&page=1&limit=20`, {
       headers: {
         'Accept': 'application/json',
         'User-Agent': this.userAgent

@@ -33,6 +33,14 @@ export interface TradingConfig {
   strategies?: {
     [key: string]: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   };
+  // ✅ FIX: Configurable exploration limits to prevent performance issues
+  explorationLimits?: {
+    triangular?: number;
+    crossPair?: number;
+    multiHop4?: number;
+    multiHop5?: number;
+    multiHop6?: number;
+  };
 }
 
 export interface ApiConfig {
@@ -44,7 +52,6 @@ export interface ApiConfig {
 
 export interface WalletConfig {
   address: string;
-  privateKey: string;
   maxPositionSize?: number;
 }
 
@@ -129,6 +136,15 @@ export function validateEnvironment(): BotConfig {
       maxDailyVolume: safeParseFloat(process.env.MAX_DAILY_VOLUME, 100000000), // Default to $100M
       concentrationLimit: safeParseFloat(process.env.CONCENTRATION_LIMIT, 1.0), // Default to 100%
       disablePortfolioLimits: process.env.DISABLE_PORTFOLIO_LIMITS === 'true', // Default to enabled
+      // ✅ FIX: Conservative exploration limits (configurable via env vars)
+      // Reduced from previous aggressive values (100→50, 200→100, etc.)
+      explorationLimits: {
+        triangular: safeParseFloat(process.env.EXPLORATION_LIMIT_TRIANGULAR, 50),
+        crossPair: safeParseFloat(process.env.EXPLORATION_LIMIT_CROSS_PAIR, 100),
+        multiHop4: safeParseFloat(process.env.EXPLORATION_LIMIT_MULTIHOP4, 150),
+        multiHop5: safeParseFloat(process.env.EXPLORATION_LIMIT_MULTIHOP5, 200),
+        multiHop6: safeParseFloat(process.env.EXPLORATION_LIMIT_MULTIHOP6, 250),
+      },
     },
     api: {
       baseUrl: process.env.GALASWAP_API_URL!,
@@ -136,7 +152,7 @@ export function validateEnvironment(): BotConfig {
     },
     wallet: {
       address: walletAddress,
-      privateKey: privateKey,
+      // ✅ SECURITY: Private key is NOT stored in config - use getPrivateKey() function instead
     },
     development: {
       nodeEnv,
@@ -173,6 +189,25 @@ export function validateEnvironment(): BotConfig {
 export function getConfig(): BotConfig {
   return validateEnvironment();
 }
+
+/**
+ * Global configuration instance (lazy-loaded to allow dotenv to load first)
+ */
+let _ENV: BotConfig | null = null;
+
+function getENV(): BotConfig {
+  if (!_ENV) {
+    _ENV = validateEnvironment();
+  }
+  return _ENV;
+}
+
+// Export as getter to ensure dotenv runs first
+export const ENV = new Proxy({} as BotConfig, {
+  get(target, prop) {
+    return getENV()[prop as keyof BotConfig];
+  }
+});
 
 /**
  * Securely get private key from environment - never store in memory

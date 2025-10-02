@@ -19,6 +19,20 @@ beforeAll(() => {
   // Set test environment
   process.env.NODE_ENV = 'test';
 
+  // Set required environment variables for tests (if not already set)
+  if (!process.env.WALLET_ADDRESS) {
+    process.env.WALLET_ADDRESS = 'eth|0x0000000000000000000000000000000000000000';
+  }
+  if (!process.env.WALLET_PRIVATE_KEY) {
+    process.env.WALLET_PRIVATE_KEY = '0x0000000000000000000000000000000000000000000000000000000000000000';
+  }
+  if (!process.env.GALASWAP_API_URL) {
+    process.env.GALASWAP_API_URL = 'https://dex-backend-prod1.defi.gala.com';
+  }
+  if (!process.env.GALASWAP_WS_URL) {
+    process.env.GALASWAP_WS_URL = 'wss://bundle-backend-prod1.defi.gala.com';
+  }
+
   // Setup test logger configuration (comment out logger.level as it may not exist)
   // logger.level = 'error'; // Only show errors in tests
 

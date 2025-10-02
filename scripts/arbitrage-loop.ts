@@ -11,13 +11,14 @@
  * - Support for both single-pair and multi-pair modes
  */
 
+// ✅ CRITICAL: Load .env BEFORE any imports that validate environment variables
 import { config } from 'dotenv';
+config();
+
 import { logger } from '../src/utils/logger';
 import { TRADING_CONSTANTS } from '../src/config/constants';
 import { executeArbitrage, ArbitrageResult } from '../src/trading/execution/arbitrage-executor';
 import { executeExoticArbitrage, ExoticArbitrageResult, ExoticArbitrageConfig } from '../src/trading/execution/exotic-arbitrage-executor';
-
-config();
 
 interface LoopConfig {
   mode: 'full' | 'multi' | 'triangular' | 'cross-pair' | 'exotic-hunt';

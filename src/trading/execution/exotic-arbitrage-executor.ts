@@ -16,6 +16,8 @@ import { CircuitBreaker, CircuitBreakerFactory, CircuitBreakerManager, CircuitBr
 import type { TokenInfo } from '../../types/galaswap';
 import { PrecisionMath, FixedNumber, TOKEN_DECIMALS } from '../../utils/precision-math';
 import { safeParseFixedNumber, safeFixedToNumber } from '../../utils/safe-parse';
+import { getMaxSafeTradeSize } from '../../utils/wallet-balance';
+import { ENV } from '../../config/environment';
 import {
   recordTradeOutcome,
   recordVolatility,
@@ -42,26 +44,33 @@ interface GasEstimateResult {
  * Calculate gas estimation using centralized constants
  * Matches the gas costs used by hunt-deals.ts for consistent profit calculations
  */
-function calculateDynamicGas(route: string[], inputAmount: number): GasEstimateResult {
+// ✅ CRITICAL FIX: Renamed from calculateDynamicGas to be honest (Code Reviewer Issue #3)
+// This uses STATIC constants, not dynamic network conditions
+// Added 10% safety margin to account for gas price volatility
+function calculateStaticGasWithSafetyMargin(route: string[], inputAmount: number): GasEstimateResult {
   // Use centralized gas constants for consistent calculations
-  let totalGas: number;
+  let baseGas: number;
 
   if (route.length === 3) {
     // Triangular arbitrage: GALA → TOKEN → GALA (2 swaps)
-    totalGas = TRADING_CONSTANTS.GAS_COSTS.TRIANGULAR_ARBITRAGE;
+    baseGas = TRADING_CONSTANTS.GAS_COSTS.TRIANGULAR_ARBITRAGE;
   } else if (route.length === 4) {
     // Cross-pair arbitrage: GALA → TokenA → TokenB → GALA (3 swaps)
-    totalGas = TRADING_CONSTANTS.GAS_COSTS.CROSS_PAIR_ARBITRAGE;
+    baseGas = TRADING_CONSTANTS.GAS_COSTS.CROSS_PAIR_ARBITRAGE;
   } else {
     // Fallback for other complex routes
-    totalGas = TRADING_CONSTANTS.GAS_COSTS.BASE_GAS +
+    baseGas = TRADING_CONSTANTS.GAS_COSTS.BASE_GAS +
                (TRADING_CONSTANTS.GAS_COSTS.PER_HOP_GAS * (route.length - 1));
   }
+
+  // ✅ Add 10% safety margin for gas price volatility
+  const safetyMargin = 1.1;
+  const totalGas = baseGas * safetyMargin;
 
   return {
     totalGas: Math.round(totalGas * 1000) / 1000,
     perHopGas: totalGas / Math.max(1, route.length - 1),
-    complexityMultiplier: 1.0,
+    complexityMultiplier: safetyMargin, // Now reflects actual multiplier applied
     baseGas: TRADING_CONSTANTS.GAS_COSTS.BASE_GAS
   };
 }
@@ -463,6 +472,29 @@ async function calculateOptimalPositionSize(
       logger.debug(`   💡 Calculated optimal size: ${optimalSize.toFixed(1)} GALA (scale: ${scaleFactor.toFixed(2)}x)`);
     }
 
+    // ✅ FIX: Validate against wallet balance
+    // Never use more than 50% of available balance to prevent over-allocation
+    try {
+      const tokenSymbol = inputToken.split('|')[0]; // Extract symbol from token class
+      const maxSafeSize = await getMaxSafeTradeSize(ENV.wallet.address, tokenSymbol, 0.5);
+
+      if (maxSafeSize < config.minPositionSize) {
+        throw new Error(
+          `Insufficient wallet balance: have ${maxSafeSize.toFixed(2)} ${tokenSymbol} (50% of balance), ` +
+          `need ${config.minPositionSize} minimum`
+        );
+      }
+
+      // Constrain optimal size to wallet balance limit
+      if (optimalSize > maxSafeSize) {
+        logger.warn(`   ⚠️  Reducing position size from ${optimalSize.toFixed(1)} to ${maxSafeSize.toFixed(1)} ${tokenSymbol} (wallet balance limit)`);
+        optimalSize = maxSafeSize;
+      }
+    } catch (balanceError) {
+      logger.error(`   ❌ Failed to check wallet balance:`, balanceError);
+      throw balanceError; // Propagate error to prevent trading without balance check
+    }
+
     return Math.floor(optimalSize); // Round down to whole number
 
   } catch (error) {
@@ -588,9 +620,10 @@ export async function discoverTriangularOpportunities(
       const finalAmount = quote2.outputAmount;
 
       // Use precision math for profit calculations (using dynamic tradeSize)
-      // Note: Using GALA decimals (8) as default - may need token-specific decimals for other start tokens
-      const inputAmountFixed = PrecisionMath.fromToken(tradeSize, TOKEN_DECIMALS.GALA);
-      const finalAmountFixed = PrecisionMath.fromToken(finalAmount, TOKEN_DECIMALS.GALA);
+      // ✅ FIX: Use token-specific decimals for accurate calculations
+      const startDecimals = getTokenDecimals(startSymbol);
+      const inputAmountFixed = PrecisionMath.fromToken(tradeSize, startDecimals);
+      const finalAmountFixed = PrecisionMath.fromToken(finalAmount, startDecimals);
       const profitFixed = PrecisionMath.subtract(finalAmountFixed, inputAmountFixed);
       const profitPercentFixed = PrecisionMath.calculatePercentageChange(inputAmountFixed, finalAmountFixed);
 
@@ -599,8 +632,8 @@ export async function discoverTriangularOpportunities(
       const profitPercent = safeFixedToNumber(profitPercentFixed);
 
       // Estimate gas costs (2 swaps) using precision math
-      const gasEstimate = calculateDynamicGas([startSymbol, token.symbol, startSymbol], tradeSize);
-      const estimatedGasFixed = PrecisionMath.fromToken(gasEstimate.totalGas, TOKEN_DECIMALS.GALA);
+      const gasEstimate = calculateStaticGasWithSafetyMargin([startSymbol, token.symbol, startSymbol], tradeSize);
+      const estimatedGasFixed = PrecisionMath.fromToken(gasEstimate.totalGas, startDecimals);
       const netProfitFixed = PrecisionMath.subtract(profitFixed, estimatedGasFixed);
 
       // Convert back to numbers for compatibility
@@ -736,9 +769,10 @@ export async function discoverCrossPairOpportunities(
         const finalAmount = quote3.outputAmount;
 
         // Use precision math for cross-pair profit calculations (using dynamic tradeSize)
-        // Note: Using GALA decimals (8) as default - may need token-specific decimals for other start tokens
-        const inputAmountFixed = PrecisionMath.fromToken(tradeSize, TOKEN_DECIMALS.GALA);
-        const finalAmountFixed = PrecisionMath.fromToken(finalAmount, TOKEN_DECIMALS.GALA);
+        // ✅ FIX: Use token-specific decimals for accurate calculations
+        const startDecimals = getTokenDecimals(startSymbol);
+        const inputAmountFixed = PrecisionMath.fromToken(tradeSize, startDecimals);
+        const finalAmountFixed = PrecisionMath.fromToken(finalAmount, startDecimals);
         const profitFixed = PrecisionMath.subtract(finalAmountFixed, inputAmountFixed);
         const profitPercentFixed = PrecisionMath.calculatePercentageChange(inputAmountFixed, finalAmountFixed);
 
@@ -748,8 +782,8 @@ export async function discoverCrossPairOpportunities(
 
         // Estimate gas costs (3 swaps) using precision math
         const routeSymbols = [startSymbol, tokenA.symbol, tokenB.symbol, startSymbol];
-        const gasEstimate = calculateDynamicGas(routeSymbols, tradeSize);
-        const estimatedGasFixed = PrecisionMath.fromToken(gasEstimate.totalGas, TOKEN_DECIMALS.GALA);
+        const gasEstimate = calculateStaticGasWithSafetyMargin(routeSymbols, tradeSize);
+        const estimatedGasFixed = PrecisionMath.fromToken(gasEstimate.totalGas, startDecimals);
         const netProfitFixed = PrecisionMath.subtract(profitFixed, estimatedGasFixed);
 
         // Convert back to numbers for compatibility
@@ -1058,8 +1092,10 @@ export async function discoverMultiHopOpportunities(
         }
 
         // Use precision math for profit calculations
-        const inputAmountFixed = PrecisionMath.fromToken(tradeSize, TOKEN_DECIMALS.GALA);
-        const finalAmountFixed = PrecisionMath.fromToken(finalAmount, TOKEN_DECIMALS.GALA);
+        // ✅ FIX: Use token-specific decimals (GALA for multi-hop routes)
+        const startDecimals = getTokenDecimals('GALA'); // Multi-hop always starts/ends with GALA
+        const inputAmountFixed = PrecisionMath.fromToken(tradeSize, startDecimals);
+        const finalAmountFixed = PrecisionMath.fromToken(finalAmount, startDecimals);
         const profitFixed = PrecisionMath.subtract(finalAmountFixed, inputAmountFixed);
         const profitPercentFixed = PrecisionMath.calculatePercentageChange(inputAmountFixed, finalAmountFixed);
 
@@ -1068,8 +1104,8 @@ export async function discoverMultiHopOpportunities(
 
         // Calculate gas costs
         const fullPath = [...currentSymbols, 'GALA'];
-        const gasEstimate = calculateDynamicGas(fullPath, tradeSize);
-        const estimatedGasFixed = PrecisionMath.fromToken(gasEstimate.totalGas, TOKEN_DECIMALS.GALA);
+        const gasEstimate = calculateStaticGasWithSafetyMargin(fullPath, tradeSize);
+        const estimatedGasFixed = PrecisionMath.fromToken(gasEstimate.totalGas, startDecimals);
         const netProfitFixed = PrecisionMath.subtract(profitFixed, estimatedGasFixed);
 
         const estimatedGas = safeFixedToNumber(estimatedGasFixed);
@@ -1217,6 +1253,19 @@ async function executeExoticRoute(route: ExoticRoute): Promise<ExoticArbitrageRe
     logger.info(`   Expected profit: ${route.profitPercent.toFixed(2)}%`);
     logger.info(`   Gas estimate: ${route.estimatedGas} GALA`);
     logger.info(`   Net profit: ${((route.profitAmount) / route.inputAmount * 100).toFixed(2)}%`);
+
+    // ✅ CRITICAL FIX: Mandatory balance check at execution layer (Code Reviewer Issue #2)
+    // This ensures balance is checked regardless of which code path was used
+    const startTokenSymbol = route.symbols[0];
+    const maxAvailable = await getMaxSafeTradeSize(ENV.wallet.address, startTokenSymbol, 0.9);
+    if (route.inputAmount > maxAvailable) {
+      cleanup();
+      throw new Error(
+        `❌ Insufficient balance for route ${route.symbols.join('→')}: ` +
+        `need ${route.inputAmount.toFixed(2)} ${startTokenSymbol}, have ${maxAvailable.toFixed(2)} (90% of wallet)`
+      );
+    }
+    logger.info(`   ✅ Balance check: ${startTokenSymbol} - ${route.inputAmount.toFixed(2)} / ${maxAvailable.toFixed(2)} available`);
 
     if (route.confidence === 'low') {
       logger.warn(`⚠️ Executing LOW confidence route - higher risk of failure`);
@@ -1370,7 +1419,7 @@ async function executeExoticRoute(route: ExoticRoute): Promise<ExoticArbitrageRe
     logger.info(`   Actual profit: ${actualProfit.toFixed(6)} GALA (${actualProfitPercent.toFixed(2)}%)`);
 
     // 📊 PHASE 7: Record successful trade for learning
-    recordTradeOutcome(route, true, actualProfitPercent);
+    await recordTradeOutcome(route, true, actualProfitPercent);
 
     // Clean up before returning
     cleanup();
@@ -1389,7 +1438,7 @@ async function executeExoticRoute(route: ExoticRoute): Promise<ExoticArbitrageRe
     logger.error(`❌ Exotic arbitrage execution failed:`, errorMessage);
 
     // 📊 PHASE 7: Record failed trade for learning
-    recordTradeOutcome(route, false);
+    await recordTradeOutcome(route, false);
 
     // Clean up before returning error
     cleanup();
@@ -1485,7 +1534,7 @@ export async function huntAndExecuteArbitrage(
 
   // 📊 PHASE 7: Calculate and record market volatility
   const marketVolatility = calculateMarketVolatility(allOpportunities);
-  recordVolatility(marketVolatility);
+  await recordVolatility(marketVolatility);
   logger.info(`📊 Market volatility: ${marketVolatility.toFixed(2)}%`);
 
   // 📊 PHASE 7: Smart route prioritization using historical performance
@@ -1532,7 +1581,16 @@ async function executeMultiHop4Arbitrage(
 ): Promise<ExoticArbitrageResult> {
   logger.info('🔍 Executing 4-hop Multi-Path Arbitrage');
 
-  const opportunities = await discoverMultiHopOpportunities(inputAmount, minProfitThreshold, 4, useMultiFeeTier);
+  // ✅ FIX: Use configurable exploration limit (default 150, was hardcoded)
+  const maxRoutes = ENV.trading.explorationLimits?.multiHop4 ?? 150;
+  const opportunities = await discoverMultiHopOpportunities(
+    inputAmount,
+    minProfitThreshold,
+    4,
+    useMultiFeeTier,
+    true, // useDynamicSizing
+    maxRoutes
+  );
 
   if (opportunities.length === 0) {
     return {
@@ -1558,7 +1616,16 @@ async function executeMultiHop5Arbitrage(
 ): Promise<ExoticArbitrageResult> {
   logger.info('🔍 Executing 5-hop Multi-Path Arbitrage');
 
-  const opportunities = await discoverMultiHopOpportunities(inputAmount, minProfitThreshold, 5, useMultiFeeTier);
+  // ✅ FIX: Use configurable exploration limit (default 200, was hardcoded)
+  const maxRoutes = ENV.trading.explorationLimits?.multiHop5 ?? 200;
+  const opportunities = await discoverMultiHopOpportunities(
+    inputAmount,
+    minProfitThreshold,
+    5,
+    useMultiFeeTier,
+    true, // useDynamicSizing
+    maxRoutes
+  );
 
   if (opportunities.length === 0) {
     return {
@@ -1584,7 +1651,16 @@ async function executeMultiHop6Arbitrage(
 ): Promise<ExoticArbitrageResult> {
   logger.info('🔍 Executing 6-hop Multi-Path Arbitrage');
 
-  const opportunities = await discoverMultiHopOpportunities(inputAmount, minProfitThreshold, 6, useMultiFeeTier);
+  // ✅ FIX: Use configurable exploration limit (default 250, was hardcoded)
+  const maxRoutes = ENV.trading.explorationLimits?.multiHop6 ?? 250;
+  const opportunities = await discoverMultiHopOpportunities(
+    inputAmount,
+    minProfitThreshold,
+    6,
+    useMultiFeeTier,
+    true, // useDynamicSizing
+    maxRoutes
+  );
 
   if (opportunities.length === 0) {
     return {
@@ -1731,7 +1807,7 @@ export async function executeParallelArbitrage(
 
   // Calculate market volatility
   const marketVolatility = calculateMarketVolatility(allOpportunities);
-  recordVolatility(marketVolatility);
+  await recordVolatility(marketVolatility);
 
   // Prioritize routes using historical performance
   const prioritized = prioritizeRoutes(allOpportunities);
@@ -1761,11 +1837,64 @@ export async function executeParallelArbitrage(
     logger.info(`   ${idx + 1}. ${route.symbols.join(' → ')} - ${route.profitPercent.toFixed(2)}%`);
   });
 
-  // Execute all routes in parallel
+  // ✅ CRITICAL FIX: Pre-execution balance validation (Code Reviewer Issue #1)
+  // Validate wallet has sufficient balance for EACH unique starting token BEFORE executing
+  const tokenRequirements = new Map<string, number>();
+  firstBatch.forEach(route => {
+    const tokenSymbol = route.symbols[0];
+    const currentReq = tokenRequirements.get(tokenSymbol) || 0;
+    tokenRequirements.set(tokenSymbol, currentReq + route.inputAmount);
+  });
+
+  // Check balance for each token
+  for (const [tokenSymbol, totalRequired] of tokenRequirements.entries()) {
+    try {
+      const maxAvailable = await getMaxSafeTradeSize(ENV.wallet.address, tokenSymbol, 1.0); // 100% of balance
+      if (totalRequired > maxAvailable) {
+        throw new Error(
+          `❌ Insufficient wallet balance for parallel execution: need ${totalRequired.toFixed(2)} ${tokenSymbol}, ` +
+          `have ${maxAvailable.toFixed(2)} available`
+        );
+      }
+      logger.info(`✅ Balance check passed: ${tokenSymbol} - need ${totalRequired.toFixed(2)}, have ${maxAvailable.toFixed(2)}`);
+    } catch (error) {
+      logger.error(`❌ Balance check failed for ${tokenSymbol}:`, error);
+      throw error; // Abort entire parallel execution if balance check fails
+    }
+  }
+
+  // ✅ FIX: Execute routes with early abort on balance errors
+  // Sequential execution prevents wasting resources if wallet is depleted
   const startTime = Date.now();
-  const results = await Promise.allSettled(
-    firstBatch.map(route => executeExoticRoute(route))
-  );
+  const results: PromiseSettledResult<ExoticArbitrageResult>[] = [];
+  let shouldAbort = false;
+
+  for (let idx = 0; idx < firstBatch.length; idx++) {
+    if (shouldAbort) {
+      logger.warn(`⏭️  Skipping route ${idx + 1} due to early abort`);
+      break;
+    }
+
+    const route = firstBatch[idx];
+    try {
+      const result = await executeExoticRoute(route);
+      results.push({ status: 'fulfilled', value: result });
+
+      // Early abort if balance error to prevent wasting resources
+      if (!result.success && result.error?.toLowerCase().includes('insufficient')) {
+        logger.warn('⚠️  Aborting parallel execution due to insufficient balance');
+        shouldAbort = true;
+      }
+    } catch (error) {
+      results.push({ status: 'rejected', reason: error });
+      // Also abort on thrown balance errors
+      if (error instanceof Error && error.message.toLowerCase().includes('insufficient')) {
+        logger.warn('⚠️  Aborting parallel execution due to thrown balance error');
+        shouldAbort = true;
+      }
+    }
+  }
+
   const executionTime = Date.now() - startTime;
 
   // Analyze results

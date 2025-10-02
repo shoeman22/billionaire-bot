@@ -12,6 +12,14 @@ import { logger } from '../../utils/logger';
 import { ExoticRoute } from '../execution/exotic-arbitrage-executor';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as lockfile from 'proper-lockfile';
+
+// ============================================================================
+// STATE TRACKING FOR CIRCUIT BREAKER
+// ============================================================================
+
+let consecutiveFailures = 0;
+let learningDisabled = false;
 
 // ============================================================================
 // TYPES AND INTERFACES
@@ -87,6 +95,32 @@ export function loadLearningData(): ArbitrageLearningData {
       const data = fs.readFileSync(LEARNING_DATA_PATH, 'utf-8');
       const parsed = JSON.parse(data);
 
+      // 🔧 MIGRATION: Convert old "pairs" to new "routes"
+      if (!parsed.routes && (parsed as { pairs?: Record<string, RoutePerformance> }).pairs) {
+        logger.warn('⚠️  Migrating old learning data from "pairs" to "routes" format');
+        parsed.routes = (parsed as { pairs: Record<string, RoutePerformance> }).pairs;
+        delete (parsed as { pairs?: Record<string, RoutePerformance> }).pairs;
+
+        // Auto-save migrated data
+        try {
+          const dataDir = path.dirname(LEARNING_DATA_PATH);
+          if (!fs.existsSync(dataDir)) {
+            fs.mkdirSync(dataDir, { recursive: true });
+          }
+          fs.writeFileSync(LEARNING_DATA_PATH, JSON.stringify(parsed, null, 2), 'utf-8');
+          logger.info('✅ Learning data migrated and saved');
+        } catch (saveError) {
+          logger.error('Failed to save migrated data:', saveError);
+        }
+      }
+
+      // Add missing fields
+      if (!parsed.volatilityHistory) parsed.volatilityHistory = [];
+      if (!parsed.profitHistory) parsed.profitHistory = [];
+      if (!parsed.globalStats) parsed.globalStats = {};
+      if (!parsed.globalStats.avgVolatility) parsed.globalStats.avgVolatility = 0;
+      if (!parsed.globalStats.recentProfitability) parsed.globalStats.recentProfitability = 0;
+
       // Ensure all required fields exist
       return {
         routes: parsed.routes || {},
@@ -123,9 +157,18 @@ export function loadLearningData(): ArbitrageLearningData {
 }
 
 /**
- * Save learning data to disk
+ * Save learning data to disk with file locking to prevent race conditions
+ * Includes circuit breaker pattern to disable learning on persistent failures
  */
-export function saveLearningData(data: ArbitrageLearningData): void {
+export async function saveLearningData(data: ArbitrageLearningData): Promise<void> {
+  // Circuit breaker: Skip if learning disabled due to persistent failures
+  if (learningDisabled) {
+    logger.warn('⚠️  Learning system disabled due to persistent save failures');
+    return;
+  }
+
+  let release: (() => Promise<void>) | undefined;
+
   try {
     // Ensure data directory exists
     const dataDir = path.dirname(LEARNING_DATA_PATH);
@@ -133,10 +176,41 @@ export function saveLearningData(data: ArbitrageLearningData): void {
       fs.mkdirSync(dataDir, { recursive: true });
     }
 
+    // Acquire file lock with retry mechanism
+    release = await lockfile.lock(LEARNING_DATA_PATH, {
+      retries: {
+        retries: 5,
+        minTimeout: 100,
+        maxTimeout: 500
+      },
+      stale: 10000 // Consider lock stale after 10 seconds
+    });
+
+    // Write data while holding lock
     fs.writeFileSync(LEARNING_DATA_PATH, JSON.stringify(data, null, 2), 'utf-8');
+
+    // Reset failure counter on success
+    consecutiveFailures = 0;
     logger.debug('✅ Learning data saved');
+
   } catch (error) {
-    logger.error('Failed to save learning data:', error);
+    consecutiveFailures++;
+    logger.error(`Failed to save learning data (attempt ${consecutiveFailures}):`, error);
+
+    // Circuit breaker: Disable learning after too many failures
+    if (consecutiveFailures > 5) {
+      logger.error('🚨 Too many save failures - disabling learning system');
+      learningDisabled = true;
+    }
+  } finally {
+    // Always release lock
+    if (release) {
+      try {
+        await release();
+      } catch (error) {
+        logger.error('Failed to release file lock:', error);
+      }
+    }
   }
 }
 
@@ -147,11 +221,11 @@ export function saveLearningData(data: ArbitrageLearningData): void {
 /**
  * Record a trade attempt and outcome for learning
  */
-export function recordTradeOutcome(
+export async function recordTradeOutcome(
   route: ExoticRoute,
   success: boolean,
   actualProfit?: number
-): void {
+): Promise<void> {
   const learningData = loadLearningData();
   const routeSignature = generateRouteSignature(route.symbols);
 
@@ -189,9 +263,10 @@ export function recordTradeOutcome(
   // Calculate success rate and confidence
   routePerf.successRate = routePerf.successes / routePerf.attempts;
 
-  // Confidence increases with more attempts and higher success rate
-  // Formula: successRate * min(attempts / 10, 1.0)
-  const attemptConfidence = Math.min(routePerf.attempts / 10, 1.0);
+  // ✅ FIX: Confidence increases exponentially with more attempts
+  // Formula: successRate * (1 - e^(-attempts/20))
+  // Requires ~50 attempts for 90% confidence, ~100 for 95%
+  const attemptConfidence = 1 - Math.exp(-routePerf.attempts / 20);
   routePerf.confidence = routePerf.successRate * attemptConfidence;
 
   // Update global stats
@@ -211,7 +286,7 @@ export function recordTradeOutcome(
 
   learningData.globalStats.lastUpdateTime = Date.now();
 
-  saveLearningData(learningData);
+  await saveLearningData(learningData);
 
   logger.info(`📊 Recorded trade: ${routeSignature} (${success ? 'SUCCESS' : 'FAILED'}) - Confidence: ${(routePerf.confidence * 100).toFixed(1)}%`);
 }
@@ -224,7 +299,7 @@ export function recordTradeOutcome(
  * Record market volatility measurement
  * Volatility = average absolute price change across all routes
  */
-export function recordVolatility(volatility: number): void {
+export async function recordVolatility(volatility: number): Promise<void> {
   const learningData = loadLearningData();
 
   learningData.volatilityHistory.push(volatility);
@@ -236,7 +311,7 @@ export function recordVolatility(volatility: number): void {
   const recentVolatility = learningData.volatilityHistory.slice(-20);
   learningData.globalStats.avgVolatility = recentVolatility.reduce((sum, v) => sum + v, 0) / recentVolatility.length;
 
-  saveLearningData(learningData);
+  await saveLearningData(learningData);
 }
 
 /**
@@ -267,14 +342,16 @@ export function calculateAdaptiveThreshold(
   let volatilityAdjustment = 0;
   let confidenceBonus = 0;
 
-  // Volatility adjustment: Lower threshold in volatile markets (more opportunities)
+  // ✅ FIX: Volatility adjustment with conservative limits
+  // Lower threshold in volatile markets (more opportunities), but cap max reduction
   if (learningData.globalStats.avgVolatility > 0) {
-    // High volatility (>3%) → reduce threshold by up to 0.5%
+    // High volatility (>3%) → reduce threshold by up to 0.3% (was 0.5%, too aggressive)
+    // Medium volatility (>2%) → reduce threshold by 0.2%
     // Low volatility (<1%) → increase threshold by up to 0.3%
     if (learningData.globalStats.avgVolatility > 3.0) {
-      volatilityAdjustment = -0.5;
-    } else if (learningData.globalStats.avgVolatility > 2.0) {
       volatilityAdjustment = -0.3;
+    } else if (learningData.globalStats.avgVolatility > 2.0) {
+      volatilityAdjustment = -0.2;
     } else if (learningData.globalStats.avgVolatility < 1.0) {
       volatilityAdjustment = 0.3;
     }
@@ -363,7 +440,10 @@ export function getTopPerformingRoutes(limit: number = 10): RoutePerformance[] {
 
 /**
  * Identify non-conflicting routes that can be executed in parallel
- * Routes conflict if they share any common tokens (except starting/ending token)
+ * Routes conflict if they share any common tokens INCLUDING the starting token
+ *
+ * CRITICAL: All arbitrage routes start/end with same token (usually GALA),
+ * so they ALL need wallet balance. Only one route per batch allowed!
  */
 export function identifyParallelRoutes(routes: ExoticRoute[]): ExoticRoute[][] {
   const batches: ExoticRoute[][] = [];
@@ -376,15 +456,20 @@ export function identifyParallelRoutes(routes: ExoticRoute[]): ExoticRoute[][] {
     for (let i = remaining.length - 1; i >= 0; i--) {
       const route = remaining[i];
 
-      // Get intermediate tokens (exclude first and last which are the same)
-      const intermediateTokens = route.symbols.slice(1, -1);
+      // ✅ FIX: Include starting token + intermediate tokens
+      // All tokens that need to be available for this route
+      const allTokens = new Set([
+        route.symbols[0],  // Starting token (critical - all routes need this!)
+        ...route.symbols.slice(1, -1)  // Intermediate tokens
+      ]);
 
-      // Check if any intermediate token is already used
-      const hasConflict = intermediateTokens.some(token => usedTokens.has(token));
+      // Check if any token is already used
+      const hasConflict = Array.from(allTokens).some(token => usedTokens.has(token));
 
       if (!hasConflict) {
         batch.push(route);
-        intermediateTokens.forEach(token => usedTokens.add(token));
+        // Mark ALL tokens as used
+        allTokens.forEach(token => usedTokens.add(token));
         remaining.splice(i, 1);
       }
     }

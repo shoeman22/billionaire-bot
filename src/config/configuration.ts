@@ -8,8 +8,6 @@
 import { logger } from '../utils/logger';
 import * as fs from 'fs';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
 
 // Type definitions for configuration structures
 export interface WhaleConfig {
@@ -330,9 +328,9 @@ export class ConfigurationManager {
       return envConfigPath;
     }
 
-    // Get current directory in ESM compatible way
-    const __filename = fileURLToPath(import.meta.url);
-    const currentDir = dirname(__filename);
+    // Use process.cwd() as reliable base for all environments
+    // This works in both ESM and CommonJS, and in test and production
+    const currentDir = process.cwd();
 
     // Check common locations
     const possiblePaths = [

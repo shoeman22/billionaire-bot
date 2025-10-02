@@ -218,7 +218,7 @@ describe('StablecoinArbitrageStrategy', () => {
       expect(profitableOpp).toBeDefined();
 
       if (profitableOpp) {
-        expect(profitableOpp.path.symbol).toBe('GUSDC/GUSDT');
+        expect(profitableOpp.path.symbol).toBe('GUSDC→GALA→GUSDT'); // Matches mock data on line 182
         expect(profitableOpp.spreadPercent).toBeGreaterThan(0.02);
         expect(profitableOpp.direction).toMatch(/A_TO_B|B_TO_A/);
       }
