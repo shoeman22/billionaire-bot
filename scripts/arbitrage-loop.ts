@@ -185,7 +185,7 @@ class ArbitrageLoopController {
         const exoticConfig: ExoticArbitrageConfig = {
           mode: this.config.mode === 'exotic-hunt' ? 'hunt-execute' : this.config.mode as 'triangular' | 'cross-pair',
           inputAmount: TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
-          minProfitThreshold: this.config.mode === 'triangular' ? 1.0 : this.config.mode === 'cross-pair' ? 1.5 : 3.0
+          minProfitThreshold: this.config.mode === 'triangular' ? 1.0 : this.config.mode === 'cross-pair' ? 1.5 : 2.0 // Aggressive 2% threshold for ultra-hunting (lower than default 3%)
         };
 
         const result: ExoticArbitrageResult = await executeExoticArbitrage(exoticConfig);

@@ -53,7 +53,10 @@ async function huntDeals(): Promise<void> {
       { symbol: 'GALA', classKey: 'GALA|Unit|none|none', decimals: 18 },
       { symbol: 'GUSDC', classKey: 'GUSDC|Unit|none|none', decimals: 6 },
       { symbol: 'ETIME', classKey: 'ETIME|Unit|none|none', decimals: 8 },
-      { symbol: 'SILK', classKey: 'SILK|Unit|none|none', decimals: 8 }
+      { symbol: 'SILK', classKey: 'SILK|Unit|none|none', decimals: 8 },
+      { symbol: 'GWETH', classKey: 'GWETH|Unit|none|none', decimals: 18 },
+      { symbol: 'GWBTC', classKey: 'GWBTC|Unit|none|none', decimals: 8 },
+      { symbol: 'TOWN', classKey: 'TOWN|Unit|none|none', decimals: 8 }
     ];
 
     // Our war chest - how much we're willing to risk per trade

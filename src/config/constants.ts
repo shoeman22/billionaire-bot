@@ -69,13 +69,17 @@ export const TRADING_CONSTANTS = {
     GWBTC: 'GWBTC|Unit|none|none',
   },
 
-  // Fallback token set for arbitrage operations
+  // Fallback token set for arbitrage operations (expanded for aggressive multi-token arbitrage)
   FALLBACK_TOKENS: [
     { symbol: 'GALA', name: 'Gala', decimals: 8, tokenClass: 'GALA|Unit|none|none', price: 0, priceChange24h: 0 },
     { symbol: 'GUSDC', name: 'Gala USD Coin', decimals: 6, tokenClass: 'GUSDC|Unit|none|none', price: 0, priceChange24h: 0 },
     { symbol: 'GUSDT', name: 'Gala Tether', decimals: 6, tokenClass: 'GUSDT|Unit|none|none', price: 0, priceChange24h: 0 },
     { symbol: 'GWETH', name: 'Gala Wrapped Ethereum', decimals: 18, tokenClass: 'GWETH|Unit|none|none', price: 0, priceChange24h: 0 },
-    { symbol: 'GWBTC', name: 'Gala Wrapped Bitcoin', decimals: 8, tokenClass: 'GWBTC|Unit|none|none', price: 0, priceChange24h: 0 }
+    { symbol: 'GWBTC', name: 'Gala Wrapped Bitcoin', decimals: 8, tokenClass: 'GWBTC|Unit|none|none', price: 0, priceChange24h: 0 },
+    { symbol: 'ETIME', name: 'Eternal Time', decimals: 8, tokenClass: 'ETIME|Unit|none|none', price: 0, priceChange24h: 0 },
+    { symbol: 'SILK', name: 'SILK Token', decimals: 8, tokenClass: 'SILK|Unit|none|none', price: 0, priceChange24h: 0 },
+    { symbol: 'TOWN', name: 'Town Coin', decimals: 8, tokenClass: 'TOWN|Unit|none|none', price: 0, priceChange24h: 0 },
+    { symbol: 'GTON', name: 'Gala TON', decimals: 8, tokenClass: 'GTON|Unit|none|none', price: 0, priceChange24h: 0 }
   ] as const,
 
   // Position management

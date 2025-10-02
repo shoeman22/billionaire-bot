@@ -6,6 +6,7 @@
 import { GSwap, PrivateKeySigner } from '@gala-chain/gswap-sdk';
 import { validateEnvironment, getPrivateKey } from '../../config/environment';
 import { logger } from '../../utils/logger';
+import { liquidityFilter } from '../../utils/liquidity-filter';
 import { TRADING_CONSTANTS, STRATEGY_CONSTANTS } from '../../config/constants';
 import { calculateMinOutputAmount, applySafetyMargin, getTokenDecimals } from '../../utils/slippage-calculator';
 import { SignerService, createSignerService } from '../../security/SignerService';
@@ -280,12 +281,15 @@ export async function discoverTriangularOpportunities(
     }
   };
 
-  // Use extended token set for better discovery
-  const tokens = [
-    ...TRADING_CONSTANTS.FALLBACK_TOKENS,
-    { symbol: 'ETIME', tokenClass: 'ETIME|Unit|none|none', decimals: 8 },
-    { symbol: 'SILK', tokenClass: 'SILK|Unit|none|none', decimals: 8 }
-  ];
+  // Use extended token set for better discovery, filtered for liquidity
+  // Now includes: GALA, GUSDC, GUSDT, GWETH, GWBTC, ETIME, SILK, TOWN, GTON (9 tokens total)
+  const allTokens = [...TRADING_CONSTANTS.FALLBACK_TOKENS];
+
+  // Get only liquid pairs to prevent failed quote requests
+  const liquidPairs = liquidityFilter.getLiquidPairs(allTokens.map(t => t.tokenClass));
+  logger.info(`🔍 Exotic arbitrage discovery: ${liquidPairs.length} liquid pairs from ${allTokens.length} tokens`);
+
+  const tokens = allTokens;
 
   // Discover GALA → TOKEN → GALA routes
   for (const token of tokens) {
