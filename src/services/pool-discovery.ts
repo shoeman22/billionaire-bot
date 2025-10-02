@@ -557,5 +557,23 @@ export class PoolDiscoveryService {
   }
 }
 
-// Export singleton instance
-export const poolDiscovery = new PoolDiscoveryService();
+// ✅ FIX: Lazy-loaded singleton to allow dotenv to load first
+// Creating instance immediately causes ENV validation before dotenv.config() runs
+let _poolDiscovery: PoolDiscoveryService | null = null;
+
+function getPoolDiscovery(): PoolDiscoveryService {
+  if (!_poolDiscovery) {
+    _poolDiscovery = new PoolDiscoveryService();
+  }
+  return _poolDiscovery;
+}
+
+// Export lazy-loaded singleton via Proxy pattern
+export const poolDiscovery = new Proxy({} as PoolDiscoveryService, {
+  get(_target, prop) {
+    const instance = getPoolDiscovery();
+    const value = instance[prop as keyof PoolDiscoveryService];
+    // Bind methods to maintain 'this' context
+    return typeof value === 'function' ? value.bind(instance) : value;
+  }
+});
