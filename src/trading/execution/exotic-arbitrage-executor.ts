@@ -341,6 +341,126 @@ async function getSmartQuote(
 }
 
 /**
+ * Dynamic Position Sizing Configuration
+ */
+interface DynamicSizingConfig {
+  minPositionSize: number;    // Minimum trade size (GALA)
+  maxPositionSize: number;    // Maximum trade size (GALA)
+  targetPriceImpact: number;  // Target price impact percentage
+  maxPriceImpact: number;     // Maximum acceptable price impact
+  testAmount: number;         // Small test amount for liquidity check
+}
+
+const DEFAULT_SIZING_CONFIG: DynamicSizingConfig = {
+  minPositionSize: 5,          // 5 GALA minimum
+  maxPositionSize: 100,        // 100 GALA maximum
+  targetPriceImpact: 1.0,      // 1% target price impact
+  maxPriceImpact: 3.0,         // 3% maximum price impact
+  testAmount: 1                // 1 GALA test trade
+};
+
+/**
+ * Calculate optimal position size based on pool liquidity (price impact)
+ *
+ * Uses a small test trade to measure price impact, then scales up the position
+ * size to hit the target price impact while staying within limits.
+ *
+ * Formula: If testAmount causes X% impact, then optimalAmount ≈ testAmount * (targetImpact / X)
+ *
+ * @param gSwap - GSwap instance
+ * @param circuitBreaker - Circuit breaker for API protection
+ * @param inputToken - Input token class key
+ * @param outputToken - Output token class key
+ * @param useMultiFeeTier - Whether to use multi-fee-tier optimization
+ * @param config - Dynamic sizing configuration
+ * @returns Optimal position size in GALA
+ */
+async function calculateOptimalPositionSize(
+  gSwap: GSwap,
+  circuitBreaker: CircuitBreaker,
+  inputToken: string,
+  outputToken: string,
+  useMultiFeeTier: boolean = true,
+  config: DynamicSizingConfig = DEFAULT_SIZING_CONFIG
+): Promise<number> {
+  try {
+    // Step 1: Test with small amount to measure price impact
+    const testQuote = await getSmartQuote(
+      useMultiFeeTier,
+      gSwap,
+      circuitBreaker,
+      inputToken,
+      outputToken,
+      config.testAmount
+    );
+
+    if (!testQuote) {
+      logger.debug('   ⚠️ No liquidity for position sizing, using minimum');
+      return config.minPositionSize;
+    }
+
+    // Step 2: Get a second test quote with 2x amount to measure price impact curve
+    const testQuote2x = await getSmartQuote(
+      useMultiFeeTier,
+      gSwap,
+      circuitBreaker,
+      inputToken,
+      outputToken,
+      config.testAmount * 2
+    );
+
+    if (!testQuote2x) {
+      logger.debug('   ⚠️ No liquidity for 2x test, using minimum');
+      return config.minPositionSize;
+    }
+
+    // Step 3: Calculate price impact from the two test trades
+    // Expected: 2x input should give ~2x output if no slippage
+    const expectedOutput2x = testQuote.outputAmount * 2;
+    const actualOutput2x = testQuote2x.outputAmount;
+    const slippagePercent = ((expectedOutput2x - actualOutput2x) / expectedOutput2x) * 100;
+
+    logger.debug(`   📊 Liquidity test: ${config.testAmount}→${testQuote.outputAmount.toFixed(4)}, ${config.testAmount * 2}→${actualOutput2x.toFixed(4)} (slippage: ${slippagePercent.toFixed(2)}%)`);
+
+    // Step 4: Check if pool has acceptable liquidity
+    if (slippagePercent > config.maxPriceImpact) {
+      logger.debug(`   ⚠️ High slippage (${slippagePercent.toFixed(2)}% > ${config.maxPriceImpact}%), using minimum position`);
+      return config.minPositionSize;
+    }
+
+    // Step 5: Calculate optimal position size
+    let optimalSize: number;
+
+    if (slippagePercent < 0.01) {
+      // Excellent liquidity (< 0.01% slippage) - use maximum size
+      optimalSize = config.maxPositionSize;
+      logger.debug(`   🔥 Excellent liquidity (<0.01% slippage), using maximum: ${optimalSize} GALA`);
+    } else if (slippagePercent < 0.1) {
+      // Very good liquidity (< 0.1% slippage) - use 75% of maximum
+      optimalSize = config.maxPositionSize * 0.75;
+      logger.debug(`   💎 Very good liquidity (<0.1% slippage), using 75% max: ${optimalSize.toFixed(0)} GALA`);
+    } else {
+      // Calculate based on slippage curve
+      // If doubling causes X% slippage, we want targetImpact% slippage
+      // Since slippage grows non-linearly, use conservative scaling
+      const scaleFactor = Math.sqrt(config.targetPriceImpact / slippagePercent) * 0.7; // sqrt for non-linear, 0.7 = safety
+      optimalSize = (config.testAmount * 2) * scaleFactor;
+
+      // Clamp to min/max bounds
+      optimalSize = Math.max(config.minPositionSize, Math.min(config.maxPositionSize, optimalSize));
+
+      logger.debug(`   💡 Calculated optimal size: ${optimalSize.toFixed(1)} GALA (scale: ${scaleFactor.toFixed(2)}x)`);
+    }
+
+    return Math.floor(optimalSize); // Round down to whole number
+
+  } catch (error) {
+    logger.warn(`   ⚠️ Position sizing failed, using default: ${error}`);
+    return TRADING_CONSTANTS.DEFAULT_TRADE_SIZE;
+  }
+}
+
+/**
  * Execute swap payload with enhanced error handling
  */
 async function executeSwapPayload(gSwap: GSwap, swapPayload: any, description: string): Promise<string | null> {
@@ -377,14 +497,18 @@ async function executeSwapPayload(gSwap: GSwap, swapPayload: any, description: s
 }
 
 /**
- * Discover triangular arbitrage opportunities
+ * Discover triangular arbitrage opportunities with dynamic position sizing
  */
 export async function discoverTriangularOpportunities(
   inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
   minProfitThreshold: number = 1.0,
-  useMultiFeeTier: boolean = true
+  useMultiFeeTier: boolean = true,
+  useDynamicSizing: boolean = true // Enable dynamic position sizing by default
 ): Promise<ExoticRoute[]> {
   logger.info(`🔍 Discovering triangular arbitrage opportunities`);
+  if (useDynamicSizing) {
+    logger.info(`💡 Dynamic position sizing enabled (adapts to pool liquidity)`);
+  }
 
   let gSwap, signerService, circuitBreakers;
   try {
@@ -426,8 +550,21 @@ export async function discoverTriangularOpportunities(
     try {
       logger.info(`🔍 Checking triangular route: GALA → ${token.symbol} → GALA`);
 
-      // Step 1: GALA → TOKEN
-      const quote1 = await getSmartQuote(useMultiFeeTier, gSwap, circuitBreakers.quote, 'GALA|Unit|none|none', token.tokenClass, inputAmount);
+      // Calculate optimal position size based on liquidity
+      let tradeSize = inputAmount;
+      if (useDynamicSizing) {
+        tradeSize = await calculateOptimalPositionSize(
+          gSwap,
+          circuitBreakers.quote,
+          'GALA|Unit|none|none',
+          token.tokenClass,
+          useMultiFeeTier
+        );
+        logger.info(`   💰 Dynamic position size: ${tradeSize} GALA (was ${inputAmount} GALA)`);
+      }
+
+      // Step 1: GALA → TOKEN (using dynamic size)
+      const quote1 = await getSmartQuote(useMultiFeeTier, gSwap, circuitBreakers.quote, 'GALA|Unit|none|none', token.tokenClass, tradeSize);
       if (!quote1) continue;
 
       // Step 2: TOKEN → GALA
@@ -436,8 +573,8 @@ export async function discoverTriangularOpportunities(
 
       const finalAmount = quote2.outputAmount;
 
-      // Use precision math for profit calculations
-      const inputAmountFixed = PrecisionMath.fromToken(inputAmount, TOKEN_DECIMALS.GALA);
+      // Use precision math for profit calculations (using dynamic tradeSize)
+      const inputAmountFixed = PrecisionMath.fromToken(tradeSize, TOKEN_DECIMALS.GALA);
       const finalAmountFixed = PrecisionMath.fromToken(finalAmount, TOKEN_DECIMALS.GALA);
       const profitFixed = PrecisionMath.subtract(finalAmountFixed, inputAmountFixed);
       const profitPercentFixed = PrecisionMath.calculatePercentageChange(inputAmountFixed, finalAmountFixed);
@@ -447,7 +584,7 @@ export async function discoverTriangularOpportunities(
       const profitPercent = safeFixedToNumber(profitPercentFixed);
 
       // Estimate gas costs (2 swaps) using precision math
-      const gasEstimate = calculateDynamicGas(['GALA', token.symbol, 'GALA'], inputAmount);
+      const gasEstimate = calculateDynamicGas(['GALA', token.symbol, 'GALA'], tradeSize);
       const estimatedGasFixed = PrecisionMath.fromToken(gasEstimate.totalGas, TOKEN_DECIMALS.GALA);
       const netProfitFixed = PrecisionMath.subtract(profitFixed, estimatedGasFixed);
 
@@ -468,7 +605,7 @@ export async function discoverTriangularOpportunities(
         opportunities.push({
           tokens: ['GALA|Unit|none|none', token.tokenClass, 'GALA|Unit|none|none'],
           symbols: ['GALA', token.symbol, 'GALA'],
-          inputAmount,
+          inputAmount: tradeSize,
           expectedOutput: finalAmount,
           profitPercent: netProfitPercent,
           profitAmount: netProfit,
@@ -505,9 +642,13 @@ export async function discoverTriangularOpportunities(
 export async function discoverCrossPairOpportunities(
   inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
   minProfitThreshold: number = 1.5,
-  useMultiFeeTier: boolean = true
+  useMultiFeeTier: boolean = true,
+  useDynamicSizing: boolean = true // Enable dynamic position sizing by default
 ): Promise<ExoticRoute[]> {
   logger.info(`🔍 Discovering cross-pair arbitrage opportunities`);
+  if (useDynamicSizing) {
+    logger.info(`💡 Dynamic position sizing enabled (adapts to pool liquidity)`);
+  }
 
   let gSwap, signerService, circuitBreakers;
   try {
@@ -549,8 +690,21 @@ export async function discoverCrossPairOpportunities(
       try {
         logger.info(`🔍 Checking cross-pair: GALA → ${tokenA.symbol} → ${tokenB.symbol} → GALA`);
 
-        // GALA → TokenA
-        const quote1 = await getSmartQuote(useMultiFeeTier, gSwap, circuitBreakers.quote, 'GALA|Unit|none|none', tokenA.tokenClass, inputAmount);
+        // Calculate optimal position size based on liquidity
+        let tradeSize = inputAmount;
+        if (useDynamicSizing) {
+          tradeSize = await calculateOptimalPositionSize(
+            gSwap,
+            circuitBreakers.quote,
+            'GALA|Unit|none|none',
+            tokenA.tokenClass,
+            useMultiFeeTier
+          );
+          logger.info(`   💰 Dynamic position size: ${tradeSize} GALA (was ${inputAmount} GALA)`);
+        }
+
+        // GALA → TokenA (using dynamic size)
+        const quote1 = await getSmartQuote(useMultiFeeTier, gSwap, circuitBreakers.quote, 'GALA|Unit|none|none', tokenA.tokenClass, tradeSize);
         if (!quote1) continue;
 
         // TokenA → TokenB
@@ -563,8 +717,8 @@ export async function discoverCrossPairOpportunities(
 
         const finalAmount = quote3.outputAmount;
 
-        // Use precision math for cross-pair profit calculations
-        const inputAmountFixed = PrecisionMath.fromToken(inputAmount, TOKEN_DECIMALS.GALA);
+        // Use precision math for cross-pair profit calculations (using dynamic tradeSize)
+        const inputAmountFixed = PrecisionMath.fromToken(tradeSize, TOKEN_DECIMALS.GALA);
         const finalAmountFixed = PrecisionMath.fromToken(finalAmount, TOKEN_DECIMALS.GALA);
         const profitFixed = PrecisionMath.subtract(finalAmountFixed, inputAmountFixed);
         const profitPercentFixed = PrecisionMath.calculatePercentageChange(inputAmountFixed, finalAmountFixed);
@@ -575,7 +729,7 @@ export async function discoverCrossPairOpportunities(
 
         // Estimate gas costs (3 swaps) using precision math
         const routeSymbols = ['GALA', tokenA.symbol, tokenB.symbol, 'GALA'];
-        const gasEstimate = calculateDynamicGas(routeSymbols, inputAmount);
+        const gasEstimate = calculateDynamicGas(routeSymbols, tradeSize);
         const estimatedGasFixed = PrecisionMath.fromToken(gasEstimate.totalGas, TOKEN_DECIMALS.GALA);
         const netProfitFixed = PrecisionMath.subtract(profitFixed, estimatedGasFixed);
 
@@ -596,7 +750,7 @@ export async function discoverCrossPairOpportunities(
           opportunities.push({
             tokens: ['GALA|Unit|none|none', tokenA.tokenClass, tokenB.tokenClass, 'GALA|Unit|none|none'],
             symbols: ['GALA', tokenA.symbol, tokenB.symbol, 'GALA'],
-            inputAmount,
+            inputAmount: tradeSize,
             expectedOutput: finalAmount,
             profitPercent: netProfitPercent,
             profitAmount: netProfit,
