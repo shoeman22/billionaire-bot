@@ -240,21 +240,37 @@ async function executeSwapPayload(gSwap: GSwap, swapPayload: any, description: s
 }
 
 /**
- * Generate token pairs from fallback tokens
+ * Whitelist of viable token pairs with known liquidity pools
+ * Only test pairs that actually have pools to avoid wasting time
+ */
+const VIABLE_PAIRS = [
+  ['GALA', 'GUSDC'],   // Main stablecoin pair
+  ['GALA', 'GUSDT'],   // Another stablecoin pair
+  ['GALA', 'GWETH'],   // Major asset pair
+  ['GALA', 'ETIME'],   // If pool exists
+  ['GUSDC', 'GUSDT'],  // Stablecoin arbitrage
+  ['GWETH', 'GUSDC'],  // ETH to stablecoin
+] as const;
+
+/**
+ * Generate token pairs from whitelist (only pairs with known pools)
  */
 function generateTokenPairs(): Array<{ tokenA: TokenInfo; tokenB: TokenInfo }> {
   const pairs: Array<{ tokenA: TokenInfo; tokenB: TokenInfo }> = [];
   const tokens = TRADING_CONSTANTS.FALLBACK_TOKENS;
 
-  for (let i = 0; i < tokens.length; i++) {
-    for (let j = i + 1; j < tokens.length; j++) {
-      pairs.push({
-        tokenA: tokens[i],
-        tokenB: tokens[j]
-      });
+  for (const [symbolA, symbolB] of VIABLE_PAIRS) {
+    const tokenA = tokens.find(t => t.symbol === symbolA);
+    const tokenB = tokens.find(t => t.symbol === symbolB);
+
+    if (tokenA && tokenB) {
+      pairs.push({ tokenA, tokenB });
+    } else {
+      logger.warn(`⚠️  Viable pair ${symbolA}/${symbolB} not found in token list`);
     }
   }
 
+  logger.info(`📋 Testing ${pairs.length} viable token pairs (filtered from ${tokens.length} tokens)`);
   return pairs;
 }
 
