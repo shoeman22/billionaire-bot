@@ -96,7 +96,7 @@ export class StablecoinArbitrageStrategy {
 
   // Analytics services for enhanced decision making
   private transactionAnalyzer: TransactionAnalyzer;
-  private whaleTracker: WhaleTracker;
+  private whaleTracker: WhaleTracker | null = null; // Disabled - transaction history API not available
   private volumePredictor: VolumePredictor;
 
   // Strategy configuration (updated for indirect paths)
@@ -154,7 +154,8 @@ export class StablecoinArbitrageStrategy {
 
     // Initialize analytics services
     this.transactionAnalyzer = createTransactionAnalyzer();
-    this.whaleTracker = createWhaleTracker();
+    // Whale tracking disabled - transaction history API not available on GalaSwap
+    // this.whaleTracker = createWhaleTracker();
     this.volumePredictor = createVolumePredictor();
 
     logger.info('Stablecoin Arbitrage Strategy initialized (indirect paths)', {
@@ -389,19 +390,8 @@ export class StablecoinArbitrageStrategy {
 
     const opportunities: StablecoinOpportunity[] = [];
 
-    // Check for whale alerts first - immediate action may be needed
-    const whaleAlerts = await this.whaleTracker.checkForAlerts();
-    const immediateWhaleSignals = whaleAlerts.filter(alert =>
-      alert.actionRecommendation.urgency === 'immediate' &&
-      alert.actionRecommendation.action === 'copy'
-    );
-
-    if (immediateWhaleSignals.length > 0) {
-      logger.info('🐋 Immediate whale signals detected - prioritizing analysis', {
-        signalCount: immediateWhaleSignals.length,
-        pools: immediateWhaleSignals.map(s => s.poolHash.substring(0, 8))
-      });
-    }
+    // Whale tracking disabled - transaction history API not available
+    // Skip whale alerts to avoid TransactionHistoryError warnings
 
     for (const [pathSymbol, path] of this.paths.entries()) {
       if (!path.isActive) continue;
