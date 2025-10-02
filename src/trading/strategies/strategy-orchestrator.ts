@@ -923,10 +923,20 @@ export class StrategyOrchestrator {
    * Calculate dynamic risk score based on performance
    */
   private calculateDynamicRiskScore(performance: StrategyPerformance): number {
-    let riskScore = this.calculateBaseRiskScore(
-      this.strategyConfigs.get(performance.name.toLowerCase().replace(/\s+/g, '-')) ||
-      { riskTolerance: 'medium' } as StrategyConfig
-    );
+    const configKey = performance.name.toLowerCase().replace(/\s+/g, '-');
+    const config = this.strategyConfigs.get(configKey) || {
+      name: performance.name,
+      enabled: true,
+      priority: 5,
+      maxCapitalAllocation: 20,
+      riskTolerance: 'medium' as const,
+      marketConditions: ['bull', 'bear', 'sideways', 'volatile', 'stable'] as const,
+      minProfitThreshold: 0.5,
+      cooldownPeriod: 60000,
+      maxConcurrentTrades: 3
+    };
+
+    let riskScore = this.calculateBaseRiskScore(config);
 
     // Adjust based on recent performance
     if (performance.winRate > 80) riskScore *= 0.9; // Lower risk for high win rate
