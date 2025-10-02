@@ -38,6 +38,8 @@ import { StrategyOrchestrator } from '../../src/trading/strategies/strategy-orch
 import { credentialService } from '../../src/security/credential-service';
 import { PrivateKeySigner } from '@gala-chain/gswap-sdk';
 import { PriceTracker } from '../../src/monitoring/price-tracker';
+import { VolumeAnalyzer } from '../../src/monitoring/volume-analyzer';
+import { RiskMonitor } from '../../src/trading/risk/risk-monitor';
 
 // Load environment
 dotenv.config();
@@ -94,9 +96,18 @@ class StrategyOrchestratorRunner {
       const swapExecutor = new SwapExecutor(gswap, slippageProtection);
       const priceTracker = new PriceTracker();
       const marketAnalysis = new MarketAnalysis(priceTracker, gswap);
+      const volumeAnalyzer = new VolumeAnalyzer();
+      const riskMonitor = new RiskMonitor(config.trading);
 
-      // Initialize orchestrator with correct parameters (it manages its own strategies internally)
-      this.orchestrator = new StrategyOrchestrator(gswap, config.trading, swapExecutor, marketAnalysis);
+      // Initialize orchestrator with all required parameters
+      this.orchestrator = new StrategyOrchestrator(
+        gswap,
+        config.trading,
+        swapExecutor,
+        marketAnalysis,
+        volumeAnalyzer,
+        riskMonitor
+      );
 
       // Apply custom configuration
       this.applyCustomConfig(options);
@@ -410,27 +421,23 @@ EXAMPLES:
   private displayRunningStats(): void {
     const runtime = Math.round((Date.now() - this.startTime) / 1000);
     const stats = this.orchestrator!.getStats();
+    const strategyPerformance = this.orchestrator!.getStrategyPerformance();
 
-    logger.info(`⏱️  ${runtime}s | Strategies: ${stats.activeStrategies} | Combined Trades: ${stats.totalTrades} | Success: ${stats.overallSuccessRate?.toFixed(1) || '0'}% | Profit: $${stats.totalProfit?.toFixed(6) || '0'}`);
+    logger.info(`⏱️  ${runtime}s | Strategies: ${strategyPerformance.size} | Combined Trades: ${stats.totalTrades} | Success: ${stats.overallWinRate?.toFixed(1) || '0'}% | Profit: $${stats.totalProfit?.toFixed(6) || '0'}`);
   }
 
   private displayPortfolioAllocation(): void {
-    const allocation = this.orchestrator!.getCurrentAllocation();
+    const strategyPerformance = this.orchestrator!.getStrategyPerformance();
     const stats = this.orchestrator!.getStats();
 
-    logger.info('\n📊 Portfolio Allocation Status:');
-    Object.entries(allocation).forEach(([strategy, amount]) => {
-      const performance = stats.strategyBreakdown?.[strategy];
-      const status = performance?.status || 'Unknown';
-      const profit = performance?.profit?.toFixed(6) || '0';
+    logger.info('\n📊 Strategy Performance:');
+    strategyPerformance.forEach((performance, strategyName) => {
+      const trades = performance.totalTrades || 0;
+      const profit = performance.totalProfit || 0;
+      const winRate = performance.winRate || 0;
 
-      logger.info(`   ${strategy}: $${amount.toFixed(2)} | Status: ${status} | P&L: $${profit}`);
+      logger.info(`   ${strategyName}: ${trades} trades | Win rate: ${winRate.toFixed(1)}% | P&L: $${profit.toFixed(6)}`);
     });
-
-    if (stats.portfolioDrift && stats.portfolioDrift > 10) {
-      logger.info(`   ⚠️  High portfolio drift: ${stats.portfolioDrift.toFixed(2)}%`);
-      logger.info(`   🔄 Rebalancing recommended`);
-    }
   }
 
   private setupGracefulShutdown(): void {
