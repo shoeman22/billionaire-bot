@@ -398,8 +398,8 @@ export class StablecoinArbitrageStrategy {
       if (!path.isActive) continue;
 
       try {
-        // Enhanced analysis with whale and volume intelligence
-        const opportunity = await this.analyzePathWithAnalytics(path);
+        // Price-based analysis (analytics disabled - no transaction history API)
+        const opportunity = await this.analyzePath(path);
         if (opportunity && this.isOpportunityProfitable(opportunity)) {
           opportunities.push(opportunity);
         }
@@ -429,14 +429,15 @@ export class StablecoinArbitrageStrategy {
     // Execute the best opportunity with enhanced validation
     if (opportunities.length > 0) {
       const best = opportunities[0];
-      const shouldExecute = await this.validateOpportunityWithAnalytics(best);
 
-      if (shouldExecute) {
+      // Simple validation: check confidence threshold (analytics disabled)
+      if (best.confidence >= this.MIN_CONFIDENCE) {
         await this.executeStablecoinTrade(best);
       } else {
-        logger.info('🚫 Analytics validation rejected best opportunity', {
+        logger.info('🚫 Opportunity rejected - insufficient confidence', {
           path: best.path.symbol,
-          reason: 'Risk factors too high'
+          confidence: best.confidence.toFixed(2),
+          required: this.MIN_CONFIDENCE
         });
       }
     }
