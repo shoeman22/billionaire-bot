@@ -95,7 +95,7 @@ export class StablecoinArbitrageStrategy {
   private availablePools: PoolData[] = [];
 
   // Analytics services for enhanced decision making
-  private transactionAnalyzer: TransactionAnalyzer;
+  private transactionAnalyzer: TransactionAnalyzer | null = null; // Disabled - transaction history API not available
   private whaleTracker: WhaleTracker | null = null; // Disabled - transaction history API not available
   private volumePredictor: VolumePredictor;
 
@@ -153,7 +153,8 @@ export class StablecoinArbitrageStrategy {
     this.quoteWrapper = createQuoteWrapper(fullConfig.api.baseUrl);
 
     // Initialize analytics services
-    this.transactionAnalyzer = createTransactionAnalyzer();
+    // Transaction analyzer disabled - transaction history API not available on GalaSwap
+    // this.transactionAnalyzer = createTransactionAnalyzer();
     // Whale tracking disabled - transaction history API not available on GalaSwap
     // this.whaleTracker = createWhaleTracker();
     this.volumePredictor = createVolumePredictor();
@@ -812,6 +813,17 @@ export class StablecoinArbitrageStrategy {
 
     // Analyze primary pool (first hop)
     const primaryPool = poolHashes[0];
+
+    // Skip analytics if transaction analyzer is disabled
+    if (!this.transactionAnalyzer) {
+      return {
+        score: 0.5,
+        confidenceMultiplier: 1.0,
+        whaleActivity: false,
+        volumePredict: null,
+        riskFactors: []
+      };
+    }
 
     try {
       // Get pool insights
