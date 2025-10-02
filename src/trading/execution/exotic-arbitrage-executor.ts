@@ -88,7 +88,7 @@ export interface ExoticArbitrageResult {
 }
 
 export interface ExoticArbitrageConfig {
-  mode: 'triangular' | 'cross-pair' | 'hunt-execute' | 'multi-hop-4' | 'multi-hop-5' | 'multi-hop-6';
+  mode: 'triangular' | 'cross-pair' | 'hunt-execute' | 'multi-hop-4' | 'multi-hop-5' | 'multi-hop-6' | 'comprehensive-triangular' | 'comprehensive-cross-pair' | 'comprehensive-all';
   inputAmount?: number;
   minProfitThreshold?: number;
   maxHops?: number;
@@ -498,14 +498,17 @@ async function executeSwapPayload(gSwap: GSwap, swapPayload: any, description: s
 
 /**
  * Discover triangular arbitrage opportunities with dynamic position sizing
+ * Supports any starting token (not just GALA) for reverse routing
  */
 export async function discoverTriangularOpportunities(
   inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
   minProfitThreshold: number = 1.0,
   useMultiFeeTier: boolean = true,
-  useDynamicSizing: boolean = true // Enable dynamic position sizing by default
+  useDynamicSizing: boolean = true, // Enable dynamic position sizing by default
+  startToken: string = 'GALA|Unit|none|none', // Starting token (default: GALA)
+  startSymbol: string = 'GALA' // Starting token symbol for display
 ): Promise<ExoticRoute[]> {
-  logger.info(`🔍 Discovering triangular arbitrage opportunities`);
+  logger.info(`🔍 Discovering triangular arbitrage opportunities (starting from ${startSymbol})`);
   if (useDynamicSizing) {
     logger.info(`💡 Dynamic position sizing enabled (adapts to pool liquidity)`);
   }
@@ -543,12 +546,12 @@ export async function discoverTriangularOpportunities(
 
   const tokens = allTokens;
 
-  // Discover GALA → TOKEN → GALA routes
+  // Discover START_TOKEN → TOKEN → START_TOKEN routes
   for (const token of tokens) {
-    if (token.symbol === 'GALA') continue;
+    if (token.symbol === startSymbol) continue; // Skip if same as starting token
 
     try {
-      logger.info(`🔍 Checking triangular route: GALA → ${token.symbol} → GALA`);
+      logger.info(`🔍 Checking triangular route: ${startSymbol} → ${token.symbol} → ${startSymbol}`);
 
       // Calculate optimal position size based on liquidity
       let tradeSize = inputAmount;
@@ -556,24 +559,25 @@ export async function discoverTriangularOpportunities(
         tradeSize = await calculateOptimalPositionSize(
           gSwap,
           circuitBreakers.quote,
-          'GALA|Unit|none|none',
+          startToken,
           token.tokenClass,
           useMultiFeeTier
         );
-        logger.info(`   💰 Dynamic position size: ${tradeSize} GALA (was ${inputAmount} GALA)`);
+        logger.info(`   💰 Dynamic position size: ${tradeSize} ${startSymbol} (was ${inputAmount} ${startSymbol})`);
       }
 
-      // Step 1: GALA → TOKEN (using dynamic size)
-      const quote1 = await getSmartQuote(useMultiFeeTier, gSwap, circuitBreakers.quote, 'GALA|Unit|none|none', token.tokenClass, tradeSize);
+      // Step 1: START_TOKEN → TOKEN (using dynamic size)
+      const quote1 = await getSmartQuote(useMultiFeeTier, gSwap, circuitBreakers.quote, startToken, token.tokenClass, tradeSize);
       if (!quote1) continue;
 
-      // Step 2: TOKEN → GALA
-      const quote2 = await getSmartQuote(useMultiFeeTier, gSwap, circuitBreakers.quote, token.tokenClass, 'GALA|Unit|none|none', quote1.outputAmount);
+      // Step 2: TOKEN → START_TOKEN
+      const quote2 = await getSmartQuote(useMultiFeeTier, gSwap, circuitBreakers.quote, token.tokenClass, startToken, quote1.outputAmount);
       if (!quote2) continue;
 
       const finalAmount = quote2.outputAmount;
 
       // Use precision math for profit calculations (using dynamic tradeSize)
+      // Note: Using GALA decimals (8) as default - may need token-specific decimals for other start tokens
       const inputAmountFixed = PrecisionMath.fromToken(tradeSize, TOKEN_DECIMALS.GALA);
       const finalAmountFixed = PrecisionMath.fromToken(finalAmount, TOKEN_DECIMALS.GALA);
       const profitFixed = PrecisionMath.subtract(finalAmountFixed, inputAmountFixed);
@@ -584,7 +588,7 @@ export async function discoverTriangularOpportunities(
       const profitPercent = safeFixedToNumber(profitPercentFixed);
 
       // Estimate gas costs (2 swaps) using precision math
-      const gasEstimate = calculateDynamicGas(['GALA', token.symbol, 'GALA'], tradeSize);
+      const gasEstimate = calculateDynamicGas([startSymbol, token.symbol, startSymbol], tradeSize);
       const estimatedGasFixed = PrecisionMath.fromToken(gasEstimate.totalGas, TOKEN_DECIMALS.GALA);
       const netProfitFixed = PrecisionMath.subtract(profitFixed, estimatedGasFixed);
 
@@ -592,7 +596,7 @@ export async function discoverTriangularOpportunities(
       const estimatedGas = safeFixedToNumber(estimatedGasFixed);
       const netProfit = safeFixedToNumber(netProfitFixed);
 
-      logger.debug(`⛽ Gas estimate for GALA→${token.symbol}→GALA: ${estimatedGas} GALA (base: ${gasEstimate.baseGas}, complexity: ${gasEstimate.complexityMultiplier}x)`);
+      logger.debug(`⛽ Gas estimate for ${startSymbol}→${token.symbol}→${startSymbol}: ${estimatedGas} ${startSymbol} (base: ${gasEstimate.baseGas}, complexity: ${gasEstimate.complexityMultiplier}x)`);
       const netProfitPercentFixed = PrecisionMath.calculatePercentage(
         PrecisionMath.divide(netProfitFixed, inputAmountFixed),
         PrecisionMath.fromNumber(100, PrecisionMath.PERCENTAGE_DECIMALS)
@@ -603,8 +607,8 @@ export async function discoverTriangularOpportunities(
 
       if (netProfitPercent >= minProfitThreshold) {
         opportunities.push({
-          tokens: ['GALA|Unit|none|none', token.tokenClass, 'GALA|Unit|none|none'],
-          symbols: ['GALA', token.symbol, 'GALA'],
+          tokens: [startToken, token.tokenClass, startToken],
+          symbols: [startSymbol, token.symbol, startSymbol],
           inputAmount: tradeSize,
           expectedOutput: finalAmount,
           profitPercent: netProfitPercent,
@@ -638,14 +642,17 @@ export async function discoverTriangularOpportunities(
 
 /**
  * Discover cross-pair arbitrage opportunities
+ * Supports any starting token (not just GALA) for reverse routing
  */
 export async function discoverCrossPairOpportunities(
   inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
   minProfitThreshold: number = 1.5,
   useMultiFeeTier: boolean = true,
-  useDynamicSizing: boolean = true // Enable dynamic position sizing by default
+  useDynamicSizing: boolean = true, // Enable dynamic position sizing by default
+  startToken: string = 'GALA|Unit|none|none', // Starting token (default: GALA)
+  startSymbol: string = 'GALA' // Starting token symbol for display
 ): Promise<ExoticRoute[]> {
-  logger.info(`🔍 Discovering cross-pair arbitrage opportunities`);
+  logger.info(`🔍 Discovering cross-pair arbitrage opportunities (starting from ${startSymbol})`);
   if (useDynamicSizing) {
     logger.info(`💡 Dynamic position sizing enabled (adapts to pool liquidity)`);
   }
@@ -681,14 +688,14 @@ export async function discoverCrossPairOpportunities(
     { symbol: 'GWETH', tokenClass: 'GWETH|Unit|none|none' }
   ];
 
-  // GALA → TokenA → TokenB → GALA
+  // START_TOKEN → TokenA → TokenB → START_TOKEN
   for (let i = 0; i < tokens.length; i++) {
     for (let j = i + 1; j < tokens.length; j++) {
       const tokenA = tokens[i];
       const tokenB = tokens[j];
 
       try {
-        logger.info(`🔍 Checking cross-pair: GALA → ${tokenA.symbol} → ${tokenB.symbol} → GALA`);
+        logger.info(`🔍 Checking cross-pair: ${startSymbol} → ${tokenA.symbol} → ${tokenB.symbol} → ${startSymbol}`);
 
         // Calculate optimal position size based on liquidity
         let tradeSize = inputAmount;
@@ -696,28 +703,29 @@ export async function discoverCrossPairOpportunities(
           tradeSize = await calculateOptimalPositionSize(
             gSwap,
             circuitBreakers.quote,
-            'GALA|Unit|none|none',
+            startToken,
             tokenA.tokenClass,
             useMultiFeeTier
           );
-          logger.info(`   💰 Dynamic position size: ${tradeSize} GALA (was ${inputAmount} GALA)`);
+          logger.info(`   💰 Dynamic position size: ${tradeSize} ${startSymbol} (was ${inputAmount} ${startSymbol})`);
         }
 
-        // GALA → TokenA (using dynamic size)
-        const quote1 = await getSmartQuote(useMultiFeeTier, gSwap, circuitBreakers.quote, 'GALA|Unit|none|none', tokenA.tokenClass, tradeSize);
+        // START_TOKEN → TokenA (using dynamic size)
+        const quote1 = await getSmartQuote(useMultiFeeTier, gSwap, circuitBreakers.quote, startToken, tokenA.tokenClass, tradeSize);
         if (!quote1) continue;
 
         // TokenA → TokenB
         const quote2 = await getSmartQuote(useMultiFeeTier, gSwap, circuitBreakers.quote, tokenA.tokenClass, tokenB.tokenClass, quote1.outputAmount);
         if (!quote2) continue;
 
-        // TokenB → GALA
-        const quote3 = await getSmartQuote(useMultiFeeTier, gSwap, circuitBreakers.quote, tokenB.tokenClass, 'GALA|Unit|none|none', quote2.outputAmount);
+        // TokenB → START_TOKEN
+        const quote3 = await getSmartQuote(useMultiFeeTier, gSwap, circuitBreakers.quote, tokenB.tokenClass, startToken, quote2.outputAmount);
         if (!quote3) continue;
 
         const finalAmount = quote3.outputAmount;
 
         // Use precision math for cross-pair profit calculations (using dynamic tradeSize)
+        // Note: Using GALA decimals (8) as default - may need token-specific decimals for other start tokens
         const inputAmountFixed = PrecisionMath.fromToken(tradeSize, TOKEN_DECIMALS.GALA);
         const finalAmountFixed = PrecisionMath.fromToken(finalAmount, TOKEN_DECIMALS.GALA);
         const profitFixed = PrecisionMath.subtract(finalAmountFixed, inputAmountFixed);
@@ -728,7 +736,7 @@ export async function discoverCrossPairOpportunities(
         const profitPercent = safeFixedToNumber(profitPercentFixed);
 
         // Estimate gas costs (3 swaps) using precision math
-        const routeSymbols = ['GALA', tokenA.symbol, tokenB.symbol, 'GALA'];
+        const routeSymbols = [startSymbol, tokenA.symbol, tokenB.symbol, startSymbol];
         const gasEstimate = calculateDynamicGas(routeSymbols, tradeSize);
         const estimatedGasFixed = PrecisionMath.fromToken(gasEstimate.totalGas, TOKEN_DECIMALS.GALA);
         const netProfitFixed = PrecisionMath.subtract(profitFixed, estimatedGasFixed);
@@ -737,7 +745,7 @@ export async function discoverCrossPairOpportunities(
         const estimatedGas = safeFixedToNumber(estimatedGasFixed);
         const netProfit = safeFixedToNumber(netProfitFixed);
 
-        logger.debug(`⛽ Gas estimate for ${routeSymbols.join('→')}: ${estimatedGas} GALA (base: ${gasEstimate.baseGas}, complexity: ${gasEstimate.complexityMultiplier}x)`);
+        logger.debug(`⛽ Gas estimate for ${routeSymbols.join('→')}: ${estimatedGas} ${startSymbol} (base: ${gasEstimate.baseGas}, complexity: ${gasEstimate.complexityMultiplier}x)`);
         const netProfitPercentFixed = PrecisionMath.calculatePercentage(
           PrecisionMath.divide(netProfitFixed, inputAmountFixed),
           PrecisionMath.fromNumber(100, PrecisionMath.PERCENTAGE_DECIMALS)
@@ -748,8 +756,8 @@ export async function discoverCrossPairOpportunities(
 
         if (netProfitPercent >= minProfitThreshold) {
           opportunities.push({
-            tokens: ['GALA|Unit|none|none', tokenA.tokenClass, tokenB.tokenClass, 'GALA|Unit|none|none'],
-            symbols: ['GALA', tokenA.symbol, tokenB.symbol, 'GALA'],
+            tokens: [startToken, tokenA.tokenClass, tokenB.tokenClass, startToken],
+            symbols: [startSymbol, tokenA.symbol, tokenB.symbol, startSymbol],
             inputAmount: tradeSize,
             expectedOutput: finalAmount,
             profitPercent: netProfitPercent,
@@ -780,6 +788,134 @@ export async function discoverCrossPairOpportunities(
   cleanup();
 
   return opportunities.sort((a, b) => b.profitPercent - a.profitPercent);
+}
+
+/**
+ * Discover opportunities across ALL possible starting tokens
+ * Scans triangular routes starting from each token to find the best opportunities
+ *
+ * Example: Instead of only GALA → TOKEN → GALA, also tries:
+ * - GUSDC → TOKEN → GUSDC
+ * - GWETH → TOKEN → GWETH
+ * - ETIME → TOKEN → ETIME
+ * - etc.
+ *
+ * Benefits:
+ * - Uncovers price inefficiencies invisible from GALA-only perspective
+ * - Dramatically expands opportunity space (9x more routes with 9 tokens)
+ * - Finds optimal entry points for each arbitrage cycle
+ */
+export async function discoverComprehensiveTriangularOpportunities(
+  inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
+  minProfitThreshold: number = 1.0,
+  useMultiFeeTier: boolean = true,
+  useDynamicSizing: boolean = true,
+  maxStartingTokens: number = 9 // Limit to prevent excessive API calls
+): Promise<ExoticRoute[]> {
+  logger.info(`🌐 COMPREHENSIVE TRIANGULAR SCAN - trying all starting tokens`);
+  logger.info(`   Max starting tokens: ${maxStartingTokens}`);
+
+  const allOpportunities: ExoticRoute[] = [];
+  const allTokens = [...TRADING_CONSTANTS.FALLBACK_TOKENS].slice(0, maxStartingTokens);
+
+  // Try each token as starting point
+  for (const startTokenInfo of allTokens) {
+    logger.info(`\n🔄 Scanning from ${startTokenInfo.symbol} as starting token...`);
+
+    try {
+      const opportunities = await discoverTriangularOpportunities(
+        inputAmount,
+        minProfitThreshold,
+        useMultiFeeTier,
+        useDynamicSizing,
+        startTokenInfo.tokenClass,
+        startTokenInfo.symbol
+      );
+
+      if (opportunities.length > 0) {
+        logger.info(`   ✅ Found ${opportunities.length} opportunities from ${startTokenInfo.symbol}`);
+        allOpportunities.push(...opportunities);
+      } else {
+        logger.info(`   📭 No opportunities from ${startTokenInfo.symbol}`);
+      }
+
+      // Small delay to avoid overwhelming API
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+    } catch (error) {
+      logger.warn(`   ⚠️ Error scanning from ${startTokenInfo.symbol}:`, error);
+    }
+  }
+
+  // Sort all opportunities by profit percentage
+  const sortedOpportunities = allOpportunities.sort((a, b) => b.profitPercent - a.profitPercent);
+
+  logger.info(`\n🏆 COMPREHENSIVE SCAN COMPLETE:`);
+  logger.info(`   Total opportunities found: ${sortedOpportunities.length}`);
+  if (sortedOpportunities.length > 0) {
+    const best = sortedOpportunities[0];
+    logger.info(`   Best: ${best.symbols.join(' → ')} (${best.profitPercent.toFixed(2)}%)`);
+  }
+
+  return sortedOpportunities;
+}
+
+/**
+ * Discover cross-pair opportunities across ALL possible starting tokens
+ */
+export async function discoverComprehensiveCrossPairOpportunities(
+  inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
+  minProfitThreshold: number = 1.5,
+  useMultiFeeTier: boolean = true,
+  useDynamicSizing: boolean = true,
+  maxStartingTokens: number = 6 // Smaller limit for more complex routes
+): Promise<ExoticRoute[]> {
+  logger.info(`🌐 COMPREHENSIVE CROSS-PAIR SCAN - trying all starting tokens`);
+  logger.info(`   Max starting tokens: ${maxStartingTokens}`);
+
+  const allOpportunities: ExoticRoute[] = [];
+  const allTokens = [...TRADING_CONSTANTS.FALLBACK_TOKENS].slice(0, maxStartingTokens);
+
+  // Try each token as starting point
+  for (const startTokenInfo of allTokens) {
+    logger.info(`\n🔄 Scanning from ${startTokenInfo.symbol} as starting token...`);
+
+    try {
+      const opportunities = await discoverCrossPairOpportunities(
+        inputAmount,
+        minProfitThreshold,
+        useMultiFeeTier,
+        useDynamicSizing,
+        startTokenInfo.tokenClass,
+        startTokenInfo.symbol
+      );
+
+      if (opportunities.length > 0) {
+        logger.info(`   ✅ Found ${opportunities.length} opportunities from ${startTokenInfo.symbol}`);
+        allOpportunities.push(...opportunities);
+      } else {
+        logger.info(`   📭 No opportunities from ${startTokenInfo.symbol}`);
+      }
+
+      // Small delay to avoid overwhelming API
+      await new Promise(resolve => setTimeout(resolve, 150));
+
+    } catch (error) {
+      logger.warn(`   ⚠️ Error scanning from ${startTokenInfo.symbol}:`, error);
+    }
+  }
+
+  // Sort all opportunities by profit percentage
+  const sortedOpportunities = allOpportunities.sort((a, b) => b.profitPercent - a.profitPercent);
+
+  logger.info(`\n🏆 COMPREHENSIVE SCAN COMPLETE:`);
+  logger.info(`   Total opportunities found: ${sortedOpportunities.length}`);
+  if (sortedOpportunities.length > 0) {
+    const best = sortedOpportunities[0];
+    logger.info(`   Best: ${best.symbols.join(' → ')} (${best.profitPercent.toFixed(2)}%)`);
+  }
+
+  return sortedOpportunities;
 }
 
 /**
@@ -1435,6 +1571,104 @@ async function executeMultiHop6Arbitrage(
 }
 
 /**
+ * Execute comprehensive triangular scan across all starting tokens
+ */
+async function executeComprehensiveTriangularArbitrage(
+  inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
+  minProfitThreshold: number = 1.0,
+  useMultiFeeTier: boolean = true
+): Promise<ExoticArbitrageResult> {
+  logger.info('🌐 Executing Comprehensive Triangular Arbitrage Scan');
+
+  const opportunities = await discoverComprehensiveTriangularOpportunities(
+    inputAmount,
+    minProfitThreshold,
+    useMultiFeeTier
+  );
+
+  if (opportunities.length === 0) {
+    return {
+      success: false,
+      error: 'No profitable triangular opportunities found across all starting tokens',
+      executedTrades: 0
+    };
+  }
+
+  const bestRoute = opportunities[0];
+  logger.info(`🏆 Best triangular route: ${bestRoute.symbols.join(' → ')} (${bestRoute.profitPercent.toFixed(2)}%)`);
+
+  return await executeExoticRoute(bestRoute);
+}
+
+/**
+ * Execute comprehensive cross-pair scan across all starting tokens
+ */
+async function executeComprehensiveCrossPairArbitrage(
+  inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
+  minProfitThreshold: number = 1.5,
+  useMultiFeeTier: boolean = true
+): Promise<ExoticArbitrageResult> {
+  logger.info('🌐 Executing Comprehensive Cross-Pair Arbitrage Scan');
+
+  const opportunities = await discoverComprehensiveCrossPairOpportunities(
+    inputAmount,
+    minProfitThreshold,
+    useMultiFeeTier
+  );
+
+  if (opportunities.length === 0) {
+    return {
+      success: false,
+      error: 'No profitable cross-pair opportunities found across all starting tokens',
+      executedTrades: 0
+    };
+  }
+
+  const bestRoute = opportunities[0];
+  logger.info(`🏆 Best cross-pair route: ${bestRoute.symbols.join(' → ')} (${bestRoute.profitPercent.toFixed(2)}%)`);
+
+  return await executeExoticRoute(bestRoute);
+}
+
+/**
+ * Execute comprehensive scan of BOTH triangular AND cross-pair across all starting tokens
+ */
+async function executeComprehensiveAllArbitrage(
+  inputAmount: number = TRADING_CONSTANTS.DEFAULT_TRADE_SIZE,
+  minProfitThreshold: number = 1.0,
+  useMultiFeeTier: boolean = true
+): Promise<ExoticArbitrageResult> {
+  logger.info('🌐 Executing COMPREHENSIVE ALL-IN-ONE Arbitrage Scan');
+  logger.info('   Scanning: Triangular + Cross-Pair from all starting tokens');
+
+  // Run both scans in parallel for efficiency
+  const [triangularOpps, crossPairOpps] = await Promise.all([
+    discoverComprehensiveTriangularOpportunities(inputAmount, minProfitThreshold, useMultiFeeTier),
+    discoverComprehensiveCrossPairOpportunities(inputAmount, minProfitThreshold * 1.5, useMultiFeeTier)
+  ]);
+
+  // Combine and sort all opportunities
+  const allOpportunities = [...triangularOpps, ...crossPairOpps]
+    .sort((a, b) => b.profitPercent - a.profitPercent);
+
+  if (allOpportunities.length === 0) {
+    return {
+      success: false,
+      error: 'No profitable opportunities found in comprehensive scan',
+      executedTrades: 0
+    };
+  }
+
+  const bestRoute = allOpportunities[0];
+  logger.info(`\n🏆 BEST OPPORTUNITY ACROSS ALL SCANS:`);
+  logger.info(`   Route: ${bestRoute.symbols.join(' → ')}`);
+  logger.info(`   Profit: ${bestRoute.profitPercent.toFixed(2)}%`);
+  logger.info(`   Type: ${bestRoute.tokens.length === 3 ? 'Triangular' : 'Cross-Pair'}`);
+
+  return await executeExoticRoute(bestRoute);
+}
+
+/**
  * Execute exotic arbitrage based on configuration
  */
 export async function executeExoticArbitrage(config: ExoticArbitrageConfig): Promise<ExoticArbitrageResult> {
@@ -1465,6 +1699,12 @@ export async function executeExoticArbitrage(config: ExoticArbitrageConfig): Pro
         return await executeMultiHop5Arbitrage(inputAmount, config.minProfitThreshold || 2.5, useMultiFeeTier);
       case 'multi-hop-6':
         return await executeMultiHop6Arbitrage(inputAmount, config.minProfitThreshold || 3.0, useMultiFeeTier);
+      case 'comprehensive-triangular':
+        return await executeComprehensiveTriangularArbitrage(inputAmount, config.minProfitThreshold || 1.0, useMultiFeeTier);
+      case 'comprehensive-cross-pair':
+        return await executeComprehensiveCrossPairArbitrage(inputAmount, config.minProfitThreshold || 1.5, useMultiFeeTier);
+      case 'comprehensive-all':
+        return await executeComprehensiveAllArbitrage(inputAmount, config.minProfitThreshold || 1.0, useMultiFeeTier);
       default:
         throw new Error(`Invalid arbitrage mode: ${config.mode}`);
     }
