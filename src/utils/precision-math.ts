@@ -128,6 +128,15 @@ export class PrecisionMath {
         throw new Error(`Negative value ${valueStr} exceeds maximum supported precision`);
       }
 
+      // ✅ FIX: Round to correct decimal places before conversion
+      // Prevents "too many decimals for format" error
+      const parts = valueStr.split('.');
+      if (parts.length === 2 && parts[1].length > decimals) {
+        // Round to the correct number of decimals
+        const numValue = parseFloat(valueStr);
+        valueStr = numValue.toFixed(decimals);
+      }
+
       return FixedNumber.fromString(valueStr, decimals);
     } catch (error) {
       throw new Error(`Failed to convert number ${value}: ${error}`);
