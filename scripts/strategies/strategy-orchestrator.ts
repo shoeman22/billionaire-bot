@@ -23,7 +23,10 @@
  *   npm run strategy:all                    # All strategies with intelligent coordination
  */
 
+// ✅ CRITICAL: Load .env BEFORE any imports that validate environment variables
 import dotenv from 'dotenv';
+dotenv.config();
+
 import { Command } from 'commander';
 import { logger } from '../../src/utils/logger';
 import { validateEnvironment } from '../../src/config/environment';
