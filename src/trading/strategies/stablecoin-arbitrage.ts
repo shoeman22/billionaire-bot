@@ -27,6 +27,7 @@ import { poolDiscovery, PoolData } from '../../services/pool-discovery';
 import { createTransactionAnalyzer, TransactionAnalyzer } from '../../analytics/transaction-analyzer';
 import { createWhaleTracker, WhaleTracker } from '../../analytics/whale-tracker';
 import { createVolumePredictor, VolumePredictor } from '../../analytics/volume-predictor';
+import { getWalletBalance } from '../../utils/wallet-balance';
 
 export interface StablecoinPath {
   stablecoinA: string; // e.g., "GUSDC"
@@ -286,6 +287,43 @@ export class StablecoinArbitrageStrategy {
 
     this.isActive = true;
     logger.info('💵 Starting Stablecoin Arbitrage Strategy (Bridge Token Mode)');
+
+    // ✅ FIX: Initialize capital based on actual wallet balance
+    try {
+      const config = getConfig();
+      const galaBalance = await getWalletBalance(config.wallet.address, 'GALA');
+      const usdcBalance = await getWalletBalance(config.wallet.address, 'GUSDC');
+      const usdtBalance = await getWalletBalance(config.wallet.address, 'GUSDT');
+
+      // Estimate total capital in USD (using GALA @ $0.02 approximation)
+      const estimatedCapital = (galaBalance * 0.02) + usdcBalance + usdtBalance;
+
+      if (estimatedCapital > 0) {
+        this.initialCapital = estimatedCapital;
+        this.currentCapital = estimatedCapital;
+        this.dailyStartCapital = estimatedCapital;
+
+        logger.info('💰 Capital initialized from wallet balance', {
+          gala: galaBalance.toFixed(2),
+          gusdc: usdcBalance.toFixed(2),
+          gusdt: usdtBalance.toFixed(2),
+          estimatedUSD: estimatedCapital.toFixed(2)
+        });
+      } else {
+        logger.warn('⚠️  No wallet balance detected, using default capital of $1000');
+        this.initialCapital = 1000;
+        this.currentCapital = 1000;
+        this.dailyStartCapital = 1000;
+      }
+    } catch (error) {
+      logger.error('Failed to initialize capital from wallet balance', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+      logger.warn('Using default capital of $1000');
+      this.initialCapital = 1000;
+      this.currentCapital = 1000;
+      this.dailyStartCapital = 1000;
+    }
 
     // Initialize stablecoin paths
     await this.initializeStablecoinPaths();
