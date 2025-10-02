@@ -379,6 +379,12 @@ function setupGracefulShutdown(tradingEngine: TradingEngine): void {
 
   // Handle uncaught exceptions
   process.on('uncaughtException', (error) => {
+    // Ignore WebSocket errors - bot uses API polling, WebSocket is optional
+    if (error.message && error.message.includes('websocket error')) {
+      logger.warn('⚠️  WebSocket error ignored (bot uses API polling):', error.message);
+      return;
+    }
+
     logger.error('💥 Uncaught Exception:', error);
     gracefulShutdown('UNCAUGHT_EXCEPTION');
   });

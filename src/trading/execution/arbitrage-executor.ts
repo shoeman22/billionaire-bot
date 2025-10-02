@@ -9,6 +9,7 @@ import { logger } from '../../utils/logger';
 import { TRADING_CONSTANTS, STRATEGY_CONSTANTS } from '../../config/constants';
 import { calculateMinOutputAmount } from '../../utils/slippage-calculator';
 import type { TokenInfo } from '../../types/galaswap';
+import { createTokenClassKey } from '../../types/galaswap';
 
 export interface ArbitrageResult {
   success: boolean;
@@ -72,8 +73,8 @@ async function executePairArbitrage(
     try {
       logger.info(`🔍 Getting quote for ${tokenA.symbol} → ${tokenB.symbol} (API auto-discovery)...`);
       quote1 = await gSwap.quoting.quoteExactInput(
-        tokenA.tokenClass,
-        tokenB.tokenClass,
+        createTokenClassKey(tokenA.tokenClass),
+        createTokenClassKey(tokenB.tokenClass),
         inputAmount
       );
 
@@ -99,8 +100,8 @@ async function executePairArbitrage(
     try {
       logger.info(`🔍 Getting return quote for ${tokenB.symbol} → ${tokenA.symbol} (API auto-discovery)...`);
       quote2 = await gSwap.quoting.quoteExactInput(
-        tokenB.tokenClass,
-        tokenA.tokenClass,
+        createTokenClassKey(tokenB.tokenClass),
+        createTokenClassKey(tokenA.tokenClass),
         midAmount
       );
 
@@ -142,8 +143,8 @@ async function executePairArbitrage(
 
     // Step 3: Execute first trade using discovered fee tier
     const swapPayload1 = await gSwap.swaps.swap(
-      tokenA.tokenClass,
-      tokenB.tokenClass,
+      createTokenClassKey(tokenA.tokenClass),
+      createTokenClassKey(tokenB.tokenClass),
       feeTier1, // Use the fee tier that worked for the quote
       {
         exactIn: inputAmount,
@@ -162,8 +163,8 @@ async function executePairArbitrage(
 
     // Step 4: Execute second trade using discovered fee tier
     const swapPayload2 = await gSwap.swaps.swap(
-      tokenB.tokenClass,
-      tokenA.tokenClass,
+      createTokenClassKey(tokenB.tokenClass),
+      createTokenClassKey(tokenA.tokenClass),
       feeTier2, // Use the fee tier that worked for the quote
       {
         exactIn: midAmount,

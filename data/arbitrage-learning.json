@@ -1,13 +1,11 @@
 {
-  "routes": {},
   "globalStats": {
     "totalSuccessfulTrades": 0,
     "totalAttemptedTrades": 0,
     "totalProfit": 0,
-    "lastUpdateTime": 1759294579957,
-    "avgVolatility": 0,
-    "recentProfitability": 0
+    "lastUpdateTime": 1759426166942,
+    "apiErrorCount": 0,
+    "rateLimitCount": 0
   },
-  "volatilityHistory": [],
-  "profitHistory": []
+  "routes": {}
 }

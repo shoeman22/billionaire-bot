@@ -87,8 +87,18 @@ export class PrecisionMath {
   static toToken(value: FixedNumber, decimals?: number): string {
     try {
       if (decimals !== undefined) {
+        // ✅ FIX: Round to correct decimal places before conversion
+        // Prevents "too many decimals for format" error
+        let valueStr = value.toString();
+        const parts = valueStr.split('.');
+        if (parts.length === 2 && parts[1].length > decimals) {
+          // Round to the correct number of decimals
+          const numValue = parseFloat(valueStr);
+          valueStr = numValue.toFixed(decimals);
+        }
+
         // Format to specific decimal places using round and toString
-        const rounded = FixedNumber.fromString(value.toString(), decimals);
+        const rounded = FixedNumber.fromString(valueStr, decimals);
         return rounded.toString();
       }
 

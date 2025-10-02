@@ -57,29 +57,31 @@ export const TRADING_CONSTANTS = {
   },
 
   // Common GalaChain token identifiers (SDK pipe format)
+  // ✅ FIX: Use $ separator (GalaChain format), not |
   TOKENS: {
-    GALA: 'GALA|Unit|none|none',
-    GUSDC: 'GUSDC|Unit|none|none',
-    ETIME: 'ETIME|Unit|none|none',
-    SILK: 'SILK|Unit|none|none',
-    GTON: 'GTON|Unit|none|none',
+    GALA: 'GALA$Unit$none$none',
+    GUSDC: 'GUSDC$Unit$none$none',
+    ETIME: 'ETIME$Unit$none$none',
+    SILK: 'SILK$Unit$none$none',
+    GTON: 'GTON$Unit$none$none',
     // Major wrapped tokens
-    GUSDT: 'GUSDT|Unit|none|none',
-    GWETH: 'GWETH|Unit|none|none',
-    GWBTC: 'GWBTC|Unit|none|none',
+    GUSDT: 'GUSDT$Unit$none$none',
+    GWETH: 'GWETH$Unit$none$none',
+    GWBTC: 'GWBTC$Unit$none$none',
   },
 
   // Fallback token set for arbitrage operations (expanded for aggressive multi-token arbitrage)
+  // ✅ FIX: Use $ separator (GalaChain format), not |
   FALLBACK_TOKENS: [
-    { symbol: 'GALA', name: 'Gala', decimals: 8, tokenClass: 'GALA|Unit|none|none', price: 0, priceChange24h: 0 },
-    { symbol: 'GUSDC', name: 'Gala USD Coin', decimals: 6, tokenClass: 'GUSDC|Unit|none|none', price: 0, priceChange24h: 0 },
-    { symbol: 'GUSDT', name: 'Gala Tether', decimals: 6, tokenClass: 'GUSDT|Unit|none|none', price: 0, priceChange24h: 0 },
-    { symbol: 'GWETH', name: 'Gala Wrapped Ethereum', decimals: 18, tokenClass: 'GWETH|Unit|none|none', price: 0, priceChange24h: 0 },
-    { symbol: 'GWBTC', name: 'Gala Wrapped Bitcoin', decimals: 8, tokenClass: 'GWBTC|Unit|none|none', price: 0, priceChange24h: 0 },
-    { symbol: 'ETIME', name: 'Eternal Time', decimals: 8, tokenClass: 'ETIME|Unit|none|none', price: 0, priceChange24h: 0 },
-    { symbol: 'SILK', name: 'SILK Token', decimals: 8, tokenClass: 'SILK|Unit|none|none', price: 0, priceChange24h: 0 },
-    { symbol: 'TOWN', name: 'Town Coin', decimals: 8, tokenClass: 'TOWN|Unit|none|none', price: 0, priceChange24h: 0 },
-    { symbol: 'GTON', name: 'Gala TON', decimals: 8, tokenClass: 'GTON|Unit|none|none', price: 0, priceChange24h: 0 }
+    { symbol: 'GALA', name: 'Gala', decimals: 8, tokenClass: 'GALA$Unit$none$none', price: 0, priceChange24h: 0 },
+    { symbol: 'GUSDC', name: 'Gala USD Coin', decimals: 6, tokenClass: 'GUSDC$Unit$none$none', price: 0, priceChange24h: 0 },
+    { symbol: 'GUSDT', name: 'Gala Tether', decimals: 6, tokenClass: 'GUSDT$Unit$none$none', price: 0, priceChange24h: 0 },
+    { symbol: 'GWETH', name: 'Gala Wrapped Ethereum', decimals: 18, tokenClass: 'GWETH$Unit$none$none', price: 0, priceChange24h: 0 },
+    { symbol: 'GWBTC', name: 'Gala Wrapped Bitcoin', decimals: 8, tokenClass: 'GWBTC$Unit$none$none', price: 0, priceChange24h: 0 },
+    { symbol: 'ETIME', name: 'Eternal Time', decimals: 8, tokenClass: 'ETIME$Unit$none$none', price: 0, priceChange24h: 0 },
+    { symbol: 'SILK', name: 'SILK Token', decimals: 8, tokenClass: 'SILK$Unit$none$none', price: 0, priceChange24h: 0 },
+    { symbol: 'TOWN', name: 'Town Coin', decimals: 8, tokenClass: 'TOWN$Unit$none$none', price: 0, priceChange24h: 0 },
+    { symbol: 'GTON', name: 'Gala TON', decimals: 8, tokenClass: 'GTON$Unit$none$none', price: 0, priceChange24h: 0 }
   ] as const,
 
   // Position management

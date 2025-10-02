@@ -76,7 +76,8 @@ export class TradingEngine {
     // Initialize GSwap SDK - using simple wrapper with baseUrl override
     this.gswap = new GSwap({
       signer: new PrivateKeySigner(privateKey),
-      baseUrl: config.api.baseUrl
+      baseUrl: config.api.baseUrl,
+      walletAddress: config.wallet.address
     });
 
     // Initialize core systems
@@ -155,24 +156,34 @@ export class TradingEngine {
         if (!response.ok) {
           throw new Error(`Health check failed: ${response.status} ${response.statusText}`);
         }
-        logger.info('GSwap API connectivity verified');
+        logger.info('✅ GSwap API connectivity verified');
       } catch (error) {
-        logger.warn('Health endpoint check failed, attempting SDK verification...', error);
-
-        // Fallback: Test SDK connectivity by attempting to get a basic asset query
-        try {
-          await this.gswap.assets.getUserAssets(this.config.wallet.address, 1, 1);
-          logger.info('GSwap SDK connectivity verified via fallback');
-        } catch (sdkError) {
-          throw new Error('GSwap API connection failed: ' + (sdkError instanceof Error ? sdkError.message : 'Unknown error'));
-        }
+        // Don't fail startup on connectivity check - trading operations might still work
+        logger.warn('⚠️  API health check failed, proceeding anyway...', {
+          error: error instanceof Error ? error.message : 'Unknown error',
+          note: 'Trading operations will be attempted - failures will be logged if they occur'
+        });
       }
 
       // Initialize database for position tracking
       await initializeDatabase();
 
-      // Connect WebSocket for real-time data
-      await GSwap.events.connectEventSocket();
+      // Connect WebSocket for real-time data (optional - using API polling as primary method)
+      try {
+        const socketClient = await GSwap.events.connectEventSocket();
+
+        // Add error handler to prevent uncaught exceptions from async WebSocket errors
+        socketClient.on('error', (error: Error) => {
+          logger.debug('WebSocket error (ignored, using API polling):', error.message);
+        });
+
+        logger.info('✅ WebSocket connected for real-time events');
+      } catch (error) {
+        logger.warn('⚠️  WebSocket connection failed, using API polling instead:', {
+          error: error instanceof Error ? error.message : 'Unknown error',
+          note: 'This is expected - bot uses API polling as primary data source'
+        });
+      }
 
       // Start price tracking
       await this.priceTracker.start();

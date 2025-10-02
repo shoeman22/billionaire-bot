@@ -25,7 +25,8 @@ export class GSwap extends SDKGSwap {
 
     super({
       signer: options.signer,
-      gatewayBaseUrl: gatewayUrl
+      gatewayBaseUrl: gatewayUrl,
+      walletAddress: options.walletAddress
     });
 
     // Add stub methods for dev scripts compatibility

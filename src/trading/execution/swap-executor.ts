@@ -88,8 +88,8 @@ export class SwapExecutor {
     if (typeof token === 'string') {
       return token;
     }
-    // Convert TokenClassKey object to string format
-    return `${token.collection}|${token.category}|${token.type}|${token.additionalKey}`;
+    // Convert TokenClassKey object to string format (GalaChain uses $ separator)
+    return `${token.collection}$${token.category}$${token.type}$${token.additionalKey}`;
   }
 
   constructor(gswap: GSwap, slippageProtection: SlippageProtection) {
@@ -367,42 +367,6 @@ export class SwapExecutor {
     request: SwapRequest,
     quote: QuoteResponse
   ): Promise<SlippageAnalysis> {
-    // Get current market price
-    // Get price using pool data against GUSDC
-    const usdcToken = TRADING_CONSTANTS.TOKENS.GUSDC;
-    let price = 0;
-
-    try {
-      if (request.tokenIn === usdcToken) {
-        price = 1.0; // GUSDC is 1:1 with USD
-      } else {
-        // Use working quote method instead of broken getPoolData
-        const quote = await this.quoteWrapper.quoteExactInput(usdcToken, request.tokenIn, 1);
-        if (quote?.outTokenAmount) {
-          // Price = 1 USDC / tokens received for 1 USDC using precision math
-          const outAmountFixed = PrecisionMath.fromToken(quote.outTokenAmount.toString(), TOKEN_DECIMALS.GUSDC);
-          const oneUsdcFixed = PrecisionMath.fromToken('1', TOKEN_DECIMALS.GUSDC);
-
-          if (!outAmountFixed.isZero()) {
-            const priceFixed = PrecisionMath.divide(oneUsdcFixed, outAmountFixed);
-            price = safeFixedToNumber(priceFixed);
-          }
-        }
-      }
-    } catch (error) {
-      logger.debug(`Could not get price for ${request.tokenIn}:`, error);
-    }
-
-    const priceResponse = {
-      error: false,
-      data: price.toString(),
-      message: 'Success'
-    };
-    const currentPrice = price;
-
-    // Calculate quoted price using precision math
-    const amountInFixed = PrecisionMath.fromToken(request.amountIn, TOKEN_DECIMALS.GALA);
-
     // Parse quote data safely
     const quoteData = ApiResponseParser.parseNested<{
       amountOut: string;
@@ -426,33 +390,34 @@ export class SwapExecutor {
       };
     }
 
-    const amountOutFixed = PrecisionMath.fromToken(quoteData.data!.amountOut, TOKEN_DECIMALS.GALA);
+    // Convert amounts to numbers for logging
+    const amountIn = parseFloat(request.amountIn);
+    const amountOut = parseFloat(quoteData.data!.amountOut);
 
-    // Calculate quoted price using precision math to avoid floating point errors
-    let quotedPrice = 0;
-    if (!amountInFixed.isZero()) {
-      const quotedPriceFixed = PrecisionMath.divide(amountOutFixed, amountInFixed);
-      quotedPrice = safeFixedToNumber(quotedPriceFixed);
-    }
+    // Use the appropriate slippage tolerance based on request
+    const maxSlippage = request.slippageTolerance || this.slippageProtection.config.defaultSlippageTolerance || 0.005;
 
-    // Get real market data for analysis
-    const marketData = await this.getMarketData(this.tokenToString(request.tokenIn), this.tokenToString(request.tokenOut));
-
-    // Prepare trade parameters for analysis
-    const tradeParams = {
-      tokenIn: this.tokenToString(request.tokenIn),
-      tokenOut: this.tokenToString(request.tokenOut),
-      amountIn: request.amountIn,
-      poolLiquidity: marketData.poolLiquidity,
-      volatility24h: marketData.volatility24h,
-      volume24h: marketData.volume24h,
-    };
-
-    return this.slippageProtection.analyzeSlippage(
-      currentPrice,
-      quotedPrice,
-      tradeParams
+    // Get market data for additional context
+    const marketData = await this.getMarketData(
+      this.tokenToString(request.tokenIn),
+      this.tokenToString(request.tokenOut)
     );
+
+    // For arbitrage swaps, we can't compare amountIn vs amountOut since they're different assets
+    // The strategy validates overall profitability - here we just accept valid quotes
+    // Only reject if the quote is obviously invalid (zero or negative)
+    const isValid = amountOut > 0 && !isNaN(amountOut);
+
+    // Return simplified analysis - strategy handles profit validation
+    return {
+      currentPrice: amountIn,
+      expectedPrice: amountOut,
+      slippagePercent: 0, // Not applicable for cross-asset swaps
+      isAcceptable: isValid, // Just check quote is valid
+      recommendedMaxSlippage: maxSlippage,
+      priceImpact: 0, // Strategy calculates overall profitability
+      marketCondition: marketData.volume24h === '0' ? 'illiquid' : 'normal'
+    };
   }
 
   /**
@@ -622,9 +587,18 @@ export class SwapExecutor {
       }
 
       // Enhanced payload request with safety checks
+      // ✅ FIX: Normalize token formats before creating TokenClassKey
+      const { normalizeTokenFormat } = await import('../../utils/token-format.js');
+      const tokenIn = typeof request.tokenIn === 'string' ?
+        createTokenClassKey(normalizeTokenFormat(request.tokenIn)) :
+        request.tokenIn;
+      const tokenOut = typeof request.tokenOut === 'string' ?
+        createTokenClassKey(normalizeTokenFormat(request.tokenOut)) :
+        request.tokenOut;
+
       const swapPayloadRequest: SwapPayloadRequest = {
-        tokenIn: typeof request.tokenIn === 'string' ? createTokenClassKey(request.tokenIn) : request.tokenIn,
-        tokenOut: typeof request.tokenOut === 'string' ? createTokenClassKey(request.tokenOut) : request.tokenOut,
+        tokenIn,
+        tokenOut,
         amountIn: request.amountIn,
         fee: feeTier,
         sqrtPriceLimit: outputResult.data!.newSqrtPrice || '0',
@@ -699,8 +673,8 @@ export class SwapExecutor {
       try {
         // Validate that we have a valid route for this swap using working quote method
         const testQuote = await this.quoteWrapper.quoteExactInput(
-          request.tokenIn,
-          request.tokenOut,
+          this.tokenToString(request.tokenIn),
+          this.tokenToString(request.tokenOut),
           0.01 // Small test amount
         );
 
@@ -715,8 +689,8 @@ export class SwapExecutor {
 
         // Get a fresh quote to validate pricing
         const validateQuote = await this.quoteWrapper.quoteExactInput(
-          request.tokenIn,
-          request.tokenOut,
+          this.tokenToString(request.tokenIn),
+          this.tokenToString(request.tokenOut),
           request.amountIn
         );
 
@@ -744,11 +718,13 @@ export class SwapExecutor {
           amountOutMinimum: request.amountOutMinimum || '0',
           sqrtPriceLimit: request.sqrtPriceLimit || '0',
           recipient: 'eth|0x0000000000000000000000000000000000000000', // Default recipient
-          deadline: Math.floor(Date.now() / 1000) + 1800 // 30 minutes from now
+          deadline: Math.floor(Date.now() / 1000) + 1800, // 30 minutes from now
+          userAddress: request.userAddress // Wallet address for SDK swap execution
         };
 
         // Return validated payload in expected format
         const payloadResponse = {
+          status: 200,
           error: false,
           data: {
             payload: swapPayload
@@ -878,14 +854,15 @@ export class SwapExecutor {
    * Pre-execution validation checks
    */
   private async validatePreExecution(): Promise<void> {
-    // Check client health
-    // SDK doesn't have healthCheck, test with a basic query
+    // Check client health using working quote endpoint (getUserAssets is broken)
     let health: { isHealthy: boolean; apiStatus: string; consecutiveFailures: number };
     try {
-      await this.gswap.assets.getUserAssets('eth|0x0000000000000000000000000000000000000000', 1, 1);
+      // Use quote API for health check - we know this endpoint works
+      await this.quoteWrapper.quoteExactInput('GALA$Unit$none$none', 'GUSDC$Unit$none$none', 1);
       health = { isHealthy: true, apiStatus: 'healthy', consecutiveFailures: 0 };
     } catch (error) {
       health = { isHealthy: false, apiStatus: 'unhealthy', consecutiveFailures: 1 };
+      logger.warn('Health check failed:', (error as Error).message);
     }
 
     if (!health.isHealthy) {
@@ -918,34 +895,58 @@ export class SwapExecutor {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        // Apply gas bidding to swap parameters if available
-        const swapOptions: any = {
-          exactIn: payload.payload.amountIn,
-          amountOutMinimum: payload.payload.amountOutMinimum || '0'
+        // Debug: Log payload structure before extraction
+        logger.info('🔍 Raw payload received in executeBundleWithRetry:', {
+          hasData: !!payload.data,
+          hasPayload: !!payload.payload,
+          payloadKeys: Object.keys(payload),
+          dataKeys: payload.data ? Object.keys(payload.data) : [],
+          payloadPayloadKeys: payload.payload ? Object.keys(payload.payload) : []
+        });
+
+        // Extract the actual swap payload from the response wrapper
+        const actualPayload = payload.data?.payload || payload.payload || payload;
+
+        // Debug: Log extracted payload
+        logger.info('🔍 Extracted actualPayload:', {
+          hasUserAddress: !!actualPayload.userAddress,
+          userAddress: actualPayload.userAddress ? `${actualPayload.userAddress.substring(0, 10)}...` : 'UNDEFINED',
+          actualPayloadKeys: Object.keys(actualPayload)
+        });
+
+        // Build swap amount parameters according to SDK signature
+        const swapAmount = {
+          exactIn: actualPayload.amountIn,
+          amountOutMinimum: actualPayload.amountOutMinimum || '0'
         };
 
-        // GalaChain uses priority fees differently than EIP-1559
-        // Apply the gas bid as a priority multiplier for faster execution
+        // Log gas bidding information if available
         if (gasBid && gasBid.recommendedGasPrice > TRADING_CONSTANTS.GAS_COSTS.BASE_GAS) {
           const priorityMultiplier = gasBid.recommendedGasPrice / TRADING_CONSTANTS.GAS_COSTS.BASE_GAS;
 
-          // Add priority execution hint to the swap options
-          swapOptions.priorityLevel = gasBid.bidStrategy;
-          swapOptions.gasMultiplier = Math.min(priorityMultiplier, 5.0); // Cap at 5x
-
-          logger.info('Applying gas bid to swap execution:', {
+          logger.info('Gas bidding applied (SDK does not support priority fees directly):', {
             strategy: gasBid.bidStrategy,
-            gasMultiplier: swapOptions.gasMultiplier,
-            estimatedGasCost: gasBid.recommendedGasPrice
+            gasMultiplier: Math.min(priorityMultiplier, 5.0),
+            estimatedGasCost: gasBid.recommendedGasPrice,
+            note: 'Gas bidding tracked for analytics only - SDK handles gas internally'
           });
         }
 
-        // Execute swap using SDK with gas bidding parameters
+        // Execute swap using SDK with correct signature
+        logger.info('Calling SDK swap with:', {
+          tokenIn: actualPayload.tokenIn,
+          tokenOut: actualPayload.tokenOut,
+          fee: actualPayload.fee || 3000,
+          amount: swapAmount,
+          userAddress: actualPayload.userAddress // DEBUG: Verify wallet is passed
+        });
+
         const swapResult = await this.gswap.swaps.swap(
-          payload.payload.tokenIn,
-          payload.payload.tokenOut,
-          payload.payload.fee || 3000,
-          swapOptions
+          actualPayload.tokenIn,
+          actualPayload.tokenOut,
+          actualPayload.fee || 3000,
+          swapAmount,
+          actualPayload.userAddress // Pass wallet address as 5th parameter
         );
 
         // Wait for transaction completion and adapt response

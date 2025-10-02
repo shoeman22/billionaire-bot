@@ -6,6 +6,7 @@
 // import { TokenFormatter } from './formatting'; // Unused - commenting out to fix linting
 import { TRADING_CONSTANTS } from '../config/constants';
 import { safeParseFloat } from './safe-parse';
+import { normalizeTokenFormat, parseTokenComponents } from './token-format';
 
 export interface ValidationResult {
   isValid: boolean;
@@ -191,14 +192,15 @@ export class InputValidator {
   }
 
   /**
-   * Check if token follows GalaChain format
+   * Check if token follows GalaChain format (supports both | and $ separators)
    */
   private static isGalaChainTokenFormat(token: string): boolean {
-    return /^[A-Za-z0-9]+\|[A-Za-z0-9]+(?:\|[A-Za-z0-9:$]+){1,2}$/.test(token);
+    // Support both | and $ separators for backwards compatibility
+    return /^[A-Za-z0-9]+[\|$][A-Za-z0-9]+(?:[\|$][A-Za-z0-9:$]+){1,2}$/.test(token);
   }
 
   /**
-   * Validate GalaChain token format: Collection|Category|Type|AdditionalKey
+   * Validate GalaChain token format: Collection$Category$Type$AdditionalKey
    * HIGH PRIORITY FIX: Enhanced validation to prevent edge cases and malformed API calls
    */
   static validateTokenFormat(token: string): ValidationResult {
@@ -217,20 +219,24 @@ export class InputValidator {
       return { isValid: false, errors, warnings };
     }
 
-    // CRITICAL: Check for dangerous characters before parsing (note: | is allowed as delimiter)
+    // CRITICAL: Check for dangerous characters before parsing (note: $ is allowed as delimiter)
     if (/[<>"'`&;\n\r\t]/.test(trimmedToken)) {
       errors.push('Token contains unsafe characters that could cause injection attacks');
       return { isValid: false, errors, warnings };
     }
 
-    // CRITICAL: Split validation
-    const parts = trimmedToken.split('|');
-    if (parts.length < 3 || parts.length > 4) {
-      errors.push(`Invalid format: expected 3-4 parts separated by '|', got ${parts.length} parts. Format: Collection|Category|Type|AdditionalKey`);
+    // Use normalizer to handle both | and $ formats
+    let normalized: string;
+    let parts: ReturnType<typeof parseTokenComponents>;
+    try {
+      normalized = normalizeTokenFormat(trimmedToken);
+      parts = parseTokenComponents(normalized);
+    } catch (error) {
+      errors.push(`Invalid token format: ${error instanceof Error ? error.message : String(error)}`);
       return { isValid: false, errors, warnings };
     }
 
-    const [collection, category, type, additionalKey] = parts;
+    const { collection, category, type, additionalKey } = parts;
 
     // CRITICAL: Check for empty components
     const componentNames = ['Collection', 'Category', 'Type', 'AdditionalKey'];

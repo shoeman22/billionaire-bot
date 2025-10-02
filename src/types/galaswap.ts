@@ -231,6 +231,7 @@ export interface SwapPayloadRequest {
   sqrtPriceLimit: string;
   amountInMaximum: string;
   amountOutMinimum: string;
+  userAddress?: string; // Wallet address for swap execution
 }
 
 export interface SwapPayload {

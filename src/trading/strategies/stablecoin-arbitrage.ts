@@ -1115,7 +1115,8 @@ export class StablecoinArbitrageStrategy {
    */
   private getTokenClass(symbol: string): string {
     const tokenInfo = TRADING_CONSTANTS.FALLBACK_TOKENS.find((t: any) => t.symbol === symbol);
-    return tokenInfo ? tokenInfo.tokenClass : `${symbol}|Unit|none|none`;
+    // ✅ FIX: Use $ separator (GalaChain format), not |
+    return tokenInfo ? tokenInfo.tokenClass : `${symbol}$Unit$none$none`;
   }
 
   /**

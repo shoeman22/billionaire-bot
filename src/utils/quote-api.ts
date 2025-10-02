@@ -7,6 +7,7 @@
 import { logger } from './logger';
 import { safeParseFloat } from './safe-parse';
 import { liquidityFilter } from './liquidity-filter';
+import { normalizeTokenFormat, parseTokenComponents } from './token-format';
 
 export interface QuoteResult {
   outTokenAmount: string;
@@ -327,24 +328,30 @@ export class QuoteApi {
    * API: GALA$Unit$none$none
    */
   private convertTokenFormat(token: string): string {
-    // Validate token format - should have exactly 4 parts separated by pipes
+    // ✅ FIX: Use token format normalizer to handle both $ and | formats
+
+    // Validate token format
     if (!token || typeof token !== 'string') {
       throw new NonRetryableError(`Invalid token format: token must be a non-empty string, got: ${typeof token}`, 'VALIDATION_ERROR');
     }
 
-    const parts = token.split('|');
-    if (parts.length !== 4) {
+    // Use normalizer to handle both formats transparently
+    try {
+      const normalized = normalizeTokenFormat(token);
+      const parts = parseTokenComponents(normalized);
+
+      // Check that no part is completely empty (though 'none' is valid)
+      if (Object.values(parts).some(part => part === '')) {
+        throw new NonRetryableError(`Invalid token format: empty parts not allowed in "${token}"`, 'VALIDATION_ERROR');
+      }
+
+      return normalized;
+    } catch (error) {
       throw new NonRetryableError(
-        `Invalid token format: expected 4 parts (Collection|Category|Type|AdditionalKey), got ${parts.length} parts in "${token}"`, 'VALIDATION_ERROR'
+        `Invalid token format: ${error instanceof Error ? error.message : String(error)}`,
+        'VALIDATION_ERROR'
       );
     }
-
-    // Check that no part is completely empty (though 'none' is valid)
-    if (parts.some(part => part === '')) {
-      throw new NonRetryableError(`Invalid token format: empty parts not allowed in "${token}"`, 'VALIDATION_ERROR');
-    }
-
-    return token.replace(/\|/g, '$');
   }
 
   /**

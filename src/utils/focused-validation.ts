@@ -5,6 +5,7 @@
  */
 
 import { ValidationResult } from './validation';
+import { normalizeTokenFormat, parseTokenComponents } from './token-format';
 
 /**
  * Token Format Validation - Split into focused functions
@@ -29,16 +30,19 @@ export class TokenValidation {
       return { isValid: false, errors, warnings };
     }
 
-    // CRITICAL: Check for dangerous characters before parsing
+    // CRITICAL: Check for dangerous characters before parsing ($ is allowed as delimiter)
     if (/[<>"'`&|;\n\r\t]/.test(trimmedToken)) {
       errors.push('Token contains dangerous characters that could cause injection attacks');
       return { isValid: false, errors, warnings };
     }
 
-    // CRITICAL: Split validation
-    const parts = trimmedToken.split('|');
-    if (parts.length !== 4) {
-      errors.push(`Invalid format: expected 4 parts separated by '|', got ${parts.length} parts. Format: Collection|Category|Type|AdditionalKey`);
+    // Use normalizer to handle both | and $ formats
+    try {
+      const normalized = normalizeTokenFormat(trimmedToken);
+      const parts = parseTokenComponents(normalized);
+      // If we got here, the token is valid (4 parts)
+    } catch (error) {
+      errors.push(`Invalid token format: ${error instanceof Error ? error.message : String(error)}`);
       return { isValid: false, errors, warnings };
     }
 
@@ -89,8 +93,17 @@ export class TokenValidation {
     const errors: string[] = [];
     const warnings: string[] = [];
 
-    const parts = token.split('|');
-    const [collection, category, type, additionalKey] = parts;
+    // Use normalizer to handle both | and $ formats
+    let parts: ReturnType<typeof parseTokenComponents>;
+    try {
+      const normalized = normalizeTokenFormat(token);
+      parts = parseTokenComponents(normalized);
+    } catch (error) {
+      errors.push(`Invalid token format: ${error instanceof Error ? error.message : String(error)}`);
+      return { isValid: false, errors, warnings };
+    }
+
+    const { collection, category, type, additionalKey } = parts;
     const componentNames = ['Collection', 'Category', 'Type', 'AdditionalKey'];
     const components = [collection, category, type, additionalKey];
 
@@ -146,11 +159,21 @@ export class TokenValidation {
     }
 
     // Validate character set for each component
-    const parts = token.split('|');
-    const componentNames = ['Collection', 'Category', 'Type', 'AdditionalKey'];
+    let parts: ReturnType<typeof parseTokenComponents>;
+    try {
+      const normalized = normalizeTokenFormat(token);
+      parts = parseTokenComponents(normalized);
+    } catch (error) {
+      errors.push(`Invalid token format: ${error instanceof Error ? error.message : String(error)}`);
+      return { isValid: false, errors, warnings };
+    }
 
-    for (let i = 0; i < parts.length; i++) {
-      const component = parts[i];
+    const { collection, category, type, additionalKey } = parts;
+    const componentNames = ['Collection', 'Category', 'Type', 'AdditionalKey'];
+    const components = [collection, category, type, additionalKey];
+
+    for (let i = 0; i < components.length; i++) {
+      const component = components[i];
       if (!/^[A-Za-z0-9][A-Za-z0-9_-]*[A-Za-z0-9]$|^[A-Za-z0-9]$/.test(component)) {
         errors.push(`${componentNames[i]} has invalid format: must start and end with alphanumeric, can contain '_' and '-' in middle`);
       }
