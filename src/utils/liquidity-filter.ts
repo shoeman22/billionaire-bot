@@ -36,6 +36,10 @@ export class LiquidityFilter {
     'GWBTC$Unit$none$none→SILK$Unit$none$none',
     'SILK$Unit$none$none→GWETH$Unit$none$none',
     'GWETH$Unit$none$none→SILK$Unit$none$none',
+    'SILK$Unit$none$none→GUSDC$Unit$none$none',
+    'GUSDC$Unit$none$none→SILK$Unit$none$none',
+    'SILK$Unit$none$none→GUSDT$Unit$none$none',
+    'GUSDT$Unit$none$none→SILK$Unit$none$none',
 
     // GTON combinations that consistently fail
     'GALA$Unit$none$none→GTON$Unit$none$none',
@@ -52,6 +56,8 @@ export class LiquidityFilter {
     'ETIME$Unit$none$none→GWBTC$Unit$none$none',
     'GUSDC$Unit$none$none→ETIME$Unit$none$none',
     'ETIME$Unit$none$none→GUSDC$Unit$none$none',
+    'GWETH$Unit$none$none→ETIME$Unit$none$none',
+    'ETIME$Unit$none$none→GWETH$Unit$none$none',
 
     // Additional exotic pairs that typically lack liquidity
     'SILK$Unit$none$none→GTON$Unit$none$none',
@@ -60,6 +66,8 @@ export class LiquidityFilter {
     'GTON$Unit$none$none→GWETH$Unit$none$none',
     'GWBTC$Unit$none$none→GTON$Unit$none$none',
     'GTON$Unit$none$none→GWBTC$Unit$none$none',
+    'GWBTC$Unit$none$none→GWETH$Unit$none$none',
+    'GWETH$Unit$none$none→GWBTC$Unit$none$none',
 
     // ✅ FIX: TOWN combinations (consistently no liquidity)
     'GALA$Unit$none$none→TOWN$Unit$none$none',
